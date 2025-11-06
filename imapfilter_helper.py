@@ -12,32 +12,19 @@ IMAPFilter Helper (Priority + A+ Cache Clean Edition)
 • All paths local to /root/imapfilter
 """
 
-import imaplib, email, json, os, re, sys, sqlite3, random
+import imaplib, email, json, re, sys, sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from tqdm import tqdm
 from time import perf_counter
 
+from imapfilter.core.config import get_paths, load_config, resolve_path
+
+
 # ----------------------------------------------------------------------
 # Configuration
 # ----------------------------------------------------------------------
-BASE_DIR = Path(__file__).parent.resolve()
-CONFIG_DEFAULTS = {
-    "paths": {
-        "rules_dir": str(BASE_DIR / "rules"),
-        "secrets_file": str(BASE_DIR / "secrets.json"),
-        "db_file": str(BASE_DIR / "cache.db"),
-        "log_file": str(BASE_DIR / "imapfilter-helper.log"),
-    },
-    "logging": {"show_progress": True},
-    "executor": {
-        "default_run_scope": "inbox",  # future: all / inbox / custom
-        "dry_run": False,
-        "strict": False,               # --strict toggles this
-    },
-}
-
-LOG_FILE = Path(CONFIG_DEFAULTS["paths"]["log_file"])
+LOG_FILE = resolve_path("log_file")
 
 
 # ----------------------------------------------------------------------
@@ -114,7 +101,7 @@ def _ensure_column(db, table, column, coltype, default=None):
 # IMAP helpers
 # ----------------------------------------------------------------------
 def imap_login(cfg):
-    secrets_path = Path(cfg["paths"]["secrets_file"])
+    secrets_path = resolve_path("secrets_file", cfg)
     if not secrets_path.exists():
         sys.exit(f"❌ Secrets file not found: {secrets_path}")
     secrets = json.load(open(secrets_path))
@@ -487,9 +474,13 @@ def main():
     p_run.add_argument("--strict", action="store_true", help="Abort on missing/failed IMAP ops during execute")
 
     args = parser.parse_args()
-    cfg = CONFIG_DEFAULTS.copy()
-    Path(cfg["paths"]["rules_dir"]).mkdir(exist_ok=True)
-    db = init_db(cfg["paths"]["db_file"])
+    cfg = load_config()
+    paths = get_paths(cfg)
+    global LOG_FILE
+    LOG_FILE = resolve_path("log_file", cfg)
+
+    paths["rules_dir"].mkdir(parents=True, exist_ok=True)
+    db = init_db(paths["db_file"])
 
     if args.cmd == "build-cache":
         M = imap_login(cfg)
@@ -501,7 +492,7 @@ def main():
 
     elif args.cmd == "evaluate":
         cfg["executor"]["dry_run"] = args.dry_run
-        rules = load_rules(cfg["paths"]["rules_dir"])
+        rules = load_rules(resolve_path("rules_dir", cfg))
         evaluate_rules(db, rules, cfg["executor"]["default_run_scope"], cfg)
 
     elif args.cmd == "execute":
@@ -522,7 +513,7 @@ def main():
         try:
             folders = list_all_folders(M) if args.all_folders else ["INBOX"]
             t_cache, folders_count, msg_count = build_cache(M, db, folders, cfg)
-            rules = load_rules(cfg["paths"]["rules_dir"])
+            rules = load_rules(resolve_path("rules_dir", cfg))
             t_eval, rules_count, matches = evaluate_rules(db, rules, cfg["executor"]["default_run_scope"], cfg)
             t_exec, stats = execute_actions(M, db, cfg)
             run_timer.stop()
