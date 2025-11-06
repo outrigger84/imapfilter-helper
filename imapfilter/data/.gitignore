@@ -1,0 +1,5 @@
+# Ignore runtime artifacts while keeping the data directory tracked
+cache.db
+secrets.json
+imapfilter-helper.log
+*.db
