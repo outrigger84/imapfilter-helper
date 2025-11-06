@@ -1,0 +1,17 @@
+{
+  "name": "21 Cleveland Street » Neighbourhood",
+  "priority": 100,
+  "conditions": [
+    {"header": "from", "contains": "reply_at_rs_email_nextdoor_co_uk_jwmc2j8j6h_d6af4143@privaterelay.appleid.com"},
+    {"header": "from", "contains": "no-reply_at_is_email_nextdoor_co_uk_jwmc2j8j6h_016f56f9@privaterelay.appleid.com"},
+    {"header": "from", "contains": "no-reply_at_rs_email_nextdoor_co_uk_jwmc2j8j6h_bbfd61ad@privaterelay.appleid.com"}
+  ],
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Neighbourhood"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}
