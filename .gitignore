@@ -1,0 +1,20 @@
+# --- Sensitive Files ---
+secrets.json
+*.key
+.env
+
+# --- Cache / Databases ---
+*.db
+*.db-journal
+
+# --- Logs ---
+*.log
+
+# --- Python build junk ---
+__pycache__/
+*.pyc
+
+# --- Editor / system junk ---
+.DS_Store
+.idea/
+.vscode/
