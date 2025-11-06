@@ -12,70 +12,12 @@ IMAPFilter Helper (Priority + A+ Cache Clean Edition)
 • All paths local to /root/imapfilter
 """
 
-import imaplib, email, json, os, re, sys, sqlite3, random
-from datetime import datetime, timezone
+import imaplib, email, json, re, sys, sqlite3
 from pathlib import Path
 from tqdm import tqdm
-from time import perf_counter
 
-# ----------------------------------------------------------------------
-# Configuration
-# ----------------------------------------------------------------------
-BASE_DIR = Path(__file__).parent.resolve()
-CONFIG_DEFAULTS = {
-    "paths": {
-        "rules_dir": str(BASE_DIR / "rules"),
-        "secrets_file": str(BASE_DIR / "secrets.json"),
-        "db_file": str(BASE_DIR / "cache.db"),
-        "log_file": str(BASE_DIR / "imapfilter-helper.log"),
-    },
-    "logging": {"show_progress": True},
-    "executor": {
-        "default_run_scope": "inbox",  # future: all / inbox / custom
-        "dry_run": False,
-        "strict": False,               # --strict toggles this
-    },
-}
-
-LOG_FILE = Path(CONFIG_DEFAULTS["paths"]["log_file"])
-
-
-# ----------------------------------------------------------------------
-# Utilities: time, logging, timer
-# ----------------------------------------------------------------------
-def now_iso():
-    return datetime.now(timezone.utc).isoformat()
-
-def log(level, message, context=None, console=None):
-    entry = {"timestamp": now_iso(), "level": level, "message": message}
-    if context:
-        entry["context"] = context
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with LOG_FILE.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    if console:
-        tqdm.write(console)
-
-class PhaseTimer:
-    def __init__(self, phase):
-        self.phase = phase
-        self.start = perf_counter()
-        self.end = None
-        self.count = 0
-    def stop(self):
-        self.end = perf_counter()
-    @property
-    def elapsed(self):
-        return (self.end or perf_counter()) - self.start
-    def rate(self):
-        return self.count / self.elapsed if self.elapsed > 0 else 0.0
-    def fmt(self):
-        s = int(self.elapsed)
-        m, s = divmod(s, 60)
-        h, m = divmod(m, 60)
-        if h: return f"{h} h {m} m {s} s"
-        if m: return f"{m} m {s} s"
-        return f"{s} s"
+from imapfilter.core.config import get_default_config, set_active_config
+from imapfilter.core.logging_utils import PhaseTimer, log, now_iso
 
 
 # ----------------------------------------------------------------------
@@ -487,7 +429,8 @@ def main():
     p_run.add_argument("--strict", action="store_true", help="Abort on missing/failed IMAP ops during execute")
 
     args = parser.parse_args()
-    cfg = CONFIG_DEFAULTS.copy()
+    cfg = get_default_config()
+    set_active_config(cfg)
     Path(cfg["paths"]["rules_dir"]).mkdir(exist_ok=True)
     db = init_db(cfg["paths"]["db_file"])
 
