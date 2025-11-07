@@ -123,8 +123,19 @@ def test_build_cache_stores_headers_per_folder(tmp_path: Path, monkeypatch: pyte
         )
 
         rows = db.execute(
-            "SELECT folder, uid FROM headers ORDER BY folder, uid"
+            "SELECT folder, uid, data FROM headers ORDER BY folder, uid"
         ).fetchall()
-        assert rows == [("Archive", "1"), ("Inbox", "1")]
+        assert rows == [
+            (
+                "Archive",
+                "1",
+                '{"header": "Subject: Archive 1\\r\\n"}',
+            ),
+            (
+                "Inbox",
+                "1",
+                '{"header": "Subject: Inbox 1\\r\\n"}',
+            ),
+        ]
     finally:
         db.close()
