@@ -38,6 +38,8 @@ python -m core.cli <command> [flags]
 
 The helper stores its cache database, log file, and secrets JSON under `data/` by default. Rules continue to be loaded from the `rules/` directory. These locations can be customised by constructing an `AppConfig` via `core.config.build_default_config()` with a different base directory.
 
+To get started quickly, copy `data/secrets.example.json` to `data/secrets.json` and replace the placeholder IMAP credentials with your own.
+
 ## Development
 
 Install the dependencies and run the tests:
