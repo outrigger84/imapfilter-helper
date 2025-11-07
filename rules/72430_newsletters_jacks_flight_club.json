@@ -1,0 +1,36 @@
+{
+  "name": "Newsletters » Jacks Flight Club",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "jack@jacksflightclub.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "hello@travel.jacksflightclub.com"
+      },
+      {
+        "header": "from",
+        "contains": "jack@content.jacksflightclub.com"
+      },
+      {
+        "header": "from",
+        "contains": "detour@travel.jacksflightclub.com"
+      },
+      {
+        "header": "from",
+        "contains": "danni@travel.jacksflightclub.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Jacks Flight Club"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

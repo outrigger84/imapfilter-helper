@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Bath Half",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply@runninghigh.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Bath Half"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

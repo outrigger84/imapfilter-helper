@@ -1,0 +1,20 @@
+{
+  "name": "Property » Rental » Docusign",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "dse@eumail.docusign.net"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Property/Rental/Docusign"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

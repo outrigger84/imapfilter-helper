@@ -1,0 +1,20 @@
+{
+  "name": "Notifications » Bloom and Wild",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@orders.bloomandwild.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Bloom and Wild"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

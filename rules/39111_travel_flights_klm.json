@@ -1,0 +1,36 @@
+{
+  "name": "Travel » Flights » KLM",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "yourboardingpass@mobileklm.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@klm.com"
+      },
+      {
+        "header": "from",
+        "contains": "yourboardingpass@klm.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@ticket.klm.com"
+      },
+      {
+        "header": "from",
+        "contains": "donotreply@klm.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/KLM"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » ao.com",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "noreply@ao.com"
+      },
+      {
+        "header": "from",
+        "contains": "- Your Order Invoice"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/ao.com"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

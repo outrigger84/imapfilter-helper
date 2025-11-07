@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Stitch Fix",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "stitchfix_at_e_stitchfix_com_c5pdg5d8y7p6d5_hawz4414@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Stitch Fix"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

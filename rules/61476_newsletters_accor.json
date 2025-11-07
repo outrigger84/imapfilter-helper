@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Accor",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "news.all@mail.all.com"
+      },
+      {
+        "header": "from",
+        "contains": "news.all@accor-mail.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Accor"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

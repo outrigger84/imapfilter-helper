@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Sell My Miles",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "admin_at_sellmymiles_com_psza3ebhv04fth_b3cs6453@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Sell My Miles"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

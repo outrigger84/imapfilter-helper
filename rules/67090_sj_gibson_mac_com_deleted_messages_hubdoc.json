@@ -1,0 +1,22 @@
+{
+  "name": "sj.gibson@mac.com » Deleted Messages [HubDoc]",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hubdoc.treasurer.22dile30@app.hubdoc.com"
+      },
+      {
+        "header": "to",
+        "contains": "hubdoc.treasurer.22dile30@app.hubdoc.com"
+      }
+    ]
+  },
+  "action": {},
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Delete",
+    "Unsupported action: Mark unread"
+  ]
+}

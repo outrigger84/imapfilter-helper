@@ -1,0 +1,20 @@
+{
+  "name": "Travel » Acomodation » YHA",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "news@yhainfo.org.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Acomodation/YHA"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

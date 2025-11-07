@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Parabola",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "brian@parabola.io"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Parabola"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Personal » Banking » Nationwide",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "nationwide@nationwide-communications.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@communications.nationwide.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "currentaccount@nationwide.co.uk"
+      },
+      {
+        "header": "to",
+        "contains": "currentaccount@nationwide.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Banking/Nationwide"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

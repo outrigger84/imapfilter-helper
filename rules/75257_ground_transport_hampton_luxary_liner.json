@@ -1,0 +1,20 @@
+{
+  "name": "Ground Transport » Hampton Luxary Liner",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "marketing-hamptonluxuryliner.com@shared1.ccsend.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Ground Transport/Hampton Luxary Liner"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

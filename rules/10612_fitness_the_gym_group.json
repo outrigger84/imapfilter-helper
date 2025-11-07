@@ -1,0 +1,24 @@
+{
+  "name": "Fitness » The Gym Group",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "thegymgroup@et.thegymgroup.com"
+      },
+      {
+        "header": "from",
+        "contains": "TheGymGroup@et.thegymgroup.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Fitness/The Gym Group"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

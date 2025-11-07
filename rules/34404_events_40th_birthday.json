@@ -1,0 +1,32 @@
+{
+  "name": "Events » 40th Birthday",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "thecitygate@partners.collinsbookings.com"
+      },
+      {
+        "header": "from",
+        "contains": "jo@its-your-day.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "events@quaysidedistillery.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "events.topshambrewery@gmail.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Events/40th Birthday"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » OutSpot",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "newsletter@outspot.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/OutSpot"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

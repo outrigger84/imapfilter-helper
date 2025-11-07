@@ -1,0 +1,40 @@
+{
+  "name": "Newsletters » Bloom and Wild",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "newsletter@bloomandwild.com"
+      },
+      {
+        "header": "from",
+        "contains": "newsletter@email.bloomandwild.com"
+      },
+      {
+        "header": "from",
+        "contains": "lucye@email.bloomandwild.com"
+      },
+      {
+        "header": "from",
+        "contains": "bwplants@email.bloomandwild.com"
+      },
+      {
+        "header": "from",
+        "contains": "sale@email.bloomandwild.com"
+      },
+      {
+        "header": "from",
+        "contains": "arong@email.bloomandwild.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Bloom and Wild"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

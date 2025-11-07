@@ -1,0 +1,24 @@
+{
+  "name": "Personal » Finance » Credit Cards » Barclaycard » Barclaycard Cashback Rewards",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info@emails.cashbackrewards.uk.barclaycard"
+      },
+      {
+        "header": "from",
+        "contains": "news@email.cashbackrewards.uk.barclaycard"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Finance/Credit Cards/Barclaycard/Barclaycard Cashback Rewards"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

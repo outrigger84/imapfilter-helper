@@ -1,0 +1,24 @@
+{
+  "name": "Personal » Finance » Investing » Moneybox",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@moneyboxapp.com"
+      },
+      {
+        "header": "from",
+        "contains": "callum.support@moneyboxapp.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Finance/Investing/Moneybox"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

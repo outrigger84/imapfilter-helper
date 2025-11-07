@@ -1,0 +1,36 @@
+{
+  "name": "Server » Support",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@webhosting.uk.com"
+      },
+      {
+        "header": "from",
+        "contains": "customerservices@webhosting.uk.com"
+      },
+      {
+        "header": "from",
+        "contains": "servicedelivery@webhosting.uk.com"
+      },
+      {
+        "header": "from",
+        "contains": "billing@webhosting.uk.com"
+      },
+      {
+        "header": "from",
+        "contains": "angela.cummings@hyperslice.net"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Server/Support"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

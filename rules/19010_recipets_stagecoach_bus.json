@@ -1,0 +1,20 @@
+{
+  "name": "Recipets » Stagecoach Bus",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "do-not-reply@stagecoachbus.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Stagecoach Bus"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Sent Messages » Away From Computer",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "subject",
+        "contains": "Away from Computer"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Sent Messages/Away From Computer"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

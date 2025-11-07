@@ -1,0 +1,32 @@
+{
+  "name": "Complaints » Delay Repay",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreplyavantiwestcoastdr@firstcustomercontact.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply_londonnorthwesternrailway@delayrepaycompensation.com"
+      },
+      {
+        "header": "from",
+        "contains": "donotreply@gwr.com"
+      },
+      {
+        "header": "from",
+        "contains": "customer.relations@crosscountrytrains.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Complaints/Delay Repay"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

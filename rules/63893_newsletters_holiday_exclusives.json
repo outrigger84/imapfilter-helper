@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Holiday Exclusives",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@holidayexclusives\\.com$"
+      },
+      {
+        "header": "from",
+        "regex": "@hotelexclusives\\.com$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Holiday Exclusives"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

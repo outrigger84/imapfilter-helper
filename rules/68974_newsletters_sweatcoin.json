@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Sweatcoin",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "alerts@info.sweatco.in"
+      },
+      {
+        "header": "from",
+        "contains": "users@sweatco.in"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Sweatcoin"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

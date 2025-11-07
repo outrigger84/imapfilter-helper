@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » The Mortgage Brain",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info@themortgagebrain.uk"
+      },
+      {
+        "header": "from",
+        "contains": "info@themortgagebrain.net"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/The Mortgage Brain"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Notifications » Apple » iCloud",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@email.apple.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Apple/iCloud"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

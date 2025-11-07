@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » BlackmoreIT",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "sales_at_blackmoreit_com_b2p8n4fab2z329_64qv8492@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/BlackmoreIT"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

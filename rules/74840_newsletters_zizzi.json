@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Zizzi",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "news@emails.zizzi.co.uk"
+      },
+      {
+        "header": "to",
+        "contains": "news@emails.zizzi.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Zizzi"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

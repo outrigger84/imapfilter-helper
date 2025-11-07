@@ -1,0 +1,20 @@
+{
+  "name": "Recipets » scan.co.uk",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "website@scan.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/scan.co.uk"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

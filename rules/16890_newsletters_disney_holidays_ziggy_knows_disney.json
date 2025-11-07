@@ -1,0 +1,19 @@
+{
+  "name": "Newsletters » Disney Holidays » Ziggy Knows Disney",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "ziggy@ziggyknowsdisney.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Disney Holidays/Ziggy Knows Disney"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird"
+  ]
+}

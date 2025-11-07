@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Disney+",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "disneyplus@mail.disneyplus.com"
+      },
+      {
+        "header": "from",
+        "contains": "disneyplus@mkt.mail2.disneyplus.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Disney+"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

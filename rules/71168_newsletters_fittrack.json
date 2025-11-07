@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » FitTrack",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@m.fittrack.com"
+      },
+      {
+        "header": "from",
+        "contains": "support@getfittrack.com"
+      },
+      {
+        "header": "from",
+        "contains": "send@uk.fittrack.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/FitTrack"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

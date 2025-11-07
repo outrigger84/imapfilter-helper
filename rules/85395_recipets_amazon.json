@@ -1,0 +1,28 @@
+{
+  "name": "Recipets » Amazon",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "auto-confirm@amazon.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "return@amazon.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "payments-messages@amazon.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Amazon"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

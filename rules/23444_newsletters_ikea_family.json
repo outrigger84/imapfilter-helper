@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Ikea Family",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "ikea@news.email.ikea.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "information@info.email.ikea.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Ikea Family"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

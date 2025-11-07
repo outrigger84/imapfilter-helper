@@ -1,0 +1,24 @@
+{
+  "name": "Purchase » 21 Cleveland St",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "enquiries@environment-agency.gov.uk"
+      },
+      {
+        "header": "to",
+        "contains": "enquiries@environment-agency.gov.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Property/Purchase/21 Cleveland St"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

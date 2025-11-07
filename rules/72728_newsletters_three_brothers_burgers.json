@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Three Brothers Burgers",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "marketing@threebrothersburgers.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Three Brothers Burgers"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

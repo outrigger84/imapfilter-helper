@@ -1,0 +1,20 @@
+{
+  "name": "Fitness » Parkrun",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@parkrun.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Fitness/Parkrun"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

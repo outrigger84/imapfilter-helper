@@ -1,0 +1,20 @@
+{
+  "name": "Events » VenueScanner",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@notifications.venuescanner.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Events/VenueScanner"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

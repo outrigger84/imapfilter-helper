@@ -1,0 +1,24 @@
+{
+  "name": "Gift Vouchers » Screwfix",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "subject",
+        "contains": "You have received a gift certificate from Screwfix"
+      },
+      {
+        "header": "from",
+        "contains": "screwfix@voucherexpress.net"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Gift Vouchers/Screwfix"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

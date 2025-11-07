@@ -1,0 +1,52 @@
+{
+  "name": "Newsletters » Wine52",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "offers@wine52.com"
+      },
+      {
+        "header": "from",
+        "contains": "bottleshop@wine52.com"
+      },
+      {
+        "header": "from",
+        "contains": "gifts@wine52.com"
+      },
+      {
+        "header": "from",
+        "contains": "members@wine52.com"
+      },
+      {
+        "header": "from",
+        "contains": "lily@wine52.com"
+      },
+      {
+        "header": "from",
+        "contains": "Lily@wine52.com"
+      },
+      {
+        "header": "from",
+        "contains": "jack@wine52.com"
+      },
+      {
+        "header": "from",
+        "contains": "aimee@wine52.com"
+      },
+      {
+        "header": "from",
+        "contains": "annabelle@wine52.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Wine52"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Fitness » Domestiq",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "challenge@domestiq.net"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Fitness/Domestiq"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

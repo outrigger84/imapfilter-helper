@@ -1,0 +1,20 @@
+{
+  "name": "Flights » Lufthansa",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "newsletter@my.lufthansa.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/Lufthansa"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

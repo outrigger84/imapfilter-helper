@@ -1,0 +1,19 @@
+{
+  "name": "sj.gibson@mac.com » Deleted Messages [Verification Codes - Goal Plans | MuscleFood secure login code]",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "subject",
+        "regex": "^Goal\\ Plans\\ \\|\\ MuscleFood\\ secure\\ login\\ code:"
+      }
+    ]
+  },
+  "action": {},
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Delete",
+    "Unsupported action: Mark unread",
+    "Unsupported condition: age in days is greater than 0"
+  ]
+}

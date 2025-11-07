@@ -1,0 +1,104 @@
+{
+  "name": "21 Cleveland Street » Projects » Solar",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "warren.ross@arc-one.co.uk"
+      },
+      {
+        "header": "subject",
+        "contains": "Your Solar Quote"
+      },
+      {
+        "header": "subject",
+        "contains": "YOU'RE ELIGIBLE-amc"
+      },
+      {
+        "header": "subject",
+        "contains": "3 engineers are ready to quote"
+      },
+      {
+        "header": "subject",
+        "contains": "Thank you for using Solar Guide. What happens next?"
+      },
+      {
+        "header": "subject",
+        "contains": "Welcome to Solar Guide!"
+      },
+      {
+        "header": "subject",
+        "contains": "Your enquiry is live!"
+      },
+      {
+        "header": "from",
+        "contains": "richard.hawkesford@desrenewables.com"
+      },
+      {
+        "header": "from",
+        "contains": "solar@octoes.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@octopus.energy"
+      },
+      {
+        "header": "from",
+        "contains": "barry.faulkner@pure-energy.uk"
+      },
+      {
+        "header": "from",
+        "contains": "daniel.thrower@glowgreenltd.com"
+      },
+      {
+        "header": "from",
+        "contains": "proposal@opensolar.com"
+      },
+      {
+        "header": "from",
+        "contains": "design@glowgreenltd.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@effectivehome.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "info@nl.qnldkgnfstqu.fr*"
+      },
+      {
+        "header": "from",
+        "contains": "info@nl.xsfgnwktjkqc.fr*"
+      },
+      {
+        "header": "from",
+        "contains": "james.lawlor@effectivehome.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "jonw@smile-solar.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@solarguide.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "info@no1home.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "news@bonworth.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Projects/Solar"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

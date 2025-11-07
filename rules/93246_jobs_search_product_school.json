@@ -1,0 +1,20 @@
+{
+  "name": "Jobs » Search » Product School",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "eva@jobs.productschool.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Jobs/Search/Product School"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

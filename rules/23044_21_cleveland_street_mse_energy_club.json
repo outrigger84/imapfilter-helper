@@ -1,0 +1,20 @@
+{
+  "name": "21 Cleveland Street » MSE Energy Club",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "cheapenergyclub@email.moneysavingexpert.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/MSE Energy Club"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

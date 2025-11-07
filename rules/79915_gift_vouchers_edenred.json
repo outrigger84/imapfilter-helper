@@ -1,0 +1,36 @@
+{
+  "name": "Gift Vouchers » Edenred",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply_at_edenred_com_tqvr9c86t48zdc_0bzt2375@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@edenred.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@edenred.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply_at_edenred_uk_com_tqvr2ea3t48zbc_b2zt2375@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@edenred.uk.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Gift Vouchers/Edenred"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "21 Cleveland Street » Projects",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "james@asbestossolutionssouthwest.com"
+      },
+      {
+        "header": "from",
+        "contains": "nmayne@environmentuk.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Projects"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Subscriptions » AG1",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support.uk@drinkag1.com"
+      },
+      {
+        "header": "from",
+        "contains": "support@athleticgreens.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Subscriptions/AG1"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

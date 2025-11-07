@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » AARMY",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "gear@aarmy.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@aarmy.com"
+      },
+      {
+        "header": "from",
+        "contains": "nyc@aarmy.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/AARMY"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

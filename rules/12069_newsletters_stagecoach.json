@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Stagecoach",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "service@email.stagecoachbus.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Stagecoach"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

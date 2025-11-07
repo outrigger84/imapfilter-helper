@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Manual",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "help@manual.co"
+      },
+      {
+        "header": "from",
+        "regex": "@team\\.manual\\.co$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Manual"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

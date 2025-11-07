@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Holister",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "regex": "hollisterco\\.com$"
+      },
+      {
+        "header": "subject",
+        "regex": "^(?!.*Your\\ E\\-Receipt\\ from).*"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Holister"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

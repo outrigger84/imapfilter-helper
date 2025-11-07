@@ -1,0 +1,40 @@
+{
+  "name": "Newsletters » Masterworks",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "cleavell@masterworks.io"
+      },
+      {
+        "header": "from",
+        "contains": "support@masterworks.com"
+      },
+      {
+        "header": "from",
+        "contains": "mona@info.masterworks.com"
+      },
+      {
+        "header": "from",
+        "contains": "support@masterworks.io"
+      },
+      {
+        "header": "from",
+        "contains": "tfrisman@masterworks.io"
+      },
+      {
+        "header": "from",
+        "contains": "mona@masterworks.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Masterworks"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » theory11",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@theory11\\.com$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/theory11"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

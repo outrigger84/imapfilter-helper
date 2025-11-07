@@ -1,0 +1,68 @@
+{
+  "name": "Recipets » Apple",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no_reply@email.apple.com"
+      },
+      {
+        "header": "subject",
+        "contains": "Your invoice from Apple."
+      },
+      {
+        "header": "from",
+        "contains": "do_not_reply@itunes.com"
+      },
+      {
+        "header": "from",
+        "contains": "emea_invoicing@email.apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "do_not_reply@apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "west14thstreet@apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "princesshay@apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "grandcentral@apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "grandarcade@apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "fifthavenue@apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "danburyfairmall@apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "princesshay@email.apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "do_not_reply@euro.apple.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Apple"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

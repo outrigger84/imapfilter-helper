@@ -1,0 +1,48 @@
+{
+  "name": "Travel » Flights » Delta",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@delta.com"
+      },
+      {
+        "header": "from",
+        "contains": "deltaairlines@g.delta.com"
+      },
+      {
+        "header": "from",
+        "contains": "deltamessenger@delta.com"
+      },
+      {
+        "header": "from",
+        "contains": "deltaairlines@t.delta.com"
+      },
+      {
+        "header": "from",
+        "contains": "DeltaAirLines@o.delta.com"
+      },
+      {
+        "header": "from",
+        "contains": "deltaairlines@o.delta.com"
+      },
+      {
+        "header": "from",
+        "contains": "deltaairlines@e.delta.com"
+      },
+      {
+        "header": "from",
+        "contains": "contactus.delta@delta.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/Delta"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

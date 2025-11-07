@@ -1,0 +1,24 @@
+{
+  "name": "Personal » Banking » Chase",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "service@email.chase.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "mail@support.chase.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Banking/Chase"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Naked Wines",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "ray@nakedwines.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "matt@nakedwines.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Naked Wines"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

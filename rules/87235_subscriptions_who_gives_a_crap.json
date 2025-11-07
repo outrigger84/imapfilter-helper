@@ -1,0 +1,24 @@
+{
+  "name": "Subscriptions » Who Gives A Crap",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "wedo@whogivesacrap.org"
+      },
+      {
+        "header": "subject",
+        "contains": "Your subscription is rolling!"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Subscriptions/Who Gives A Crap"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

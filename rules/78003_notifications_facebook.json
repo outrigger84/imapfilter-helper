@@ -1,0 +1,20 @@
+{
+  "name": "Notifications » Facebook",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "security@facebookmail.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Facebook"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

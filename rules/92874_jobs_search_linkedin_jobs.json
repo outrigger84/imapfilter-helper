@@ -1,0 +1,24 @@
+{
+  "name": "Jobs » Search » Linkedin Jobs",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "jobs-listings@linkedin.com"
+      },
+      {
+        "header": "from",
+        "contains": "jobs-noreply@linkedin.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Jobs/Search/Linkedin Jobs"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

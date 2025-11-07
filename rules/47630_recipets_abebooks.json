@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » Abebooks",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply_transactional@abebooks.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "abebookssale@betterworldbooks.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Abebooks"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

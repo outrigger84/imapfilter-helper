@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Woodworkers Guild",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "editor@wwgoa.com"
+      },
+      {
+        "header": "from",
+        "contains": "editor@news.wwgoa.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Woodworkers Guild"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

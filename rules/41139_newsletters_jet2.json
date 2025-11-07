@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Jet2",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "myjet2@email.jet2.com"
+      },
+      {
+        "header": "from",
+        "contains": "greatdeals@jet2email.com"
+      },
+      {
+        "header": "from",
+        "contains": "holidays@email.jet2holidays.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Jet2"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

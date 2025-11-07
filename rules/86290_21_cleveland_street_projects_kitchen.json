@@ -1,0 +1,40 @@
+{
+  "name": "21 Cleveland Street » Projects » Kitchen",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@wrenkitchens.com"
+      },
+      {
+        "header": "subject",
+        "contains": "IKEA KITCHEN REMOTE PLANNING APPOINTMENT"
+      },
+      {
+        "header": "subject",
+        "contains": "IKEA REMOTE KITCHEN PLANNING APPOINTMENT"
+      },
+      {
+        "header": "from",
+        "contains": "kitchen.services@kp.booking.email.ikea.com"
+      },
+      {
+        "header": "from",
+        "contains": "email@services.email.ikea.com"
+      },
+      {
+        "header": "from",
+        "contains": "alex.holden@wrenkitchens.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Projects/Kitchen"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

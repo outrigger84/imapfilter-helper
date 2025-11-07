@@ -1,0 +1,20 @@
+{
+  "name": "Recipets » AARMY",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "welcome@aarmy.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/AARMY"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

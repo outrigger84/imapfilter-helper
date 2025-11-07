@@ -1,0 +1,20 @@
+{
+  "name": "Travel » Flights » Air Malta",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply.km@airmalta.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/Air Malta"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Newsletters » VoucherCodes",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "mail@em.vouchercodes.co.uk"
+      },
+      {
+        "header": "to",
+        "contains": "mail@em.vouchercodes.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "mail_at_em_vouchercodes_co_uk_xpwd39676g9jd8_6bnp6453@icloud.com"
+      },
+      {
+        "header": "from",
+        "regex": "@r\\.vouchercloud\\.com$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/VoucherCodes"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

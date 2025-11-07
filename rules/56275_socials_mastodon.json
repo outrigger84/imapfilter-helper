@@ -1,0 +1,20 @@
+{
+  "name": "Socials » Mastodon",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info_at_masto_ai_jfb78q2fzg0akg_ab6q2375@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Socials/Mastodon"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

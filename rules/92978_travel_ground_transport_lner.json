@@ -1,0 +1,20 @@
+{
+  "name": "Travel » Ground Transport » LNER",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply_at_lner_co_uk_sb9p0bd7m6skcf_15tq8492@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Ground Transport/LNER"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

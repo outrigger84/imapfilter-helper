@@ -1,0 +1,20 @@
+{
+  "name": "Recipets » AWD-IT",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "sales@awd-it.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/AWD-IT"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

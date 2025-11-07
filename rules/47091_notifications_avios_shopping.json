@@ -1,0 +1,20 @@
+{
+  "name": "Notifications » Avios Shopping",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "britishairways@rewardengine.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Avios Shopping"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

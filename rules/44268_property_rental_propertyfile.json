@@ -1,0 +1,20 @@
+{
+  "name": "Property » Rental » PropertyFile",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no_reply@propertyfile.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Property/Rental/PropertyFile"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

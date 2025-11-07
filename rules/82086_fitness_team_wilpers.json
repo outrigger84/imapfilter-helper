@@ -1,0 +1,20 @@
+{
+  "name": "Fitness » Team Wilpers",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "members@teamwilpers.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Fitness/Team Wilpers"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

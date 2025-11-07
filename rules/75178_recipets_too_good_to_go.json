@@ -1,0 +1,20 @@
+{
+  "name": "Recipets » Too Good To Go",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply_at_toogoodtogo_com_f6f29bbi43_bdacf9fe@privaterelay.appleid.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Too Good To Go"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

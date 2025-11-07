@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » SoulCycle",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello_at_ab_soul-cycle_email_628hnfpqtn2375_dbcbe23d@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@ab.soul-cycle.email"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/SoulCycle"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

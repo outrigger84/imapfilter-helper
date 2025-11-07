@@ -1,0 +1,32 @@
+{
+  "name": "Notifications » Booking.com",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@booking.com"
+      },
+      {
+        "header": "from",
+        "contains": "cs-noreply@booking.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply-invalidcc@booking.com"
+      },
+      {
+        "header": "from",
+        "contains": "survey@booking.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Booking.com"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

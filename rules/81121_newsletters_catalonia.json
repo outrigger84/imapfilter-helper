@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Catalonia",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info@nw.cataloniahotels.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@nw.cataloniarewards.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Catalonia"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

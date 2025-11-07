@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » DEWALT",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "DEWALT@email.dewalt.eu"
+      },
+      {
+        "header": "from",
+        "contains": "dewalt@mails.dewalt.eu"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/DEWALT"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

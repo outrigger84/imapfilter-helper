@@ -1,0 +1,23 @@
+{
+  "name": "sj.gibson@mac.com » Deleted Messages [Verification Codes - Gitub]",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "noreply@github.com"
+      },
+      {
+        "header": "subject",
+        "contains": "[GitHub] Please verify your device"
+      }
+    ]
+  },
+  "action": {},
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Delete",
+    "Unsupported action: Mark unread",
+    "Unsupported condition: age in days is greater than 0"
+  ]
+}

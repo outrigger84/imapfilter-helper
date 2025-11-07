@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » ITS",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@its.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "sales@its.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/ITS"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

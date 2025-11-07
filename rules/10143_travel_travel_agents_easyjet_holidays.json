@@ -1,0 +1,24 @@
+{
+  "name": "Travel » Travel Agents » Easyjet Holidays",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "donotreply@holiday.easyjet.com"
+      },
+      {
+        "header": "from",
+        "contains": "easyJet holidays"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Travel Agents/Easyjet Holidays"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

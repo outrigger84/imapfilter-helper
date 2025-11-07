@@ -1,0 +1,28 @@
+{
+  "name": "Events » 07-02-25 Birthday Meal",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "brownsexeter@partners.collinsbookings.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@news.browns-restaurants.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "Exeter@BrownsRestaurants.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Events/07-02-25 Birthday Meal"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

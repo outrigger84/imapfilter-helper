@@ -1,0 +1,23 @@
+{
+  "name": "Newsletters » Natalie Sisson",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "natalie@nataliesisson.com"
+      },
+      {
+        "header": "subject",
+        "regex": "^(?!.*\\[MOMENTUM\\]).*"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Natalie Sisson"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird"
+  ]
+}

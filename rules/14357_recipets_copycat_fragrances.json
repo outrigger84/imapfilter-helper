@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » Copycat Fragrances",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "copycatfragrances@hotmail.com"
+      },
+      {
+        "header": "subject",
+        "contains": "Order #"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Copycat Fragrances"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

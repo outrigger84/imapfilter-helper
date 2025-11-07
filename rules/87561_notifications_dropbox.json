@@ -1,0 +1,28 @@
+{
+  "name": "Notifications » Dropbox",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply@dropbox.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@em-s.dropbox.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply_at_em-s_dropbox_com_6tghuquysw_38295cd7@privaterelay.appleid.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Dropbox"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

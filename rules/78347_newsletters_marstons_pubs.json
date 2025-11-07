@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Marstons Pubs",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@e\\.marstonsmail\\.com$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Marstons Pubs"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » VMware",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "vmwareteam@connect.vmware.com"
+      },
+      {
+        "header": "from",
+        "contains": "vmwarecustomernews@vmware.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/VMware"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

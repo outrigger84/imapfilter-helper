@@ -1,0 +1,24 @@
+{
+  "name": "Travel » Travel Loyalty » LH Miles and More",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "newsletter@mailing.milesandmore.com"
+      },
+      {
+        "header": "from",
+        "contains": "mail@mailing.milesandmore.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Travel Loyalty/LH Miles and More"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

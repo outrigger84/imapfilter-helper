@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Karma",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello_at_news_karmanow_com_jnz2yk6wq5_f8ac8bc5@privaterelay.appleid.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Karma"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

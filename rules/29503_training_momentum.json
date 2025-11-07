@@ -1,0 +1,20 @@
+{
+  "name": "Training » Momentum",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "subject",
+        "contains": "[MOMENTUM]"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Training/Momentum"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

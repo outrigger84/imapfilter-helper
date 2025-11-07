@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Clarendon Fine Art",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@email\\.clarendonfineart\\.com$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Clarendon Fine Art"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

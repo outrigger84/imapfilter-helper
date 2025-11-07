@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » Ebay",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "ebay@ebay.com"
+      },
+      {
+        "header": "subject",
+        "contains": "Order confirmed:"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Ebay"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Allan Kelly",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "allan@softwarestrategy.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "allan@allankelly.net"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Allan Kelly"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

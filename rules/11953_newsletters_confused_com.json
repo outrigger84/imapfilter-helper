@@ -1,0 +1,52 @@
+{
+  "name": "Newsletters » Confused.com",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "news@newsletter.confused.com"
+      },
+      {
+        "header": "from",
+        "contains": "newsletter@news.confused.com"
+      },
+      {
+        "header": "from",
+        "contains": "offers@offers.confused.com"
+      },
+      {
+        "header": "from",
+        "contains": "quotes@quote.confused.com"
+      },
+      {
+        "header": "from",
+        "contains": "updates@news.confused.com"
+      },
+      {
+        "header": "from",
+        "regex": "@message\\.confused\\.com$"
+      },
+      {
+        "header": "from",
+        "regex": "@offer\\.confused\\.com$"
+      },
+      {
+        "header": "from",
+        "regex": "@news\\.confused\\.com$"
+      },
+      {
+        "header": "from",
+        "contains": "reminder@reminders.confused.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Confused.com"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

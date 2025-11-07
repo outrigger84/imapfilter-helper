@@ -1,0 +1,32 @@
+{
+  "name": "Travel » Flights » Virgin Atlantic",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "booking@virginatlantic.com"
+      },
+      {
+        "header": "from",
+        "contains": "baggage.claims@fly.virgin.com"
+      },
+      {
+        "header": "from",
+        "contains": "baggage.tracing@fly.virgin.com"
+      },
+      {
+        "header": "from",
+        "contains": "virginatlanticschedulechanges@virginatlantic.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/Virgin Atlantic"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

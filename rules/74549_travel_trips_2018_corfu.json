@@ -1,0 +1,19 @@
+{
+  "name": "Travel » Trips » 2018 - Corfu",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@booking.transavia.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Trips/2018 - Corfu"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird"
+  ]
+}

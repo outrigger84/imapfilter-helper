@@ -1,0 +1,20 @@
+{
+  "name": "Notifications » Greggs",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "account@service.greggs.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Greggs"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

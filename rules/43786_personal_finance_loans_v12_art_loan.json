@@ -1,0 +1,24 @@
+{
+  "name": "Personal » Finance » Loans » V12 Art Loan",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "customerservices@v12finance.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@news.v12finance.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Finance/Loans/V12 Art Loan"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

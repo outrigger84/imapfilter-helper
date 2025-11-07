@@ -1,0 +1,24 @@
+{
+  "name": "Notifications » Yodel",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@yodel.co.uk"
+      },
+      {
+        "header": "to",
+        "contains": "noreply@yodel.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Yodel"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

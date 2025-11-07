@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Wren Kitchens",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "communications@wrenkitchens.com"
+      },
+      {
+        "header": "from",
+        "contains": "marketing@mail.wren.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Wren Kitchens"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

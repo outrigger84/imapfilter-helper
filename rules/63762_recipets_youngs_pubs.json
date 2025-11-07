@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » Youngs Pubs",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply@pepperhq.com"
+      },
+      {
+        "header": "to",
+        "contains": "no-reply@pepperhq.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Youngs Pubs"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

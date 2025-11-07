@@ -1,0 +1,20 @@
+{
+  "name": "Travel » Travel Agents",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "donotreply@traveltrolley.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Travel Agents"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

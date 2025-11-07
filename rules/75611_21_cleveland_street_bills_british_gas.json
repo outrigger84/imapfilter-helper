@@ -1,0 +1,48 @@
+{
+  "name": "21 Cleveland Street » Bills » British Gas",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply_notification_energy@britishgas.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "notification@britishgas.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@q.britishgas.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "do-not-reply@worldpay.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@britishgas.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "bhushankumar.vetal@britishgas.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "research@britishgas.flexmr.email"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@cd.britishgas.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Bills/British Gas"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

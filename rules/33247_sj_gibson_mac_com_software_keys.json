@@ -1,0 +1,48 @@
+{
+  "name": "sj.gibson@mac.com » Software Keys",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@murgaa.com"
+      },
+      {
+        "header": "from",
+        "contains": "support@murgee.com"
+      },
+      {
+        "header": "from",
+        "contains": "help@paddle.com"
+      },
+      {
+        "header": "from",
+        "contains": "dougadams@mac.com"
+      },
+      {
+        "header": "from",
+        "contains": "support@dougscripts.com"
+      },
+      {
+        "header": "from",
+        "contains": "helpdesk@weirdkid.com"
+      },
+      {
+        "header": "from",
+        "contains": "register@aspect-one.com"
+      },
+      {
+        "header": "from",
+        "contains": "support@flip4mac.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Software Keys"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

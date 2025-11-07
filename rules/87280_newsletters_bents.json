@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Bents",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "beinspired@bents-news.co.uk"
+      },
+      {
+        "header": "to",
+        "contains": "beinspired@bents-news.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Bents"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

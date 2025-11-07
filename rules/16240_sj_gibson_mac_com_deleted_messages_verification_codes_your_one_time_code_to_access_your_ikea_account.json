@@ -1,0 +1,19 @@
+{
+  "name": "sj.gibson@mac.com » Deleted Messages [Verification Codes - Your one-time code to access your IKEA account]",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "subject",
+        "contains": "Your one-time code to access your IKEA account"
+      }
+    ]
+  },
+  "action": {},
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Delete",
+    "Unsupported action: Mark read",
+    "Unsupported condition: age in days is greater than 0"
+  ]
+}

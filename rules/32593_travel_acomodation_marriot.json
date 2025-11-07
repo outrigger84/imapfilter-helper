@@ -1,0 +1,24 @@
+{
+  "name": "Travel » Acomodation » Marriot",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@marriott.com"
+      },
+      {
+        "header": "from",
+        "contains": "reservations@res-marriott.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Acomodation/Marriot"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

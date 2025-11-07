@@ -1,0 +1,20 @@
+{
+  "name": "Notifications » HP Instant Ink",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "donotreply@instantink.hpsmart.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/HP Instant Ink"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Fastmail",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@fastmail.com"
+      },
+      {
+        "header": "to",
+        "contains": "support@fastmail.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Fastmail"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

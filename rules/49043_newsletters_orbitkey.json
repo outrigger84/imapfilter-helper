@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Orbitkey",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@orbitkey.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@orbitkey.eu"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Orbitkey"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

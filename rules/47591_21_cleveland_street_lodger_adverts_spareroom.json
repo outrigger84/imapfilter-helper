@@ -1,0 +1,20 @@
+{
+  "name": "21 Cleveland Street » Lodger » Adverts » Spareroom",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "team@spareroom.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Lodger/Adverts/Spareroom"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

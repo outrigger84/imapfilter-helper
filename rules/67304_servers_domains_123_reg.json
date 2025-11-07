@@ -1,0 +1,28 @@
+{
+  "name": "Servers » Domains » 123 Reg",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply@123-reg.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@email.123-reg.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "donotreply@e.secureserver.net"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Server/Domains/123 Reg"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Songkick",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "emails_at_songkick_com_knqgqjcytm_a008d8ef@privaterelay.appleid.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Songkick"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

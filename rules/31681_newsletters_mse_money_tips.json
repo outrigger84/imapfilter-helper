@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » MSE Money Tips",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "msemoneytips@email.moneysavingexpert.com"
+      },
+      {
+        "header": "from",
+        "contains": "msemoneytips@email3.moneysavingexpert.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/MSE Money Tips"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

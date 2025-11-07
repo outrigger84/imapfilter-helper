@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Productivity Flourising",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "charlie@productiveflourishing.com"
+      },
+      {
+        "header": "from",
+        "contains": "productiveflourishing@substack.com"
+      },
+      {
+        "header": "from",
+        "contains": "productiveflourishing+the-pulse@substack.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Productivity Flourising"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

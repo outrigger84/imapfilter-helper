@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Travelodge",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "news@e-travelodge.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@e.travelodge.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Travelodge"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

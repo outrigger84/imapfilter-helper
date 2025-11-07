@@ -1,0 +1,40 @@
+{
+  "name": "Newsletters » BOXPARK",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "BOXPARK@news.boxpark.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "boxpark@news.boxpark.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "blackcard@news.boxpark.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "shoreditch-emails@boxpark.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "shoreditch@news.boxpark.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@dtplv.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/BOXPARK"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

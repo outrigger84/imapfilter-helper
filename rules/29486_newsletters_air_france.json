@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Air France",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "contact-gb@enews-airfrance.com"
+      },
+      {
+        "header": "from",
+        "contains": "contact@enews-airfrance.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Air France"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

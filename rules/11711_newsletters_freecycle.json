@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Freecycle",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no_reply_at_freecycle_org_r9n1e9x7x26dfr_v5fc4414@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Freecycle"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Recipets » Loungers",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@loungers.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Loungers"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

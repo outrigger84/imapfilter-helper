@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Chip",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@mail.getchip.uk"
+      },
+      {
+        "header": "from",
+        "contains": "simon@mail.getchip.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Chip"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

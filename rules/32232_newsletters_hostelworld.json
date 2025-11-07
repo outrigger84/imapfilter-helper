@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Hostelworld",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@m\\.email\\.hostelworld\\.com$"
+      },
+      {
+        "header": "from",
+        "regex": "@email\\.hostelworld\\.com$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Hostelworld"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

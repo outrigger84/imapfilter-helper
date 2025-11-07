@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Disney Holidays » Disney Food Blog",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "aj@disneyfoodblog.com"
+      },
+      {
+        "header": "to",
+        "contains": "aj@disneyfoodblog.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Disney Holidays/Disney Food Blog"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

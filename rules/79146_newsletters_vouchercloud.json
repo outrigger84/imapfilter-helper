@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » VoucherCloud",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "offers@r.vouchercloud.com"
+      },
+      {
+        "header": "to",
+        "contains": "offers@r.vouchercloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/VoucherCloud"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

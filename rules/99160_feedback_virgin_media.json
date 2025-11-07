@@ -1,0 +1,20 @@
+{
+  "name": "Feedback » Virgin Media",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "youropinion@survey.virginmedia.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Feedback/Virgin Media"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

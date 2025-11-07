@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » EasyUsenet",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@easyusenet.nl"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/EasyUsenet"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

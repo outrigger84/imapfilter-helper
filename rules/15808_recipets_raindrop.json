@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » Raindrop",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "mailer@fastspring.com"
+      },
+      {
+        "header": "subject",
+        "contains": "raindrop.io"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Raindrop"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

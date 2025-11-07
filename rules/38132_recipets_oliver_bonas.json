@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » Oliver Bonas",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "askus@oliverbonas.com"
+      },
+      {
+        "header": "subject",
+        "contains": "order"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Oliver Bonas"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

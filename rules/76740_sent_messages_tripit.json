@@ -1,0 +1,20 @@
+{
+  "name": "Sent Messages » Tripit",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "to",
+        "contains": "plans@tripit.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Sent Messages/Tripit"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

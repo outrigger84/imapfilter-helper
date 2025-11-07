@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Crowdfunder",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@crowdfunder.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "info@crowdfunder.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Crowdfunder"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

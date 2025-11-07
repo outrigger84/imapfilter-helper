@@ -1,0 +1,24 @@
+{
+  "name": "Virgin » Virgin Holidays",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "virginholidays@emails.virginatlantic.com"
+      },
+      {
+        "header": "from",
+        "contains": "virginatlanticholidays@emails.virginatlantic.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Virgin/Virgin Holidays"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

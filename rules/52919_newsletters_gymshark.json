@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Gymshark",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@mail.gymshark.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@e.gymshark.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Gymshark"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

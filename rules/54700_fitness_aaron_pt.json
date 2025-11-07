@@ -1,0 +1,28 @@
+{
+  "name": "Fitness » Aaron PT",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "thompsonapt1@yahoo.com"
+      },
+      {
+        "header": "from",
+        "contains": "support@mypthub.net"
+      },
+      {
+        "header": "from",
+        "contains": "notifications@gocardless.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Fitness/Aaron PT"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

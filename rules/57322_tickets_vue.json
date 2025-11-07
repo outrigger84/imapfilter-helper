@@ -1,0 +1,24 @@
+{
+  "name": "Tickets » Vue",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "confirmation_at_kernel_myvue_com_y746d4vdhq_77b9d3b7@privaterelay.appleid.com"
+      },
+      {
+        "header": "from",
+        "contains": "confirmation@kernel.myvue.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Tickets/Vue"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

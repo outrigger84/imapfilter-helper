@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » City Pubs",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@news\\.citypubcompany\\.com$"
+      },
+      {
+        "header": "from",
+        "regex": "@turksheadexeter\\.com$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/City Pubs"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

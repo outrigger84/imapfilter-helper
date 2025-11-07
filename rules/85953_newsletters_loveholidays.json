@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Loveholidays",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "news@ema.loveholidays.com"
+      },
+      {
+        "header": "from",
+        "contains": "news@email.loveholidays.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Loveholidays"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

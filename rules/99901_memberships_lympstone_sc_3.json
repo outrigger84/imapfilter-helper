@@ -1,0 +1,36 @@
+{
+  "name": "Memberships » Lympstone SC",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "mailer.lympstonesailingclub@membermojo.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "enquiries@lympstonesailingclub.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply.lympstonesailingclub@membermojo.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "margaretturgoose@aol.com"
+      },
+      {
+        "header": "from",
+        "contains": "peter.turgoose@lympstonesailingclub.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Memberships/Lympstone SC"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

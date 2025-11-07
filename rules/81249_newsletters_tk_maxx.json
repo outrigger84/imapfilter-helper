@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » TK Maxx",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hotarrivals@mail.tkmaxx.com"
+      },
+      {
+        "header": "from",
+        "contains": "tkmaxx@eml.tkmaxx.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/TK Maxx"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

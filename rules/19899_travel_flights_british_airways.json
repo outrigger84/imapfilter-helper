@@ -1,0 +1,40 @@
+{
+  "name": "Travel » Flights » British Airways",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "ba.e-ticket@email.ba.com"
+      },
+      {
+        "header": "from",
+        "contains": "BA.e-ticket@email.ba.com"
+      },
+      {
+        "header": "from",
+        "contains": "customerservices@messages.ba.com"
+      },
+      {
+        "header": "from",
+        "contains": "ba.custsvcs@email.ba.com"
+      },
+      {
+        "header": "from",
+        "contains": "ecwebform_baonlineret@contact.britishairways.com"
+      },
+      {
+        "header": "from",
+        "contains": "ba.custsvcs@contact.britishairways.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/British Airways"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

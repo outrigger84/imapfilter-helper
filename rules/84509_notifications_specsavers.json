@@ -1,0 +1,20 @@
+{
+  "name": "Notifications » Specsavers",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "appointment@notification.specsavers.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Specsavers"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

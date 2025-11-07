@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Tado",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "newsletter_at_inside_tado_com_wz77d82ewwkxd3_cf2x6453@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply_at_tado_com_wz77c2f2wwkx8b_242x6453@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Tado"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

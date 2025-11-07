@@ -1,0 +1,24 @@
+{
+  "name": "Property » Rightmove",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@emails\\.rightmove\\.co\\.uk$"
+      },
+      {
+        "header": "from",
+        "contains": "rightmovenews@mail.rightmove.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Property/Rightmove"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

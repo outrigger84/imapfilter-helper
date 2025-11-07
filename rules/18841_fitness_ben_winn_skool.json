@@ -1,0 +1,20 @@
+{
+  "name": "Fitness » Ben Winn » Skool",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@skool.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Fitness/Ben Winn/Skool"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

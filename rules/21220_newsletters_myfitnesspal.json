@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » MyFitnessPal",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@e.blog.myfitnesspal.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@email.myfitnesspal.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/MyFitnessPal"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Subscriptions » Wine52",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@wine52.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@wine52.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Subscriptions/Wine52"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

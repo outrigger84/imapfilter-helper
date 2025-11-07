@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Meetup",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info_at_email_meetup_com_rq76hqz9f6_265a5403@privaterelay.appleid.com"
+      },
+      {
+        "header": "from",
+        "contains": "info_at_meetup_com_rq76hqz9f6_6fa120c6@privaterelay.appleid.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Meetup"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

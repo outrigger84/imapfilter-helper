@@ -1,0 +1,28 @@
+{
+  "name": "Notifications » Synology",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "sns@synologynotification.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@synologynotification.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@c2.synology.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Synology"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

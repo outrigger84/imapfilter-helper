@@ -1,0 +1,24 @@
+{
+  "name": "21 Cleveland Street » Renovations » MyBuilder.com",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info@mybuilder.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@mail.mybuilder.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Renovations/MyBuilder.com"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

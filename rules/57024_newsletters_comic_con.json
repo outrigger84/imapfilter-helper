@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Comic Con",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "museumops@comic-con.org"
+      },
+      {
+        "header": "from",
+        "contains": "donotreply@comic-con.org"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Comic Con"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

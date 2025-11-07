@@ -1,0 +1,24 @@
+{
+  "name": "Travel » Flights » TUI",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "boardingpass@tui.com"
+      },
+      {
+        "header": "from",
+        "contains": "tuiflightinfo@tui-delaycomms.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/TUI"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "name": "Travel » Travel Loyalty » BA Executive Club",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "ExecutiveClub@crm.ba.com"
+      },
+      {
+        "header": "from",
+        "contains": "executiveclub@crm.ba.com"
+      },
+      {
+        "header": "from",
+        "contains": "executiveclub@my.ba.com"
+      },
+      {
+        "header": "from",
+        "contains": "BritishAirways@crm.ba.com"
+      },
+      {
+        "header": "from",
+        "contains": "britishairwaysclub@crm.ba.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Travel Loyalty/BA Executive Club"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

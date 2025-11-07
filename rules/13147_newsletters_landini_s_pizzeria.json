@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Landini's Pizzeria",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "messages+62fstn4vgsq1q@squaremktg.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Landini's Pizzeria"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

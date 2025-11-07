@@ -1,0 +1,19 @@
+{
+  "name": "sj.gibson@mac.com » Deleted Messages [no-reply@purple.ai]",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "no-reply@purple.ai"
+      }
+    ]
+  },
+  "action": {},
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Delete",
+    "Unsupported action: Mark unread",
+    "Unsupported condition: age in days is greater than 1"
+  ]
+}

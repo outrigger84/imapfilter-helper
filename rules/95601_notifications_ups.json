@@ -1,0 +1,20 @@
+{
+  "name": "Notifications » UPS",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "pkginfo@ups.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/UPS"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

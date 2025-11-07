@@ -1,0 +1,48 @@
+{
+  "name": "Jobs » Current » Met Office",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "security@metoffice.gov.uk"
+      },
+      {
+        "header": "from",
+        "contains": "c1suvettingaftercare@hmrc.gov.uk"
+      },
+      {
+        "header": "from",
+        "contains": "assia.raza@hmrc.gov.uk"
+      },
+      {
+        "header": "from",
+        "contains": "jason.bradley@metoffice.gov.uk"
+      },
+      {
+        "header": "from",
+        "contains": "bradley.deaville@hmrc.gov.uk"
+      },
+      {
+        "header": "from",
+        "contains": "askhr@metoffice.gov.uk"
+      },
+      {
+        "header": "from",
+        "contains": "nicola.cuttridge@metoffice.gov.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply_recruitment@metoffice.gov.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Jobs/Current/Met Office"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

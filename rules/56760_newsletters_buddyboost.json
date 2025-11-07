@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Buddyboost",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "donotreply@buddyboost.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@mayathon.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Buddyboost"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

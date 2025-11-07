@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Neville Johnson",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info@neville-johnson.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "sales@nevillejohnson.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Neville Johnson"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

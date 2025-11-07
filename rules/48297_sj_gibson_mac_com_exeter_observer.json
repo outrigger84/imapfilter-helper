@@ -1,0 +1,20 @@
+{
+  "name": "sj.gibson@mac.com » Exeter Observer",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@exeterobserver\\.org$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Exeter Observer"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

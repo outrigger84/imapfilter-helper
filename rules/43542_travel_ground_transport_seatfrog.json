@@ -1,0 +1,20 @@
+{
+  "name": "Travel » Ground Transport » Seatfrog",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello_at_seatfrog_com_aw9fhjc84m_324cf944@privaterelay.appleid.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Ground Transport/Seatfrog"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

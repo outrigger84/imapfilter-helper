@@ -1,0 +1,24 @@
+{
+  "name": "Travel » Travel Agents » Expedia",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "travel@support.expedia.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "confirmation@expediaconfirm.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Travel Agents/Expedia"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

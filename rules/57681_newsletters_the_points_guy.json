@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » The Points Guy",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "tpg@thepointsguy.co.uk"
+      },
+      {
+        "header": "to",
+        "contains": "tpg@thepointsguy.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "tpg@thepointsguy.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/The Points Guy"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

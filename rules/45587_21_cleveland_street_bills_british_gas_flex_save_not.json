@@ -1,0 +1,24 @@
+{
+  "name": "21 Cleveland Street » Bills » British Gas - Flex Save [Not]",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "service@mail.energy.britishgas.co.uk"
+      },
+      {
+        "header": "subject",
+        "regex": "^(?!.*Join\\ our\\ PeakSave\\ Green\\ Flex\\ event\\ on).*"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Bills/British Gas"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

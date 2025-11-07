@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » IHG One Rewards",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "IHGOneRewards@mc.ihg.com"
+      },
+      {
+        "header": "from",
+        "contains": "ihgonerewards@points-mail.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/IHG One Rewards"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Travel » Flights » American Airlines",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "american.airlines@aa.com"
+      },
+      {
+        "header": "from",
+        "contains": "americanairlines@aa.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@notify.email.aa.com"
+      },
+      {
+        "header": "from",
+        "contains": "notify@aa.globalnotifications.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/American Airlines"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

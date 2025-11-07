@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Crooked Store",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hey@crooked.com"
+      },
+      {
+        "header": "from",
+        "contains": "votesaveamerica@crooked.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Crooked Store"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

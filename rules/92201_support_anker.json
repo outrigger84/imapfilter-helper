@@ -1,0 +1,20 @@
+{
+  "name": "Support » Anker",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@anker.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Support/Anker"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

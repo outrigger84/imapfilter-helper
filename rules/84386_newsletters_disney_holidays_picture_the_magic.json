@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Disney Holidays » Picture the Magic",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info@attractionsmagazine.com"
+      },
+      {
+        "header": "from",
+        "contains": "alisha@picturethemagic.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Disney Holidays/Picture the Magic"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

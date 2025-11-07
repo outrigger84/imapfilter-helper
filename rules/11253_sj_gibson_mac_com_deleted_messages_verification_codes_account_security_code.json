@@ -1,0 +1,23 @@
+{
+  "name": "sj.gibson@mac.com » Deleted Messages [Verification Codes - Account Security Code]",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "ba.verifyidentity@ba.com"
+      },
+      {
+        "header": "subject",
+        "contains": "Account Security Code"
+      }
+    ]
+  },
+  "action": {},
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Delete",
+    "Unsupported action: Mark unread",
+    "Unsupported condition: age in days is greater than 0"
+  ]
+}

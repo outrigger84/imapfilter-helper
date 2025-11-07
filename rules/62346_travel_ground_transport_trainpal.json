@@ -1,0 +1,24 @@
+{
+  "name": "Travel » Ground Transport » Trainpal",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "tp-accounts-noreply@trip.com"
+      },
+      {
+        "header": "from",
+        "contains": "tp-accounts-noreply@TrainPal.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Ground Transport/Trainpal"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

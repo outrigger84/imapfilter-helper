@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Webhosting",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "newsletter@webhosting.uk.com"
+      },
+      {
+        "header": "to",
+        "contains": "newsletter@webhosting.uk.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Webhosting"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

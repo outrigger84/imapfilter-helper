@@ -1,0 +1,36 @@
+{
+  "name": "Newsletters » Destination2",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "newsletter@emails.destination2.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "newsletter@emails.destination2cruise.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "postmaster@emails.destination2.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "postmaster@emails.destination2cruise.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "destination2@emails.destination2.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Destination2"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Newsletters » PADI",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "padi@mail.padidiver.com"
+      },
+      {
+        "header": "from",
+        "contains": "club@mail.padidiver.com"
+      },
+      {
+        "header": "from",
+        "contains": "gear@mail.padidiver.com"
+      },
+      {
+        "header": "from",
+        "contains": "travel@mail.padidiver.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/PADI"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Too Good To Go",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello_at_mail_toogoodtogo_co_uk_f6f29bbi43_646eddcc@privaterelay.appleid.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Too Good To Go"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

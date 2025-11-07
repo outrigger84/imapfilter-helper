@@ -1,0 +1,24 @@
+{
+  "name": "Notifications » Crave",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "crave@kobas.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "crave@partners.collinsbookings.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Crave"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

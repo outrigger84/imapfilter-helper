@@ -1,0 +1,32 @@
+{
+  "name": "Newsletters » Xbox",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "xboxreps@engage.xbox.com"
+      },
+      {
+        "header": "to",
+        "contains": "xboxreps@engage.xbox.com"
+      },
+      {
+        "header": "from",
+        "contains": "xbox@e.xbox.com"
+      },
+      {
+        "header": "from",
+        "contains": "xbox@engage.xbox.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Xbox"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

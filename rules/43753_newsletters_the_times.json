@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » The Times",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@newsletter.thetimes.co.uk"
+      },
+      {
+        "header": "to",
+        "contains": "noreply@newsletter.thetimes.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@comms.thetimes.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/The Times"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

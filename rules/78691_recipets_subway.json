@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » Subway",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "noreply-uk@subwayrewards.uk"
+      },
+      {
+        "header": "subject",
+        "contains": "Order Confirmation"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Subway"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "Recipets » CCL",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "ordertracking@cclonline.com"
+      },
+      {
+        "header": "subject",
+        "contains": "CCL Order Confirmation"
+      },
+      {
+        "header": "to",
+        "contains": "ordertracking@cclonline.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/CCL"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

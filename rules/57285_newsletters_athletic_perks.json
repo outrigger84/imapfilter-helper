@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Athletic Perks",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@athleteperks.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "support@athleteperks.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Athletic Perks"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

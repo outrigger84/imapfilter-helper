@@ -1,0 +1,24 @@
+{
+  "name": "Events » Soulcycle [Booked]",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "subject",
+        "contains": "You're in!"
+      },
+      {
+        "header": "from",
+        "contains": "@soul-cycle.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Events/Soulcycle"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Notifications » IFTTT",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "alerts@ifttt.com"
+      },
+      {
+        "header": "from",
+        "contains": "support@ifttt.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/IFTTT"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

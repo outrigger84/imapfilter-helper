@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Blinds2Go",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@email.blinds-2go.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@blinds-2go.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Blinds2Go"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

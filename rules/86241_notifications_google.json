@@ -1,0 +1,48 @@
+{
+  "name": "Notifications » Google",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply@accounts.google.com"
+      },
+      {
+        "header": "from",
+        "contains": "googlebusinessprofile-noreply@google.com"
+      },
+      {
+        "header": "from",
+        "contains": "calendar-noreply@google.com"
+      },
+      {
+        "header": "from",
+        "contains": "businessprofile-noreply@google.com"
+      },
+      {
+        "header": "from",
+        "contains": "google-maps-platform-noreply@google.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply-maps-timeline@google.com"
+      },
+      {
+        "header": "from",
+        "contains": "googlemybusiness-noreply@google.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@google.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Google"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

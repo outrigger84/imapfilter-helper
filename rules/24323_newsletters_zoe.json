@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Zoe",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply@joinzoe.com"
+      },
+      {
+        "header": "to",
+        "contains": "no-reply@joinzoe.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@info.zoe.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Zoe"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

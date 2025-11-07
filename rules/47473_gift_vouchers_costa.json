@@ -1,0 +1,24 @@
+{
+  "name": "Gift Vouchers » Costa",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "subject",
+        "contains": "You have received a gift certificate from Costa Coffee"
+      },
+      {
+        "header": "subject",
+        "contains": "A gift from Steve"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Gift Vouchers/Costa"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

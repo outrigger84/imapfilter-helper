@@ -1,0 +1,32 @@
+{
+  "name": "sj.gibson@mac.com » The Economist",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "newsletters@e.economist.com"
+      },
+      {
+        "header": "from",
+        "contains": "impact@go.economist.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@e.economist.com"
+      },
+      {
+        "header": "from",
+        "contains": "1843-magazine@e.economist.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "The Economist"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

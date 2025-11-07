@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » hims",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@alerts\\.forhims\\.co\\.uk$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/hims"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

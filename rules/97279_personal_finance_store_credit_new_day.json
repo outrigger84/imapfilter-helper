@@ -1,0 +1,44 @@
+{
+  "name": "Personal » Finance » Store Credit » New Day",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "AOFinance@e.mail.newdaycards.com"
+      },
+      {
+        "header": "from",
+        "contains": "aofinance@e.mail.newdaycards.com"
+      },
+      {
+        "header": "from",
+        "contains": "cardservices@newalert.newday.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "newday@e.mail.newdaycards.com"
+      },
+      {
+        "header": "from",
+        "contains": "newdayservice@e.mail.newdaycards.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@alerts1.extmail.newdaycards.com"
+      },
+      {
+        "header": "from",
+        "contains": "newdaycards@e.mail.newdaycards.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Finance/Store Credit/New Day"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

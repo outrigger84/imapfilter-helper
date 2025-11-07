@@ -1,0 +1,28 @@
+{
+  "name": "Fitness » Climbing Hanger",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "exeter@theclimbinghangar.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@smartwaiver.com"
+      },
+      {
+        "header": "from",
+        "contains": "donotreply@rockgympro.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Fitness/Climbing Hanger"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "Personal » Health » Magdalen Health",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "notifications@cliniko.com"
+      },
+      {
+        "header": "from",
+        "contains": "reception@magdalenhealth.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@rehabmypatient.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Health/Magdalen Health"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

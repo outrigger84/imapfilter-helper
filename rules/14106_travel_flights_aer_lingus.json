@@ -1,0 +1,28 @@
+{
+  "name": "Travel » Flights » Aer Lingus",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "bookingsen@aerlingus.com"
+      },
+      {
+        "header": "from",
+        "contains": "aerlingusfeedback@aerlingus.com"
+      },
+      {
+        "header": "from",
+        "contains": "customer.contact@aerlingus.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/Aer Lingus"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

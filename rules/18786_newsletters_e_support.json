@@ -1,0 +1,19 @@
+{
+  "name": "Newsletters » e-support",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "newsletter@newsletters.esupport.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/e-support"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird"
+  ]
+}

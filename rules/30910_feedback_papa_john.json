@@ -1,0 +1,20 @@
+{
+  "name": "Feedback » Papa John",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "papatalk@smg.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Feedback/Papa John"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

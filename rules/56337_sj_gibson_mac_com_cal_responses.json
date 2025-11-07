@@ -1,0 +1,28 @@
+{
+  "name": "sj.gibson@mac.com » Cal Responses",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "subject",
+        "contains": "Tentative:"
+      },
+      {
+        "header": "subject",
+        "contains": "Accepted:"
+      },
+      {
+        "header": "subject",
+        "contains": "Declined:"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Cal Responses"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

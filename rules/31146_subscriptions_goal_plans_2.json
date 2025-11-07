@@ -1,0 +1,24 @@
+{
+  "name": "Subscriptions » Goal Plans",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "regex": "@musclefood\\.com$"
+      },
+      {
+        "header": "subject",
+        "contains": "Your Goal Plans"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Subscriptions/Goal Plans"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

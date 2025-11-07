@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Disney Holidays » WDWMAGIC",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@wdwmagic.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Disney Holidays/WDWMAGIC"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

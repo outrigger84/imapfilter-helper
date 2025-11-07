@@ -1,0 +1,44 @@
+{
+  "name": "Newsletters » Tripadvisor",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "awards@mp1.tripadvisor.com"
+      },
+      {
+        "header": "from",
+        "contains": "inspiration@mp1.tripadvisor.com"
+      },
+      {
+        "header": "from",
+        "contains": "content@mp1.tripadvisor.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@mp1.tripadvisor.com"
+      },
+      {
+        "header": "from",
+        "contains": "product@mp1.tripadvisor.com"
+      },
+      {
+        "header": "from",
+        "contains": "savings@mp1.tripadvisor.com"
+      },
+      {
+        "header": "from",
+        "contains": "updates@mp1.tripadvisor.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Tripadvisor"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}
