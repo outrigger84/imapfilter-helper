@@ -34,6 +34,32 @@ def load_rules(rule_dir: Path, logger: JsonLogger) -> list[dict]:
     return rules
 
 
+def _extract_raw_header(data: str) -> str:
+    """Return the raw header string from a row of header data."""
+
+    if not data:
+        return ""
+
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError:
+        return data
+
+    if isinstance(payload, dict):
+        header = payload.get("header")
+        if isinstance(header, str):
+            return header
+
+    return data
+
+
+def _parse_header_map(raw_header: str) -> dict[str, str]:
+    """Parse the raw header string into a lowercase-keyed mapping."""
+
+    message = email.message_from_string(raw_header or "")
+    return {key.lower(): value for key, value in message.items()}
+
+
 def rule_match(header: dict, cond: dict) -> bool:
     value = header.get(cond.get("header", "").lower(), "") or ""
     pattern = cond.get("contains") or cond.get("regex")
@@ -52,6 +78,7 @@ def evaluate_rules(
     dry_run: bool,
     show_progress: bool,
     logger: JsonLogger,
+    debug_headers: bool = False,
 ) -> tuple[PhaseTimer, int, int]:
     rule_list = list(rules)
     timer = PhaseTimer("evaluate")
@@ -88,8 +115,20 @@ def evaluate_rules(
         )
 
         for uid, data in msgs_bar:
-            hdr = json.loads(data)["header"]
-            header = {k.lower(): v for k, v in email.message_from_string(hdr).items()}
+            raw_header = _extract_raw_header(data)
+            header = _parse_header_map(raw_header)
+
+            if debug_headers:
+                logger.log(
+                    "DEBUG",
+                    "header_debug",
+                    {
+                        "uid": uid,
+                        "folder": folder,
+                        "subject": header.get("subject"),
+                        "from": header.get("from"),
+                    },
+                )
 
             for rule in rule_list:
                 if scope == "inbox" and not folder.lower().endswith("inbox"):
