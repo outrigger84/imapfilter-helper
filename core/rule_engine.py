@@ -5,7 +5,7 @@ import email
 import json
 import re
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from tqdm import tqdm
 
@@ -68,6 +68,51 @@ def rule_match(header: dict, cond: dict) -> bool:
     if "regex" in cond:
         return bool(re.search(pattern, value, re.I))
     return pattern.lower() in value.lower()
+
+
+def _evaluate_condition_node(header: dict, node: Any) -> bool:
+    """Evaluate a condition or logical group against the header map."""
+
+    if isinstance(node, list):
+        # Implicit AND for backward compatibility with legacy rule format.
+        return all(_evaluate_condition_node(header, item) for item in node)
+
+    if isinstance(node, dict):
+        matched = False
+
+        if "all" in node:
+            matched = True
+            candidates = node.get("all")
+            if not isinstance(candidates, list):
+                candidates = [candidates]
+            if not all(_evaluate_condition_node(header, item) for item in candidates):
+                return False
+
+        if "any" in node:
+            matched = True
+            candidates = node.get("any")
+            if not isinstance(candidates, list):
+                candidates = [candidates]
+            # Empty OR group should never match.
+            if not candidates:
+                return False
+            if not any(_evaluate_condition_node(header, item) for item in candidates):
+                return False
+
+        if matched:
+            return True
+
+        return rule_match(header, node)
+
+    return False
+
+
+def conditions_match(header: dict, conditions: Any) -> bool:
+    """Return True if the header satisfies the supplied condition tree."""
+
+    if not conditions:
+        return False
+    return _evaluate_condition_node(header, conditions)
 
 
 def evaluate_rules(
@@ -134,8 +179,8 @@ def evaluate_rules(
                 if scope == "inbox" and not folder.lower().endswith("inbox"):
                     continue
 
-                conds = rule.get("conditions", [])
-                if conds and all(rule_match(header, cond) for cond in conds):
+                conds = rule.get("conditions")
+                if conditions_match(header, conds):
                     action = rule.get("action", {})
                     db.execute(
                         "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at) "
