@@ -7,11 +7,17 @@ from typing import Sequence
 from tqdm import tqdm
 
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
-from core.imap import safe_search_all
+from core.imap_client import safe_search_all
 
 
-def build_cache(client, db, folders: Sequence[str], cfg, logger: JsonLogger) -> tuple[PhaseTimer, int, int]:
-    show = cfg.logging.show_progress
+def build_cache(
+    client,
+    db,
+    folders: Sequence[str],
+    *,
+    show_progress: bool,
+    logger: JsonLogger,
+) -> tuple[PhaseTimer, int, int]:
     timer = PhaseTimer("cache")
     folders_bar = tqdm(
         folders,
@@ -20,7 +26,7 @@ def build_cache(client, db, folders: Sequence[str], cfg, logger: JsonLogger) -> 
         dynamic_ncols=True,
         leave=True,
         position=0,
-        disable=not show,
+        disable=not show_progress,
     )
     total_msgs = 0
 
@@ -55,7 +61,7 @@ def build_cache(client, db, folders: Sequence[str], cfg, logger: JsonLogger) -> 
                 dynamic_ncols=True,
                 leave=False,
                 position=1,
-                disable=not show,
+                disable=not show_progress,
             )
 
             for uid in msgs_bar:

@@ -8,7 +8,7 @@ from typing import Optional
 from core.logging_utils import JsonLogger
 
 
-def init_db(path: Path) -> sqlite3.Connection:
+def init_db(path: Path, *, logger: Optional[JsonLogger] = None) -> sqlite3.Connection:
     """Initialise the sqlite database and apply lightweight migrations."""
     db = sqlite3.connect(path)
     db.execute(
@@ -24,8 +24,8 @@ def init_db(path: Path) -> sqlite3.Connection:
         "id INTEGER PRIMARY KEY, uid TEXT, folder TEXT, rule_name TEXT, target TEXT, "
         "priority INTEGER, status TEXT, created_at TEXT, executed_at TEXT)"
     )
-    _ensure_column(db, "actions", "priority", "INTEGER", default=100)
-    _ensure_column(db, "actions", "executed_at", "TEXT", default=None)
+    _ensure_column(db, "actions", "priority", "INTEGER", default=100, logger=logger)
+    _ensure_column(db, "actions", "executed_at", "TEXT", default=None, logger=logger)
     db.commit()
     return db
 

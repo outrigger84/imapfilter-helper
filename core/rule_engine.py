@@ -1,4 +1,4 @@
-"""Rule evaluation helpers."""
+"""Rule loading and evaluation helpers."""
 from __future__ import annotations
 
 import email
@@ -44,9 +44,16 @@ def rule_match(header: dict, cond: dict) -> bool:
     return pattern.lower() in value.lower()
 
 
-def evaluate_rules(db, rules: Sequence[dict], scope: str, cfg, logger: JsonLogger) -> tuple[PhaseTimer, int, int]:
+def evaluate_rules(
+    db,
+    rules: Sequence[dict],
+    *,
+    scope: str,
+    dry_run: bool,
+    show_progress: bool,
+    logger: JsonLogger,
+) -> tuple[PhaseTimer, int, int]:
     rule_list = list(rules)
-    show = cfg.logging.show_progress
     timer = PhaseTimer("evaluate")
 
     cur = db.cursor()
@@ -64,7 +71,7 @@ def evaluate_rules(db, rules: Sequence[dict], scope: str, cfg, logger: JsonLogge
         dynamic_ncols=True,
         leave=True,
         position=0,
-        disable=not show,
+        disable=not show_progress,
     )
 
     total_matches = 0
@@ -77,7 +84,7 @@ def evaluate_rules(db, rules: Sequence[dict], scope: str, cfg, logger: JsonLogge
             dynamic_ncols=True,
             leave=False,
             position=1,
-            disable=not show,
+            disable=not show_progress,
         )
 
         for uid, data in msgs_bar:
@@ -100,7 +107,7 @@ def evaluate_rules(db, rules: Sequence[dict], scope: str, cfg, logger: JsonLogge
                             rule.get("name"),
                             action.get("target", ""),
                             int(rule.get("priority", 100)),
-                            "pending" if not cfg.executor.dry_run else "simulated",
+                            "pending" if not dry_run else "simulated",
                             now_iso(),
                         ),
                     )
@@ -114,7 +121,7 @@ def evaluate_rules(db, rules: Sequence[dict], scope: str, cfg, logger: JsonLogge
                             "folder": folder,
                             "uid": uid,
                             "target": action.get("target"),
-                            "dry_run": cfg.executor.dry_run,
+                            "dry_run": dry_run,
                         },
                     )
 
