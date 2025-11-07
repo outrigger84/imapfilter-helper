@@ -6,8 +6,7 @@ from typing import Sequence
 
 from tqdm import tqdm
 
-from core.logging_utils import JsonLogger, now_iso
-from core.timers import PhaseTimer
+from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 from core.imap import safe_search_all
 
 

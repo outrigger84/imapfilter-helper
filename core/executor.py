@@ -6,8 +6,7 @@ from typing import Dict, List, Tuple
 
 from tqdm import tqdm
 
-from core.logging_utils import JsonLogger, now_iso
-from core.timers import PhaseTimer
+from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 
 
 ActionRow = Tuple[int, str, str, str, str, int, str, str]
