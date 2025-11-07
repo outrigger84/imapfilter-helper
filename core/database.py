@@ -43,12 +43,24 @@ def _ensure_headers_table(db: sqlite3.Connection, *, logger: Optional[JsonLogger
         return
 
     info = db.execute("PRAGMA table_info(headers)").fetchall()
+    existing_columns = {row[1] for row in info}
     pk_columns = sorted(
         ((row[5], row[1]) for row in info if row[5]),
         key=lambda item: item[0],
     )
-    if [name for _, name in pk_columns] == ["folder", "uid"]:
+    if (
+        {"folder", "uid", "data", "updated_at"}.issubset(existing_columns)
+        and [name for _, name in pk_columns] == ["folder", "uid"]
+    ):
         return
+
+    select_columns = []
+    for column in ("folder", "uid", "data", "updated_at"):
+        if column in existing_columns:
+            select_columns.append(column)
+        else:
+            select_columns.append(f"NULL AS {column}")
+    select_clause = ", ".join(select_columns)
 
     with db:
         db.execute("ALTER TABLE headers RENAME TO headers_old")
@@ -59,7 +71,7 @@ def _ensure_headers_table(db: sqlite3.Connection, *, logger: Optional[JsonLogger
         )
         db.execute(
             "INSERT INTO headers (folder, uid, data, updated_at) "
-            "SELECT folder, uid, data, updated_at FROM headers_old"
+            f"SELECT {select_clause} FROM headers_old"
         )
         db.execute("DROP TABLE headers_old")
 
