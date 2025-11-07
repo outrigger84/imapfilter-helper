@@ -10,9 +10,8 @@ from core.cache import build_cache
 from core.config import build_default_config
 from core.executor import execute_actions
 from core.imap import imap_login, list_all_folders
-from core.logging_utils import JsonLogger
+from core.logging_utils import JsonLogger, PhaseTimer
 from core.rules import evaluate_rules, load_rules
-from core.timers import PhaseTimer
 from data.database import init_db
 
 

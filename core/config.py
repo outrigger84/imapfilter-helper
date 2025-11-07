@@ -5,6 +5,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+# Default filesystem layout -------------------------------------------------
+
+DEFAULT_RULES_PATH = Path("rules")
+DEFAULT_SECRETS_PATH = Path("secrets.json")
+DEFAULT_CACHE_PATH = Path("cache.db")
+DEFAULT_LOG_PATH = Path("imapfilter-helper.log")
+
 
 @dataclass
 class PathsConfig:
@@ -15,10 +22,10 @@ class PathsConfig:
     log_file: Path = field(init=False)
 
     def __post_init__(self) -> None:
-        self.rules_dir = self.base_dir / "rules"
-        self.secrets_file = self.base_dir / "secrets.json"
-        self.db_file = self.base_dir / "cache.db"
-        self.log_file = self.base_dir / "imapfilter-helper.log"
+        self.rules_dir = self.base_dir / DEFAULT_RULES_PATH
+        self.secrets_file = self.base_dir / DEFAULT_SECRETS_PATH
+        self.db_file = self.base_dir / DEFAULT_CACHE_PATH
+        self.log_file = self.base_dir / DEFAULT_LOG_PATH
 
 
 @dataclass
