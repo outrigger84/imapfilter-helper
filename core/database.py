@@ -15,10 +15,7 @@ def init_db(path: Path, *, logger: Optional[JsonLogger] = None) -> sqlite3.Conne
         "CREATE TABLE IF NOT EXISTS folders "
         "(id INTEGER PRIMARY KEY, name TEXT, parent TEXT, updated_at TEXT)"
     )
-    db.execute(
-        "CREATE TABLE IF NOT EXISTS headers "
-        "(uid TEXT PRIMARY KEY, folder TEXT, data TEXT, updated_at TEXT)"
-    )
+    _ensure_headers_table(db, logger=logger)
     db.execute(
         "CREATE TABLE IF NOT EXISTS actions ("
         "id INTEGER PRIMARY KEY, uid TEXT, folder TEXT, rule_name TEXT, target TEXT, "
@@ -28,6 +25,50 @@ def init_db(path: Path, *, logger: Optional[JsonLogger] = None) -> sqlite3.Conne
     _ensure_column(db, "actions", "executed_at", "TEXT", default=None, logger=logger)
     db.commit()
     return db
+
+
+def _ensure_headers_table(db: sqlite3.Connection, *, logger: Optional[JsonLogger] = None) -> None:
+    cur = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='headers'"
+    )
+    if cur.fetchone() is None:
+        db.execute(
+            "CREATE TABLE headers "
+            "(folder TEXT, uid TEXT, data TEXT, updated_at TEXT, "
+            "PRIMARY KEY (folder, uid))"
+        )
+        db.commit()
+        if logger:
+            logger.log("INFO", "schema_table_created", {"table": "headers"})
+        return
+
+    info = db.execute("PRAGMA table_info(headers)").fetchall()
+    pk_columns = sorted(
+        ((row[5], row[1]) for row in info if row[5]),
+        key=lambda item: item[0],
+    )
+    if [name for _, name in pk_columns] == ["folder", "uid"]:
+        return
+
+    with db:
+        db.execute("ALTER TABLE headers RENAME TO headers_old")
+        db.execute(
+            "CREATE TABLE headers "
+            "(folder TEXT, uid TEXT, data TEXT, updated_at TEXT, "
+            "PRIMARY KEY (folder, uid))"
+        )
+        db.execute(
+            "INSERT INTO headers (folder, uid, data, updated_at) "
+            "SELECT folder, uid, data, updated_at FROM headers_old"
+        )
+        db.execute("DROP TABLE headers_old")
+
+    if logger:
+        logger.log(
+            "INFO",
+            "schema_table_migrated",
+            {"table": "headers", "primary_key": ["folder", "uid"]},
+        )
 
 
 def _ensure_column(
