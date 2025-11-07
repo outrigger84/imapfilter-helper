@@ -20,10 +20,21 @@ The CLI parser and command implementations live in `core/cli.py`. The top-level 
 Invoke the CLI via the module or script:
 
 ```bash
-python -m core.cli run-all --dry-run
+python -m core.cli <command> [flags]
 # or
-./imapfilter_helper.py run-all --dry-run
+./imapfilter_helper.py <command> [flags]
 ```
+
+### Commands
+
+| Command | Purpose | Key flags |
+| --- | --- | --- |
+| `build-cache` | Fetches mail from the IMAP server and stores a local cache in `data/cache.db`. | `--all-folders` – scan every folder instead of just `INBOX`. |
+| `evaluate` | Loads rules from `rules/` and evaluates them against the cached messages, enqueueing matching actions. | `--dry-run` – report matches without mutating the database. |
+| `execute` | Executes any queued actions against the IMAP server. | `--dry-run` – preview without performing IMAP writes.<br>`--strict` – abort if required IMAP operations are missing or fail. |
+| `run-all` | Convenience command that runs `build-cache`, `evaluate`, and `execute` sequentially. | `--dry-run` – perform a full simulation without IMAP writes.<br>`--all-folders` – include every folder when building the cache.<br>`--strict` – stop on missing/failed IMAP operations during execute. |
+
+### Configuration and data locations
 
 The helper stores its cache database, log file, and secrets JSON under `data/` by default. Rules continue to be loaded from the `rules/` directory. These locations can be customised by constructing an `AppConfig` via `core.config.build_default_config()` with a different base directory.
 
