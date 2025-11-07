@@ -45,6 +45,7 @@ python rule_manager.py
 The console automatically discovers files under `rules/` and offers keyboard shortcuts for each option:
 
 * **Create / edit rules** – interactively manage the rule name, priority, conditions, actions, and any extra JSON fields.
+* **Scrollable rule browser** – navigate long rule lists with arrow keys, page-up/down, or quick keyboard shortcuts.
 * **Condition editor** – build nested `ALL`/`ANY` groups, add new header matchers, or tweak existing ones.
 * **Action editor** – adjust the primary action settings (type/target) and supply additional fields when needed.
 * **Priority management** – reorder rules with move-up/move-down shortcuts or jump straight to editing a priority value.
