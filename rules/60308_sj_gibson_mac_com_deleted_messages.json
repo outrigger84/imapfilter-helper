@@ -405,7 +405,10 @@
       }
     ]
   },
-  "action": {},
+  "action": {
+    "type": "move",
+    "target": "Deleted Messages"
+  },
   "comments": [
     "Rule disabled in Thunderbird",
     "Unsupported action: Mark unread",
