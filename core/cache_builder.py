@@ -71,8 +71,14 @@ def build_cache(
                 raw_hdr = msg_data[0][1]
                 hdr_str = raw_hdr.decode(errors="ignore")
                 db.execute(
-                    "INSERT OR REPLACE INTO headers VALUES(?,?,?,?)",
-                    (uid.decode(), folder, json.dumps({"header": hdr_str}), now_iso()),
+                    "INSERT OR REPLACE INTO headers (folder, uid, data, updated_at) "
+                    "VALUES(?,?,?,?)",
+                    (
+                        folder,
+                        uid.decode(),
+                        json.dumps({"header": hdr_str}),
+                        now_iso(),
+                    ),
                 )
 
             db.execute(
