@@ -12,10 +12,18 @@ from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 ActionRow = Tuple[int, str, str, str, str, int, str, str]
 
 
-def execute_actions(client, db, cfg, logger: JsonLogger) -> tuple[PhaseTimer, Dict[str, int]]:
-    show = cfg.logging.show_progress
-    strict = cfg.executor.strict
-    dry = cfg.executor.dry_run
+def execute_actions(
+    client: imaplib.IMAP4 | None,
+    db,
+    *,
+    show_progress: bool,
+    dry_run: bool,
+    strict: bool,
+    logger: JsonLogger,
+) -> tuple[PhaseTimer, Dict[str, int]]:
+    if not dry_run and client is None:
+        raise ValueError("An IMAP client is required when not running in dry-run mode")
+
     timer = PhaseTimer("execute")
 
     cur = db.cursor()
@@ -26,7 +34,7 @@ def execute_actions(client, db, cfg, logger: JsonLogger) -> tuple[PhaseTimer, Di
     actions: List[ActionRow] = cur.fetchall()
 
     if not actions:
-        logger.log("INFO", "execute_nothing", {"dry_run": dry}, console="ℹ️ No pending actions")
+        logger.log("INFO", "execute_nothing", {"dry_run": dry_run}, console="ℹ️ No pending actions")
         return timer, {"done": 0, "skipped": 0, "failed": 0, "suppressed": 0}
 
     chosen: List[ActionRow] = []
@@ -37,7 +45,7 @@ def execute_actions(client, db, cfg, logger: JsonLogger) -> tuple[PhaseTimer, Di
         a_id, uid, folder, target, rule_name, priority, status, created_at = row
         if uid in seen_uids:
             suppressed += 1
-            if not dry:
+            if not dry_run:
                 db.execute("UPDATE actions SET status='suppressed', executed_at=? WHERE id=?", (now_iso(), a_id))
             logger.log(
                 "INFO",
@@ -48,7 +56,7 @@ def execute_actions(client, db, cfg, logger: JsonLogger) -> tuple[PhaseTimer, Di
         seen_uids.add(uid)
         chosen.append(row)
 
-    if not dry:
+    if not dry_run:
         db.commit()
 
     grouped: Dict[tuple[str, str], List[Tuple[int, str, str, int]]] = {}
@@ -62,7 +70,7 @@ def execute_actions(client, db, cfg, logger: JsonLogger) -> tuple[PhaseTimer, Di
         dynamic_ncols=True,
         leave=True,
         position=0,
-        disable=not show,
+        disable=not show_progress,
     )
 
     stats = {"done": 0, "skipped": 0, "failed": 0, "suppressed": suppressed}
@@ -78,10 +86,10 @@ def execute_actions(client, db, cfg, logger: JsonLogger) -> tuple[PhaseTimer, Di
             dynamic_ncols=True,
             leave=False,
             position=1,
-            disable=not show,
+            disable=not show_progress,
         )
 
-        if dry:
+        if dry_run:
             logger.log(
                 "INFO",
                 "dry_action_group",
@@ -89,6 +97,8 @@ def execute_actions(client, db, cfg, logger: JsonLogger) -> tuple[PhaseTimer, Di
                 console=f"🧪 Dry run: {folder} → {target} ({len(uids)})",
             )
             continue
+
+        assert client is not None  # for type checkers
 
         try:
             sel_typ, _ = client.select(f'"{folder}"')
@@ -192,7 +202,7 @@ def execute_actions(client, db, cfg, logger: JsonLogger) -> tuple[PhaseTimer, Di
             f"   🚫  Suppressed (duplicates): {stats['suppressed']}\n"
             f"   💥  Failed: {stats['failed']}\n"
             f"   ⏱️  Duration: {timer.fmt()} ({timer.rate():.1f} msg/s)\n"
-            f"   {'🔒 STRICT' if strict else '✅ Completed'} {'(dry-run)' if dry else ''}\n"
+            f"   {'🔒 STRICT' if strict else '✅ Completed'} {'(dry-run)' if dry_run else ''}\n"
         ),
     )
     return timer, stats

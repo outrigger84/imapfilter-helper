@@ -10,8 +10,9 @@ from typing import Iterable, List
 from core.logging_utils import JsonLogger
 
 
-def imap_login(cfg, logger: JsonLogger) -> imaplib.IMAP4_SSL:
-    secrets_path = Path(cfg.paths.secrets_file)
+def imap_login(secrets_path: Path, logger: JsonLogger) -> imaplib.IMAP4_SSL:
+    """Establish an authenticated IMAP session using the provided secrets file."""
+    secrets_path = Path(secrets_path)
     if not secrets_path.exists():
         sys.exit(f"❌ Secrets file not found: {secrets_path}")
     with secrets_path.open(encoding="utf-8") as handle:
@@ -21,7 +22,7 @@ def imap_login(cfg, logger: JsonLogger) -> imaplib.IMAP4_SSL:
         "INFO",
         "imap_connect",
         {"host": secrets_cfg["host"], "user": secrets_cfg["username"]},
-        console=f"🔐 Connecting as {secrets_cfg['username']}"
+        console=f"🔐 Connecting as {secrets_cfg['username']}",
     )
     mail = imaplib.IMAP4_SSL(secrets_cfg["host"], secrets_cfg.get("port", 993))
     mail.login(secrets_cfg["username"], secrets_cfg["password"])
