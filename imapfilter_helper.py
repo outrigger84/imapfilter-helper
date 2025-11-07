@@ -6,13 +6,13 @@ import argparse
 from pathlib import Path
 from typing import Sequence
 
-from core.cache import build_cache
+from core.cache_builder import build_cache
 from core.config import build_default_config
+from core.database import init_db
 from core.executor import execute_actions
-from core.imap import imap_login, list_all_folders
+from core.imap_client import imap_login, list_all_folders
 from core.logging_utils import JsonLogger, PhaseTimer
-from core.rules import evaluate_rules, load_rules
-from data.database import init_db
+from core.rule_engine import evaluate_rules, load_rules
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,13 +44,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     base_dir = Path(__file__).parent.resolve()
     cfg = build_default_config(base_dir)
     logger = JsonLogger(cfg.paths.log_file)
-    db = init_db(cfg.paths.db_file)
+    db = init_db(cfg.paths.db_file, logger=logger)
 
     if args.cmd == "build-cache":
-        client = imap_login(cfg, logger)
+        client = imap_login(cfg.paths.secrets_file, logger)
         try:
             folders = list_all_folders(client) if args.all_folders else ["INBOX"]
-            build_cache(client, db, folders, cfg, logger)
+            build_cache(client, db, folders, show_progress=cfg.logging.show_progress, logger=logger)
         finally:
             client.logout()
         return 0
@@ -58,15 +58,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.cmd == "evaluate":
         cfg.executor.dry_run = args.dry_run
         rules = load_rules(cfg.paths.rules_dir, logger)
-        evaluate_rules(db, rules, cfg.executor.default_run_scope, cfg, logger)
+        evaluate_rules(
+            db,
+            rules,
+            scope=cfg.executor.default_run_scope,
+            dry_run=cfg.executor.dry_run,
+            show_progress=cfg.logging.show_progress,
+            logger=logger,
+        )
         return 0
 
     if args.cmd == "execute":
         cfg.executor.dry_run = args.dry_run
         cfg.executor.strict = args.strict
-        client = None if args.dry_run else imap_login(cfg, logger)
+        client = None if args.dry_run else imap_login(cfg.paths.secrets_file, logger)
         try:
-            execute_actions(client, db, cfg, logger)
+            execute_actions(
+                client,
+                db,
+                show_progress=cfg.logging.show_progress,
+                dry_run=cfg.executor.dry_run,
+                strict=cfg.executor.strict,
+                logger=logger,
+            )
         finally:
             if client is not None:
                 client.logout()
@@ -76,15 +90,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         cfg.executor.dry_run = args.dry_run
         cfg.executor.strict = args.strict
         run_timer = PhaseTimer("run-all")
-        client = imap_login(cfg, logger)
+        client = imap_login(cfg.paths.secrets_file, logger)
         try:
             folders = list_all_folders(client) if args.all_folders else ["INBOX"]
-            _cache_timer, folders_count, msg_count = build_cache(client, db, folders, cfg, logger)
+            _cache_timer, folders_count, msg_count = build_cache(client, db, folders, show_progress=cfg.logging.show_progress, logger=logger)
             rules = load_rules(cfg.paths.rules_dir, logger)
             _eval_timer, rules_count, matches = evaluate_rules(
-                db, rules, cfg.executor.default_run_scope, cfg, logger
+                db,
+                rules,
+                scope=cfg.executor.default_run_scope,
+                dry_run=cfg.executor.dry_run,
+                show_progress=cfg.logging.show_progress,
+                logger=logger,
             )
-            _exec_timer, stats = execute_actions(client, db, cfg, logger)
+            _exec_timer, stats = execute_actions(
+                client,
+                db,
+                show_progress=cfg.logging.show_progress,
+                dry_run=cfg.executor.dry_run,
+                strict=cfg.executor.strict,
+                logger=logger,
+            )
             run_timer.stop()
             summary_context = {
                 "duration_sec": run_timer.elapsed,
