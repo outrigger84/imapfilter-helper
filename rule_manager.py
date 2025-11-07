@@ -16,6 +16,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+try:  # pragma: no cover - terminal capability detection is environment-specific
+    import curses
+except Exception:  # pragma: no cover - gracefully degrade when curses is missing
+    curses = None  # type: ignore[assignment]
+
 from core.config import build_default_config
 from core.database import init_db
 from core.logging_utils import JsonLogger
@@ -112,6 +117,85 @@ def summarise_action(action: Any) -> str:
     if extras:
         summary += f" (+{len(extras)} extra field{'s' if len(extras) != 1 else ''})"
     return summary
+
+
+def interactive_menu(title: str, options: list[str]) -> int | None:
+    """Display *options* using an interactive, scrollable curses menu.
+
+    Returns the selected index, or ``None`` if the user aborts with ESC or ``q``.
+    Raises ``RuntimeError`` if curses support is unavailable in this environment."""
+
+    if curses is None or not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise RuntimeError("curses menu unavailable")
+
+    selected = 0
+    top = 0
+    aborted = False
+
+    def _run(stdscr: Any) -> None:
+        nonlocal selected, top, aborted
+        curses.curs_set(0)
+        stdscr.keypad(True)
+        try:
+            curses.use_default_colors()
+        except curses.error:  # pragma: no cover - not all terminals support this
+            pass
+
+        while True:
+            stdscr.erase()
+            height, width = stdscr.getmaxyx()
+            body_top = 2
+            body_height = max(1, height - body_top - 2)
+
+            stdscr.addnstr(0, 0, title, width - 1, curses.A_BOLD)
+
+            for offset in range(body_height):
+                index = top + offset
+                if index >= len(options):
+                    break
+                label = f"{index + 1:>3}. {options[index]}"
+                attr = curses.A_REVERSE if index == selected else curses.A_NORMAL
+                stdscr.addnstr(body_top + offset, 0, label, width - 1, attr)
+
+            help_text = "↑/↓ move  PgUp/PgDn jump  Enter select  ESC cancel"
+            stdscr.addnstr(height - 1, 0, help_text, width - 1, curses.A_DIM)
+            stdscr.refresh()
+
+            key = stdscr.getch()
+            if key in (curses.KEY_UP, ord("k")):
+                selected = max(0, selected - 1)
+            elif key in (curses.KEY_DOWN, ord("j")):
+                selected = min(len(options) - 1, selected + 1)
+            elif key in (curses.KEY_PPAGE,):
+                selected = max(0, selected - body_height)
+            elif key in (curses.KEY_NPAGE,):
+                selected = min(len(options) - 1, selected + body_height)
+            elif key in (curses.KEY_HOME,):
+                selected = 0
+            elif key in (curses.KEY_END,):
+                selected = len(options) - 1
+            elif key in (curses.KEY_ENTER, ord("\n"), ord("\r")):
+                return
+            elif key in (27, ord("q"), ord("Q")):
+                aborted = True
+                return
+            elif 32 <= key <= 126:
+                curses.beep()
+
+            # Adjust viewport to keep the current selection visible.
+            if selected < top:
+                top = selected
+            elif selected >= top + body_height:
+                top = selected - body_height + 1
+
+    try:
+        curses.wrapper(_run)
+    except curses.error as exc:  # pragma: no cover - terminal limitations
+        raise RuntimeError("curses menu unavailable") from exc
+
+    if aborted:
+        return None
+    return selected
 
 
 def ensure_group(node: Any) -> dict:
@@ -455,6 +539,24 @@ class RuleManager:
         if not self.rules:
             print("No rules are available yet.")
             return None
+        rule_labels = [
+            f"[{rule.priority:>4}] {rule.name} — {summarise_action(rule.data.get('action'))}"
+            for rule in self.rules
+        ]
+
+        try:
+            choice = interactive_menu("Available rules (sorted by priority):", rule_labels)
+            menu_used = True
+        except RuntimeError:
+            choice = None
+            menu_used = False
+
+        if choice is not None:
+            return self.rules[choice]
+
+        if menu_used:
+            return None
+
         while True:
             print("\nAvailable rules (sorted by priority):")
             for idx, rule in enumerate(self.rules, start=1):
