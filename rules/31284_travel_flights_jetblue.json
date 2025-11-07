@@ -1,0 +1,28 @@
+{
+  "name": "Travel » Flights » JetBlue",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "jetblueairways@email.jetblue.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@jetblue.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@change.jetblue.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/JetBlue"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

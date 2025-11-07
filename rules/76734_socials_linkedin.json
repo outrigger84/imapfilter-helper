@@ -1,0 +1,52 @@
+{
+  "name": "Socials » Linkedin",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "invitations@linkedin.com"
+      },
+      {
+        "header": "from",
+        "contains": "linkedin@e.linkedin.com"
+      },
+      {
+        "header": "from",
+        "contains": "messages-noreply@linkedin.com"
+      },
+      {
+        "header": "from",
+        "contains": "notifications-noreply@linkedin.com"
+      },
+      {
+        "header": "from",
+        "contains": "messaging-digest-noreply@linkedin.com"
+      },
+      {
+        "header": "from",
+        "contains": "editors-noreply@linkedin.com"
+      },
+      {
+        "header": "from",
+        "contains": "updates-noreply@linkedin.com"
+      },
+      {
+        "header": "from",
+        "contains": "inmail-hit-reply@linkedin.com"
+      },
+      {
+        "header": "from",
+        "contains": "hit-reply@linkedin.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Socials/Linkedin"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

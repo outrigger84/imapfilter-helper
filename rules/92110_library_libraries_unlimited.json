@@ -1,0 +1,24 @@
+{
+  "name": "Library » Libraries Unlimited",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info@librariesunlimited.org.uk"
+      },
+      {
+        "header": "from",
+        "contains": "marketing@librariesunlimited.org.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Library/Libraries Unlimited"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

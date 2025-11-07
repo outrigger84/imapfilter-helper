@@ -1,0 +1,36 @@
+{
+  "name": "Newsletters » Microsoft",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "Microsoftstore@microsoftstore.microsoft.com"
+      },
+      {
+        "header": "from",
+        "contains": "microsoftstore@microsoftstoreemail.com"
+      },
+      {
+        "header": "from",
+        "contains": "microsoft@engage.microsoft.com"
+      },
+      {
+        "header": "from",
+        "contains": "bingai@engage.microsoft.com"
+      },
+      {
+        "header": "subject",
+        "contains": "Tips to search your PC and the web, and be more productive every day"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Microsoft"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Correspondence » writetothem.com",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "fyr-do-not-reply@writetothem.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Correspondence/writetothem.com"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

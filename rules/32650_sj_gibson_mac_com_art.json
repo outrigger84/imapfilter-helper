@@ -1,0 +1,20 @@
+{
+  "name": "sj.gibson@mac.com » Art",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "exeter@castlefineart.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Art"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

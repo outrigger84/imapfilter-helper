@@ -1,0 +1,64 @@
+{
+  "name": "Newsletters » Blithfield SC",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "m.a.boyson_at_send_mailchimpapp_com_vsxv5256c8hy5d_2d696453@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "margaret.boyson_at_96003925_mailchimpapp_com_vsxv8935c8hyab_5c696453@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "noelle.m.wright_at_send_mailchimpapp_com_vsxv55b4c8hya2_f6696453@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "penguinsylv_at_96003925_mailchimpapp_com_vsxv9fa7c8hyd0_9b696453@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "alan.skitt_at_96003925_mailchimpapp_com_vsxvffb2c8hybe_c4696453@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "alan.skitt_at_send_mailchimpapp_com_vsxv75c3c8hyb2_fa696453@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "alastair.reid2_at_96003925_mailchimpapp_com_vsxvdeddc8hy11_29696453@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "alastair.reid2_at_send_mailchimpapp_com_vsxv27e9c8hy6f_f1696453@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "i_ferguson_at_96003925_mailchimpapp_com_vsxv9b08c8hy6c_d1696453@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "m.a.boyson_at_96003925_mailchimpapp_com_vsxv5126c8hy89_3e696453@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "penguinsylv_at_send_mailchimpapp_com_vsxvac42c8hy1c_09696453@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "sailing_at_blithfield_org_uk_vsxv6184c8hya0_e7696453@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Blithfield SC"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Notifications » OF",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "mail@lpsg.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@onlyfans.com"
+      },
+      {
+        "header": "from",
+        "contains": "membership_at_squirt_org_vs481583ct8kbf_306n8492@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "system@justfor.fans"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/OF"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

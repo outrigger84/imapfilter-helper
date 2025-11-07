@@ -1,0 +1,28 @@
+{
+  "name": "21 Cleveland Street » Insurance",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "sales@homeprotect.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@homeprotect.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "service@info.homeprotect.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Insurance"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

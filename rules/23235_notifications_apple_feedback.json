@@ -1,0 +1,32 @@
+{
+  "name": "Notifications » Apple » Feedback",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "repair2-feedback@euro.apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "retailresearch@insideapple.apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "support.survey@euro.apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "retail.feedback@euro.apple.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Apple/Feedback"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Notifications » Apple » Support",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "applesupport@email.apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "donotreply@email.apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "donotreply@apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "acsupportcase@apple.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Apple/Support"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Travel » Flights » Wizz Air",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "notifications@notifications.wizzair.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@wizzair.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/Wizz Air"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Newsletters » Whoop",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "reply@official.whoop.com"
+      },
+      {
+        "header": "to",
+        "contains": "reply@official.whoop.com"
+      },
+      {
+        "header": "from",
+        "contains": "reply@mail.whoop.com"
+      },
+      {
+        "header": "from",
+        "contains": "reply@email.whoop.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Whoop"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Memberships » British Cycling",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info@updates-britishcycling.org.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@mg.britishcycling.org.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Memberships/British Cycling"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

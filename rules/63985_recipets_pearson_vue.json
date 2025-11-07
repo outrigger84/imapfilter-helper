@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » Pearson VUE",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "pearsonvueconfirmation@pearson.com"
+      },
+      {
+        "header": "to",
+        "contains": "pearsonvueconfirmation@pearson.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Pearson VUE"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

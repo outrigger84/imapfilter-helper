@@ -1,0 +1,28 @@
+{
+  "name": "Gift Vouchers » xexec",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@xexec.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@xexec.com"
+      },
+      {
+        "header": "from",
+        "contains": "retailvouchers@xexec.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Gift Vouchers/xexec"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

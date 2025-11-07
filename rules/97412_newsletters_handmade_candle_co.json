@@ -1,0 +1,23 @@
+{
+  "name": "Newsletters » Handmade Candle Co",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "info@hmcandleco.co.uk"
+      },
+      {
+        "header": "subject",
+        "regex": "^(?!.*Order\\ \\#).*"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Handmade Candle Co"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird"
+  ]
+}

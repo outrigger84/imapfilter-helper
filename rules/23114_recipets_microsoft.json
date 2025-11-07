@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » Microsoft",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "microsoft-noreply@microsoft.com"
+      },
+      {
+        "header": "from",
+        "contains": "stremail@microsoft.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Microsoft"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

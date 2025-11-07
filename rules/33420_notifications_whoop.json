@@ -1,0 +1,24 @@
+{
+  "name": "Notifications » Whoop",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@whoop.com"
+      },
+      {
+        "header": "from",
+        "contains": "orders@whoop.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Whoop"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "name": "Personal » Finance » Trading » Trading212",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info@trading212.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@mail.trading212.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@info.trading212.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@news.trading212.com"
+      },
+      {
+        "header": "from",
+        "contains": "Trading212@proxydocs.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Finance/Trading/Trading212"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

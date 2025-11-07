@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » AliExpress",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "isnjjxtgni@privaterelay.appleid.com"
+      },
+      {
+        "header": "from",
+        "regex": "^(?!.*transaction_at_notice_aliexpress_com).*"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/AliExpress"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Packt",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "contact@packtpub.com"
+      },
+      {
+        "header": "from",
+        "contains": "packt@mail.packtpub.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Packt"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

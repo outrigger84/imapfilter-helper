@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Hope For Children",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hope@hope4c.org"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Hope For Children"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

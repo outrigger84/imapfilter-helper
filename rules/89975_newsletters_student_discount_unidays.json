@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Student Discount » Unidays",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "offers@m.myunidays.com"
+      },
+      {
+        "header": "from",
+        "contains": "study@m.myunidays.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@info.myunidays.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Student Discount/Unidays"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

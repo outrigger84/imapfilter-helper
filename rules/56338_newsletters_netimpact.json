@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » NetImpact",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info@netimpact.org"
+      },
+      {
+        "header": "from",
+        "contains": "sustainablecities@netimpact.org"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/NetImpact"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

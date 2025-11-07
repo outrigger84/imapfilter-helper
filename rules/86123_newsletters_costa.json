@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Costa",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "costa@costaclub.costa.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "costacoffee@club.costa.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Costa"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

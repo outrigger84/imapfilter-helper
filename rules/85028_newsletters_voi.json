@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Voi",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@mkt.voiapp.io"
+      },
+      {
+        "header": "from",
+        "contains": "info@trans.voiapp.io"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Voi"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

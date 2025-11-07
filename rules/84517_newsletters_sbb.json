@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » SBB",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "mailings@mailings.sbb.ch"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/SBB"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

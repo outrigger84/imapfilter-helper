@@ -1,0 +1,24 @@
+{
+  "name": "Notifications » Discord",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "notifications@discord.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@discord.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Discord"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

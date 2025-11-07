@@ -1,0 +1,28 @@
+{
+  "name": "Personal » Health » Presecription Certificate",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "nhs.prescription.prepayment.certificate@notifications.service.gov.uk"
+      },
+      {
+        "header": "from",
+        "contains": "luxtonspharmacy@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "nhsbsa.ppc1@nhsbsa.nhs.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Health/Presecription Certificate"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

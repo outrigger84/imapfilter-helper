@@ -1,0 +1,68 @@
+{
+  "name": "Notifications » Amazon",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "order-update@amazon.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "shipment-tracking@amazon.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "payments-update@amazon.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "marketplace-messages@amazon.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@amazon.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "donotreply@amazon.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "prime@amazon.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "marketplace-messages@amazon.com"
+      },
+      {
+        "header": "from",
+        "contains": "customer-reviews-messages@amazon.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "account-update@amazon.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "auto-confirm@amazon.com"
+      },
+      {
+        "header": "from",
+        "contains": "order-update@amazon.com"
+      },
+      {
+        "header": "from",
+        "contains": "shipment-tracking@amazon.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Amazon"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

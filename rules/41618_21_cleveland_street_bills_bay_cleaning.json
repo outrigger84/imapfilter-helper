@@ -1,0 +1,20 @@
+{
+  "name": "21 Cleveland Street » Bills » Bay Cleaning",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "invoicing@messaging.squareup.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Bills/Bay Cleaning"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

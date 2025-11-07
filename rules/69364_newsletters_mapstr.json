@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Mapstr",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@mapstr.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@newsletters.mapstr.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Mapstr"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

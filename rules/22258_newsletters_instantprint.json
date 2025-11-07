@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Instantprint",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@email.instantprint.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "hello@hello.instantprint.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Instantprint"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

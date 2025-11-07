@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » AbeBooks",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "news@sender.abebooks.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "reply@sender.abebooks.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/AbeBooks"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Fitness » Ben Winn » TrueCoach",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "swoletron@truecoach.co"
+      },
+      {
+        "header": "subject",
+        "regex": "^\\[TrueCoach\\]"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Fitness/Ben Winn/TrueCoach"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

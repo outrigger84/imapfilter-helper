@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Agile Rabbit",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "contact@agile-rabbit.com"
+      },
+      {
+        "header": "from",
+        "contains": "agilerabbitevents@gmail.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Agile Rabbit"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

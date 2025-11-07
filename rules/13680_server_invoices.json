@@ -1,0 +1,20 @@
+{
+  "name": "Server » Invoices",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@webhosting.uk.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Server/Invoices"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

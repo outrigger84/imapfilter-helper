@@ -1,0 +1,24 @@
+{
+  "name": "Events » Exeter ProductTank",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "meetup-group-rrzjyngh-announce_at_email_meetup_com_rq76hqz9f6_f3f2121e@privaterelay.appleid.com"
+      },
+      {
+        "header": "from",
+        "contains": "meetup-group-RRzJyNgH-announce_at_email_meetup_com_rq76hqz9f6_f3f2121e@privaterelay.appleid.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Events/Exeter ProductTank"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

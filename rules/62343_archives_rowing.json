@@ -1,0 +1,144 @@
+{
+  "name": "Archives » Rowing",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "jbmonks.btinternet.com@send.mailchimpapp.com"
+      },
+      {
+        "header": "from",
+        "contains": "secretary@exetercanoeclub.org.uk"
+      },
+      {
+        "header": "from",
+        "contains": "secretary@exewatersports.org"
+      },
+      {
+        "header": "from",
+        "contains": "jerrycopping42@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "kevindentith@hotmail.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "jmtanner@btinternet.com"
+      },
+      {
+        "header": "from",
+        "contains": "lauren.donohue@outlook.com"
+      },
+      {
+        "header": "from",
+        "contains": "pwrows@yahoo.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "facilities@exewatersports.org"
+      },
+      {
+        "header": "from",
+        "contains": "secretary@exeterrowingclub.com"
+      },
+      {
+        "header": "from",
+        "contains": "receipts+acct_19sjlngmf8nl1mdm@stripe.com"
+      },
+      {
+        "header": "from",
+        "contains": "messaging-service@post.xero.com"
+      },
+      {
+        "header": "from",
+        "contains": "kevin.dentith@devon.gov.uk"
+      },
+      {
+        "header": "from",
+        "contains": "lisa_cocks@outlook.com"
+      },
+      {
+        "header": "from",
+        "contains": "membership@exeterrowingclub.com"
+      },
+      {
+        "header": "from",
+        "contains": "hilarybastone@hotmail.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "bob@weara.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "lesleywillmo@hotmail.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "shop@exeterrowingclub.com"
+      },
+      {
+        "header": "from",
+        "contains": "parc.chairman@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "parc.vicechairman@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "s.a.worley@btinternet.com"
+      },
+      {
+        "header": "from",
+        "contains": "neiltooley@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "nikkihutchingsdunn@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "raymallett9@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "martinstentiford@hotmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "tess.preston@hotmail.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "skiffcaptain@paigntonarc.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "titchvet@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "membership@exeterrc.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "treasurer@exeterrowingclub.com"
+      },
+      {
+        "header": "from",
+        "contains": ""
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Archives/Rowing"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Notifications » PaperlessPost",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "paperlesspost@paperlesspost.com"
+      },
+      {
+        "header": "from",
+        "contains": "paperlesspost@accounts.paperlesspost.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/PaperlessPost"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

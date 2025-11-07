@@ -1,0 +1,36 @@
+{
+  "name": "Newsletters » Amazon",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "store-news@amazon.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "vfe-campaign-response@amazon.com"
+      },
+      {
+        "header": "from",
+        "contains": "aws-marketing-email-replies@amazon.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@business.amazon.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@amazonmusic.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Amazon"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

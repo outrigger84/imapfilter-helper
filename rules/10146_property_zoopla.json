@@ -1,0 +1,24 @@
+{
+  "name": "Property » Zoopla",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "news@email.zoopla.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "property.insights@email.zoopla.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Property/Zoopla"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

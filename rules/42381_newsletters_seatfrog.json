@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » SeatFrog",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply_at_hello_seatfrog_com_aw9fhjc84m_6e888b82@privaterelay.appleid.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/SeatFrog"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

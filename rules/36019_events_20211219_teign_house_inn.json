@@ -1,0 +1,20 @@
+{
+  "name": "Events » 20211219 - Teign House Inn",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "teignhouseinn@gmail.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Events/20211219 - Teign House Inn"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

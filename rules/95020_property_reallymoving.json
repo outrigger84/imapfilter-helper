@@ -1,0 +1,20 @@
+{
+  "name": "Property » reallymoving",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "movingchecklist_at_marketing_reallymoving_com_prv8d28q8ba15s_m1fs6453@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Property/reallymoving"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

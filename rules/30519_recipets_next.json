@@ -1,0 +1,36 @@
+{
+  "name": "Recipets » Next",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "donotreply@nextemail.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "DoNotReply@nextemail.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "DoNotReply@NextEmail.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "donotreply@next.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "ereceipt@next.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Next"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

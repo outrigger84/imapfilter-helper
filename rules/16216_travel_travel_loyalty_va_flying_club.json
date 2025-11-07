@@ -1,0 +1,28 @@
+{
+  "name": "Travel » Travel Loyalty » VA Flying Club",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "flyingclub@emails.virginatlantic.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreplyvirginflyingclub@express.medallia.com"
+      },
+      {
+        "header": "from",
+        "contains": "virginatlantic@emails.virginatlantic.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Travel Loyalty/VA Flying Club"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

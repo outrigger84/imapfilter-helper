@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Slug And Lettuce",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "slugandlettuce@emails.slugandlettuce.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Slug And Lettuce"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

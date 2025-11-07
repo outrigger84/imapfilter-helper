@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Holland and Barrett",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@email\\.hollandandbarrett\\.com$"
+      },
+      {
+        "header": "from",
+        "contains": "email@mailer.hollandandbarrett.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Holland and Barrett"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

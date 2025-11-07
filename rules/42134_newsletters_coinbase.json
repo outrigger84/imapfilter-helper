@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Coinbase",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "marketing@cb.mail.coinbase.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@mail.coinbase.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Coinbase"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

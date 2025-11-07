@@ -1,0 +1,136 @@
+{
+  "name": "sj.gibson@mac.com » Recipets",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "customerservice@bostonseeds.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "automailer@e-paycapita.com"
+      },
+      {
+        "header": "from",
+        "contains": "info_at_everestexeter_co_uk_b2b2d3qcx079nd_q9660336@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "support@loststock.co"
+      },
+      {
+        "header": "from",
+        "contains": "support@noodlesoft.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@onvi.com"
+      },
+      {
+        "header": "from",
+        "contains": "app@clover.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@bartaco.com"
+      },
+      {
+        "header": "from",
+        "contains": "messenger@messaging.squareup.com"
+      },
+      {
+        "header": "from",
+        "contains": "receipts@excaliburhealth.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply_at_e_fiverr_com_25qnhdq9x8_c807dbf2@privaterelay.appleid.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@gap.ecrebo.com"
+      },
+      {
+        "header": "from",
+        "contains": "receipts@messaging.squareup.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@em.grammarly.com"
+      },
+      {
+        "header": "from",
+        "contains": "bookings@headout.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@hutchhouseplants.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "invoice+statements+adk6opzbepkr0kj70s42c01upm0hlfl2@stripe.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@onedine.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@ngngdesign.com"
+      },
+      {
+        "header": "from",
+        "contains": "sales@blinds-2go.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@sumup.link"
+      },
+      {
+        "header": "from",
+        "contains": "cfonline@cardfactory.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "support@dailyom.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@thegoodtill.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@hmcandleco.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "notification@pay.gov"
+      },
+      {
+        "header": "from",
+        "contains": "natalie@womanzworld.com"
+      },
+      {
+        "header": "from",
+        "contains": "uk@thomann.de"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@shopifyemail.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@loebeshop.dk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

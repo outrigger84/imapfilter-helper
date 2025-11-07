@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Easyjet",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "donotreply@marketing.easyjet.com"
+      },
+      {
+        "header": "from",
+        "contains": "inspiration@travel.easyjet.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Easyjet"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

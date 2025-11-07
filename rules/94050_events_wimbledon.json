@@ -1,0 +1,28 @@
+{
+  "name": "Events » Wimbledon",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "@championships.aeltc-email.com"
+      },
+      {
+        "header": "from",
+        "contains": "@wimbledon.aeltc-email.com"
+      },
+      {
+        "header": "from",
+        "contains": "@wimbledon.tickets"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Events/Wimbledon"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

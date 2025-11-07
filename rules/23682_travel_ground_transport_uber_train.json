@@ -1,0 +1,24 @@
+{
+  "name": "Travel » Ground Transport » Uber Train",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "subject",
+        "contains": "Your tickets to"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@uber.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Ground Transport/Uber Train"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

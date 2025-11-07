@@ -1,0 +1,24 @@
+{
+  "name": "Personal » Health » Patient Access",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "marketing@mail.patientaccess.com"
+      },
+      {
+        "header": "from",
+        "contains": "medication_assistant@mail.patientaccess.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Health/Patient Access"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

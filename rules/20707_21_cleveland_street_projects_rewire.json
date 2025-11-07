@@ -1,0 +1,24 @@
+{
+  "name": "21 Cleveland Street » Projects » Rewire",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info@electricc.co.uk"
+      },
+      {
+        "header": "to",
+        "contains": "info@electricc.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Projects/Rewire"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

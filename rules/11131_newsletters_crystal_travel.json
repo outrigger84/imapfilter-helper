@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Crystal Travel",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info@crystaltravel.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "info@services.crystaltravel.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Crystal Travel"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

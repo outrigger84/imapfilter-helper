@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Brickwatch",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "alerts@brickwatch.net"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Brickwatch"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

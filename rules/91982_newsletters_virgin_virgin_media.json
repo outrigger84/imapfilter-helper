@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Virgin » Virgin Media",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "email@em.virginmedia.com"
+      },
+      {
+        "header": "from",
+        "contains": "email@em.virginmedia.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Virgin/Virgin Media"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

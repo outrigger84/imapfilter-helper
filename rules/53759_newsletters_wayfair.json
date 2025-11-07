@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Wayfair",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "editor@members.wayfair.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@service.wayfair.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Wayfair"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

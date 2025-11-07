@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Bristol Airport",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "donotreply_at_bristolairport-info_com_cek3q9rebcz0r8_98bg0336@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "updates_at_bristolairport-info_com_c7k5q3r4b2zfr1_94bg0336@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Bristol Airport"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "name": "Travel » Trips » 2022 - Crete",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "subject",
+        "contains": "Fwd: Updated Journey Details - OTS-28022022203015-99654-1"
+      },
+      {
+        "header": "subject",
+        "contains": "Fwd: Journey Amendment - OTS-28022022203015-99654-1"
+      },
+      {
+        "header": "subject",
+        "contains": "Fwd: Journey Amendment - OTS-28022022203015-99654-2"
+      },
+      {
+        "header": "subject",
+        "contains": "Fwd: Updated Journey Details - OTS-28022022203015-99654-2"
+      },
+      {
+        "header": "from",
+        "contains": "hello@thinkvilla.gr"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Trips/2022 - Crete"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Aer Lingus",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "aerlingus@fly.aerlingus.com"
+      },
+      {
+        "header": "from",
+        "contains": "aerlingus@flights.aerlingus.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Aer Lingus"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

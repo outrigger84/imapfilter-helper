@@ -1,0 +1,23 @@
+{
+  "name": "sj.gibson@mac.com » Deleted Messages [Verification Codes - Subway Rewards Code]",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "noreply-uk@subwayrewards/uk"
+      },
+      {
+        "header": "subject",
+        "contains": "Here's that code you requested"
+      }
+    ]
+  },
+  "action": {},
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Delete",
+    "Unsupported action: Mark unread",
+    "Unsupported condition: age in days is greater than 0"
+  ]
+}

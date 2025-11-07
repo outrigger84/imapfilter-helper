@@ -1,0 +1,40 @@
+{
+  "name": "Notifications » American Express",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "americanexpress@welcome.aexp.com"
+      },
+      {
+        "header": "from",
+        "contains": "AmericanExpress@welcome.americanexpress.com"
+      },
+      {
+        "header": "from",
+        "contains": "amexnetwork@email.amexnetwork.com"
+      },
+      {
+        "header": "from",
+        "contains": "onlineservices@welcome.americanexpress.com"
+      },
+      {
+        "header": "from",
+        "contains": "OnlineServices@welcome.americanexpress.com"
+      },
+      {
+        "header": "from",
+        "contains": "americanexpress@aexpfeedback.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/American Express"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

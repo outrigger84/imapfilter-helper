@@ -1,0 +1,20 @@
+{
+  "name": "Gift Vouchers » Apple",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "subject",
+        "contains": "You have received a gift certificate from Apple"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Gift Vouchers/Apple"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

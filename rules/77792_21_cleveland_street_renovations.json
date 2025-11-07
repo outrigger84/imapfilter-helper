@@ -1,0 +1,24 @@
+{
+  "name": "21 Cleveland Street » Renovations",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "donna@blackmetaldoors.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "quickbooks@notification.intuit.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Renovations"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

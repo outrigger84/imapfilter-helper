@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » American Express",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "americanexpress@email.americanexpress.com"
+      },
+      {
+        "header": "from",
+        "contains": "americanexpress@feedbackemail.americanexpress.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/American Express"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

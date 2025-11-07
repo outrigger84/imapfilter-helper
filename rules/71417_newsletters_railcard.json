@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Railcard",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "news@email.railcard.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@railcards.gwr.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Railcard"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

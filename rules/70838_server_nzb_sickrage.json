@@ -1,0 +1,20 @@
+{
+  "name": "Server » NZB » sickrage",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "echel0n@sickrage.ca"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Server/NZB/sickrage"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

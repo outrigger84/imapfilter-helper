@@ -1,0 +1,44 @@
+{
+  "name": "sj.gibson@mac.com » Registrations",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "accounts-noreply@collectforever.com"
+      },
+      {
+        "header": "from",
+        "contains": "brickwatch@brickwatch.net"
+      },
+      {
+        "header": "subject",
+        "contains": "Thanks for creating an account with Zoopla"
+      },
+      {
+        "header": "subject",
+        "contains": "Welcome to Your Dyson"
+      },
+      {
+        "header": "from",
+        "contains": "customersupport@waitrose.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "account@info.americangolf.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "customer.care_at_samsonite_com_z9d84321nzrb01_7djk8492@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Registrations"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

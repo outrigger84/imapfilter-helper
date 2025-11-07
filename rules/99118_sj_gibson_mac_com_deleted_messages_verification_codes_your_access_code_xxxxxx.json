@@ -1,0 +1,19 @@
+{
+  "name": "sj.gibson@mac.com » Deleted Messages [Verification Codes - Your access code: XXXXXX]",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "subject",
+        "contains": "Your access code:"
+      }
+    ]
+  },
+  "action": {},
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Delete",
+    "Unsupported action: Mark unread",
+    "Unsupported condition: age in days is greater than 0"
+  ]
+}

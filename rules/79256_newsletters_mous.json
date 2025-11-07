@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Mous",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@mous.co"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Mous"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

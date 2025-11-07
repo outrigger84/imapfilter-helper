@@ -1,0 +1,20 @@
+{
+  "name": "Notifications » Goal Plans",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support_at_goalplans_com_779ddk7xgx8492_7f0fdd90@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Goal Plans"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

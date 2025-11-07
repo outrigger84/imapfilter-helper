@@ -1,0 +1,28 @@
+{
+  "name": "Travel » Flights » Air Asia",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "itineraryns@airasia.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@ededm.airasia.com"
+      },
+      {
+        "header": "from",
+        "contains": "itinerary@myses01.airasia.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/Air Asia"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Property » Rental » Tenancy Deposit Scheme",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply@tenancydepositscheme.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Property/Rental/Tenancy Deposit Scheme"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

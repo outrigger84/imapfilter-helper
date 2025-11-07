@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Tribe",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "team@wearetribe.co"
+      },
+      {
+        "header": "from",
+        "contains": "tom@wearetribe.co"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Tribe"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

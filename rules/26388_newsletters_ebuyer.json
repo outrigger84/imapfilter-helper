@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Ebuyer",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply@ebuyer.com"
+      },
+      {
+        "header": "from",
+        "contains": "offers@marketing.ebuyer.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Ebuyer"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

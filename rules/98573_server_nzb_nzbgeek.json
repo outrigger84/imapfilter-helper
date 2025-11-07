@@ -1,0 +1,20 @@
+{
+  "name": "Server » NZB » NzbGeek",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info@nzbgeek.info"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Server/NZB/NzbGeek"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

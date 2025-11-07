@@ -1,0 +1,28 @@
+{
+  "name": "Personal » Banking » Barclays",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "barclays@emails.barclays.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "barclayscustomerfeedback@emails.barclays.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "email.correspondence@assure2.barclays.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Banking/Barclays"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

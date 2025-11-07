@@ -1,0 +1,19 @@
+{
+  "name": "Personal » Finance » Trading » Trading212 » Dividend Experiment",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@thedividendexperiment.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Finance/Trading/Trading212/Dividend Experiment"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird"
+  ]
+}

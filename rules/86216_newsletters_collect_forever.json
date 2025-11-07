@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Collect Forever",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "reply@e.upperdeck.com"
+      },
+      {
+        "header": "from",
+        "contains": "reply@e.collectforever.com"
+      },
+      {
+        "header": "to",
+        "contains": "reply@e.collectforever.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Collect Forever"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

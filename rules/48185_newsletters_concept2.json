@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Concept2",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "ranking@concept2.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@concept2.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Concept2"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

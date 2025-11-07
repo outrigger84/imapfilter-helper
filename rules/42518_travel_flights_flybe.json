@@ -1,0 +1,24 @@
+{
+  "name": "Travel » Flights » FlyBe",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "contact.centre@flybe.com"
+      },
+      {
+        "header": "from",
+        "contains": "do_not_reply@bookings.flybe.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/FlyBe"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

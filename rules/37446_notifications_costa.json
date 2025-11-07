@@ -1,0 +1,24 @@
+{
+  "name": "Notifications » Costa",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "costa-customersatisfaction@express.fra1.medallia.eu"
+      },
+      {
+        "header": "from",
+        "contains": "customersatisfactionsurvey.noreply@costacoffee.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Costa"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

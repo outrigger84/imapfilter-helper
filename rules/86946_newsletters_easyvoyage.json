@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » EasyVoyage",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "newsletter@info.easyvoyage.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "newsletter@news.easyvoyage.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "newsletter@nl.easyvoyage.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/EasyVoyage"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

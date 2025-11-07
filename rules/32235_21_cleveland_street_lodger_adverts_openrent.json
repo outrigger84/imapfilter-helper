@@ -1,0 +1,24 @@
+{
+  "name": "21 Cleveland Street » Lodger » Adverts » OpenRent",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "@user.openrent.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@openrent.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Lodger/Adverts/OpenRent"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

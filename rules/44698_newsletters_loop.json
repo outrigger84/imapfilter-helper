@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Loop",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "newsletter@loop.homes"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Loop"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

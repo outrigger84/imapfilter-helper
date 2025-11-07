@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Greggs",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@emails.greggs.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "hello@email.greggs.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Greggs"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

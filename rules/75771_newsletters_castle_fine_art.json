@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Castle Fine Art",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@email.castlefineart.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@email.castlegalleries.com"
+      },
+      {
+        "header": "from",
+        "contains": "store@email.castlefineart.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Castle Fine Art"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

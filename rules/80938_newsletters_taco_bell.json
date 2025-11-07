@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Taco Bell",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply_at_tacobell_co_uk_6nxk82pjqq_e1eea99d@privaterelay.appleid.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Taco Bell"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

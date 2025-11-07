@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » The Independant",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info_at_email_independent_co_uk_rht9255gg5c9d2_mc4b8492@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "customerservices_at_independent_co_uk_rht6255gg97bd2_mbdb8492@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/The Independant"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

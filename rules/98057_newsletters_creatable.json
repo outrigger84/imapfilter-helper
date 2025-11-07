@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Creatable",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@creatable.co"
+      },
+      {
+        "header": "from",
+        "contains": "commerce@creatabledeals.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Creatable"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

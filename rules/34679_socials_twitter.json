@@ -1,0 +1,28 @@
+{
+  "name": "Socials » Twitter",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "verify@twitter.com"
+      },
+      {
+        "header": "from",
+        "contains": "verify_at_x_com_pv5ffcz62186nf_t32k8492@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "verify@x.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Socials/Twitter"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

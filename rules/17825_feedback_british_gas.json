@@ -1,0 +1,20 @@
+{
+  "name": "Feedback » British Gas",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "feedback@britishgas.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Feedback/British Gas"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

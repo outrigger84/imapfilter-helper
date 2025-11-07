@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » MBA Exchange",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "webmaster@mba-exchange.com"
+      },
+      {
+        "header": "to",
+        "contains": "webmaster@mba-exchange.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/MBA Exchange"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

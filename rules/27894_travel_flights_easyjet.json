@@ -1,0 +1,36 @@
+{
+  "name": "Travel » Flights » EasyJet",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "donotreply@easyjet.com"
+      },
+      {
+        "header": "from",
+        "contains": "donotreply@info.easyjet.com"
+      },
+      {
+        "header": "from",
+        "contains": "bookings@info.easyjet.com"
+      },
+      {
+        "header": "from",
+        "contains": "generationeasyjet@email.easyjet.com"
+      },
+      {
+        "header": "from",
+        "contains": "bookings@email.easyjet.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/EasyJet"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

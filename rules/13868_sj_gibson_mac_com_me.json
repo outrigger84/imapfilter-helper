@@ -1,0 +1,44 @@
+{
+  "name": "sj.gibson@mac.com » ME",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "steve.gibson@metoffice.gov.uk"
+      },
+      {
+        "header": "from",
+        "contains": "sjgibson@fastmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "sj.gibson21@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "sj.gibson@me.com"
+      },
+      {
+        "header": "from",
+        "contains": "sj.gibson@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "s.j.gibson@exeter.ac.uk"
+      },
+      {
+        "header": "from",
+        "contains": "stephen.gibson@bma.org.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "*ME"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

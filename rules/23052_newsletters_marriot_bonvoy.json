@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Marriot Bonvoy",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "marriottbonvoy@email-marriott.com"
+      },
+      {
+        "header": "from",
+        "contains": "marriottvacationclub@email1.marriott-vacations.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Marriot Bonvoy"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

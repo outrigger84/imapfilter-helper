@@ -1,0 +1,414 @@
+{
+  "name": "sj.gibson@mac.com » Deleted Messages",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "Info.66691300379561684157@q9U5ld.qubebanking.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.04812427595432776843@FOTufV.cremants.lu >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.95648921309925295381@ZRmC3F.kalevala-welt.ru >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.77770722952769085243@iRBeDX.mbsolar.pk >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.48187754821878365044@SVyfPr.izotomi.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.17885920073097985684@I7i9ZR.anderwinter.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.19678234887205604043@Pn6ztc.cloyds.net >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.43573810632295811692@6tisiv.ciudadanooceano.org >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.09236528077830751178@UcqtKD.roleplus.app >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.36357626328401221335@6KtCjo.halsanhalat.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.57262321824241156663@X6zXJm.pyramide-formations.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.29239717758685914341@GcnONh.additifs.org >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.23284695404492387980@lbyG1c.plorti.sbs >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.55813965912027893337@ouDAlQ.crcphotoworks.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.52247523562902927671@5t4xED.norvegien-lamaregriseau.fr >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.51789274569296354397@Qm9fES.guerardelle.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.85368786866803313843@lweeWg.tribunaldearbitraje.org >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.99912850848269463960@wnxf1S.mummonmokit.fi >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.94337929450215273431@BqrrFQ.pi-pro.eu >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.48676041190960387319@N3Bfed.roadguide.ph >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.28600885927433921416@ueUf8U.travelclub.space >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.82341858328913718665@8vJZB6.doove.org >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.66313491494225155274@ZNGZpV.noord.net >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.83990172062171683668@NRpLED.burleyconstruction.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.24845538561635364335@Q2Dd3F.kodsmithprojects.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.59416125751340919802@Dxbk23.grupogabriel.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.68947070392311485504@cfNbEJ.graphene-investmentsmanagers.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.03817158223577578502@qpJ5mp.incaweb.net >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.55783881160651892961@8Cdpd1.yohmoe.de >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.08365843646274263469@eouq2j.aarnekoskelonsaatio.fi >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.64711367998162123544@xGkwiJ.bellarae.com.au >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.95188946144146844377@lBxtBl.hostingplanner.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.56194688317687048980@VzZiws.topritm.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.62839537100511023166@jUFa7J.combitrip.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.38229479819364142169@GcyIl9.edingtonmains.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.48815668606735177255@R90tcZ.atoppick.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.18583781485639036454@EJpv7S.circulus-berkeljaarverslag.nl >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.55393094905965839723@smtwBb.clt-limited.com >"
+      },
+      {
+        "header": "from",
+        "contains": "news@wrong.finleynissa.com"
+      },
+      {
+        "header": "from",
+        "contains": "Info.67652337544343737302@jXoyr9.muzikparki.com >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.74966395095152827351@qLhRx5.ellity.eu >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.38990464604257512296@oHEqZi.premierftp.net >"
+      },
+      {
+        "header": "from",
+        "contains": "reply.14861987890888959307@6ypIst.phoneoceanpluto.com.GUyxeq.com"
+      },
+      {
+        "header": "from",
+        "contains": "dz054kmytba45@primeservicehub.com"
+      },
+      {
+        "header": "from",
+        "contains": "Info.56311990291742760763@5Z0KAY.kethulle03.be >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.95367698885109813692@xQ5BK1.equi-diet.fr >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.96370768916943249798@JfHWHK.fashionmall.gr >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.04481439431973836454@dJbeHb.goatsolver.com >"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@lpa-conect.com"
+      },
+      {
+        "header": "from",
+        "contains": "Info.71027129132375253474@JGoegO.liegecity.be >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.dNvr47DjsoO3@vanasengineering.eu >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.Iut1cbVYnYj4@hotelmediodia.net >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.UGJLV0A1Wxn3@bronze.ovh >"
+      },
+      {
+        "header": "from",
+        "contains": "t-kenta@msa.biglobe.ne.jp"
+      },
+      {
+        "header": "from",
+        "contains": "VtJOmw@payco.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply.V0KtSHouFS@671.cheval-damour.fr >"
+      },
+      {
+        "header": "from",
+        "contains": "75ZjyCwhrF@visasan.com"
+      },
+      {
+        "header": "from",
+        "contains": "AkrixVYL6o@719.ip-51-81-234.us >"
+      },
+      {
+        "header": "from",
+        "contains": "824@712.olivo.com.vn >"
+      },
+      {
+        "header": "from",
+        "contains": "paperlesspost@paperlesspost.com"
+      },
+      {
+        "header": "from",
+        "contains": "08822102804@georgedavidkieffer.com"
+      },
+      {
+        "header": "from",
+        "contains": "sj.gibson@telenor.com.se"
+      },
+      {
+        "header": "from",
+        "contains": "mtndewrulez123@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "giapxhehzkodhog@cominine.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@nl.fypfytgexlus.fr*"
+      },
+      {
+        "header": "from",
+        "contains": "qizzbfncbwdjvns@cominine.com"
+      },
+      {
+        "header": "from",
+        "contains": "yiwdftyutgvruii@ancheduled.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@nl.viezsmyermpz.fr*"
+      },
+      {
+        "header": "from",
+        "contains": "imdgratwgjpouxj@creatential.com"
+      },
+      {
+        "header": "from",
+        "contains": "imuuihgscloabvk@ancheduled.com"
+      },
+      {
+        "header": "from",
+        "contains": "hkefoijyorkxfry@cominine.com"
+      },
+      {
+        "header": "from",
+        "contains": "pslxynytdizxtrf@ancheduled.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@nl.dodgmedwdaaa.fr*"
+      },
+      {
+        "header": "from",
+        "contains": "sales@wkf.com*"
+      },
+      {
+        "header": "from",
+        "contains": "news@carrollsirishgifts.com*"
+      },
+      {
+        "header": "from",
+        "contains": "edgar_houltham_37690@mixrefuse.mordeco.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@email.usfuturenewsletters.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@ofsys.com"
+      },
+      {
+        "header": "from",
+        "contains": "stubmenu@optonline.net"
+      },
+      {
+        "header": "from",
+        "contains": "info.7mdcqv@7mdcqv.thermomix.com.sg"
+      },
+      {
+        "header": "from",
+        "contains": "info.737@91611.thermomix.com.sg"
+      },
+      {
+        "header": "from",
+        "contains": "info.yzhoj2@yzhoj2.cambly.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@youtube.com"
+      },
+      {
+        "header": "from",
+        "contains": "info.bbpury@bbpury.besthotelscity.com"
+      },
+      {
+        "header": "from",
+        "contains": "info.yyvptp@yyvptp.cambly.com"
+      },
+      {
+        "header": "from",
+        "contains": "info.363@04949.sandykey.com"
+      },
+      {
+        "header": "from",
+        "contains": "info.698@33649.thermomix.com.sg"
+      },
+      {
+        "header": "from",
+        "contains": "info.887@74865.thermomix.com.sg"
+      },
+      {
+        "header": "from",
+        "contains": "info.472@86817.thermomix.com.sg"
+      },
+      {
+        "header": "from",
+        "contains": "info.764@04313.thermomix.com.sg"
+      },
+      {
+        "header": "from",
+        "contains": "info.633@58616.thermomix.com.sg"
+      },
+      {
+        "header": "from",
+        "contains": "info.803@07537.thermomix.com.sg"
+      },
+      {
+        "header": "from",
+        "contains": "info.429@11469.thermomix.com.sg"
+      },
+      {
+        "header": "from",
+        "contains": "info.753@56539.thermomix.com.sg"
+      },
+      {
+        "header": "from",
+        "contains": "info.234@23024.thermomix.com.sg"
+      },
+      {
+        "header": "from",
+        "regex": "@jotform\\.com\\*$"
+      },
+      {
+        "header": "from",
+        "regex": "@71720\\.xiocom\\.com$"
+      },
+      {
+        "header": "from",
+        "contains": "Info.97302738271335661676@VR4Lxj.radiochat.onl >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.72829956896567591277@2ItRSq.leignielimmobilier.info >"
+      },
+      {
+        "header": "from",
+        "contains": "Info.08799389347205615154@J4xlYk.e-commercepro.co.uk >"
+      }
+    ]
+  },
+  "action": {},
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread",
+    "Unsupported action: Delete"
+  ]
+}

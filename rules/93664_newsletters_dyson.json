@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Dyson",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@comms.dyson.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@e.dyson.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Dyson"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

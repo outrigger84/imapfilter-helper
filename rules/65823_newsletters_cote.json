@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Cote",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "bonjour@e.cote.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "bonjour@t.cote.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "bonjour@cote.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Cote"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

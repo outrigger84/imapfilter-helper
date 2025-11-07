@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Homelabbers Hangout",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info@homelabber.org"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Homelabbers Hangout"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

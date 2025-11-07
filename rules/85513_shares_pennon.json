@@ -1,0 +1,28 @@
+{
+  "name": "Shares » Pennon",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "donotreply@mifid.linkgroup.eu"
+      },
+      {
+        "header": "from",
+        "contains": "application@pennonwatershare.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "donotreply@linkshareholderinformation.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Shares/Pennon"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

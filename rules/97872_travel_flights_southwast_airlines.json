@@ -1,0 +1,24 @@
+{
+  "name": "Travel » Flights » Southwast Airlines",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "southwestairlines@iluv.southwest.com"
+      },
+      {
+        "header": "from",
+        "contains": "southwestairlines@ifly.southwest.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Flights/Southwast Airlines"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

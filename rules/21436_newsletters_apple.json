@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Apple",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "developer@insideapple.apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "betaprogram@insideapple.apple.com"
+      },
+      {
+        "header": "from",
+        "contains": "newsdigest@insideapple.apple.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Apple"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

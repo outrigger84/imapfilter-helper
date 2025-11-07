@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Clearscore",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "marketing@clearscore.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@cb.mail.coinbase.com"
+      },
+      {
+        "header": "from",
+        "contains": "default@clearscore.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Clearscore"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "21 Cleveland Street » Renovations » Rated People",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@em\\.ratedpeople\\.com$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Renovations/Rated People"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

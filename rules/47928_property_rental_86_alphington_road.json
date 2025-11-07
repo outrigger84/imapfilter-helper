@@ -1,0 +1,28 @@
+{
+  "name": "Property » Rental » 86 Alphington Road",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@tenancy\\-management\\.co\\.uk$"
+      },
+      {
+        "header": "from",
+        "regex": "@rosewood\\-property\\.co\\.uk$"
+      },
+      {
+        "header": "from",
+        "regex": "@starlettings\\.com$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Property/Rental/86 Alphington Road"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "sj.gibson@mac.com » Substack",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "@substack.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Substack"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark read"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Fitness » sosathleticexcellence.com",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@sosathleticexcellence\\.com$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Fitness/sosathleticexcellence.com"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

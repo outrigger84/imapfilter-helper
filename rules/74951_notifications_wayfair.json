@@ -1,0 +1,20 @@
+{
+  "name": "Notifications » Wayfair",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "account-updates@wayfair.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Wayfair"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

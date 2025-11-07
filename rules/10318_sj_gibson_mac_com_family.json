@@ -1,0 +1,107 @@
+{
+  "name": "sj.gibson@mac.com » Family",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "gibb06@hotmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "christinepalmer1960@hotmail.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "paula_gibson@ntlworld.com"
+      },
+      {
+        "header": "from",
+        "contains": "greg_gibson@hotmail.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "hazel.gibson@hotmail.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "litteldevil66@hotmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "hegibson@yahoo.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "hegibson86@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "hegibson@codeisto.com"
+      },
+      {
+        "header": "from",
+        "contains": "janetmgibson@yahoo.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "j.v.p.percy@exeter.ac.uk"
+      },
+      {
+        "header": "from",
+        "contains": "jmdsandiego@yahoo.com"
+      },
+      {
+        "header": "from",
+        "contains": "jennie_brown@mail-c108-01.fitsuny.edu"
+      },
+      {
+        "header": "from",
+        "contains": "judith13@ntlworld.com"
+      },
+      {
+        "header": "from",
+        "contains": "judith.mcgrath@handleman.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "beelzababe@hotmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "kellyngibson@hotmail.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "mikegibson0@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "mjgibson@lycos.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "newscientist@processrequest.com"
+      },
+      {
+        "header": "from",
+        "contains": "patgibson27@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "paulagibson233@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "siebrookes5@gmail.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Family"
+  },
+  "comments": [
+    "Unsupported action: Mark unread"
+  ]
+}

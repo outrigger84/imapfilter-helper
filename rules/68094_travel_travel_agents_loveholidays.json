@@ -1,0 +1,32 @@
+{
+  "name": "Travel » Travel Agents » Loveholidays",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@loveholidays.com"
+      },
+      {
+        "header": "from",
+        "contains": "message-centre@loveholidays.com"
+      },
+      {
+        "header": "from",
+        "contains": "loveholidays@delighted.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@srv.loveholidays.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Travel Agents/Loveholidays"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

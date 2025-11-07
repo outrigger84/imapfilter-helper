@@ -1,0 +1,72 @@
+{
+  "name": "Newsletters » Kickstarter",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "team@kickstargogo.com"
+      },
+      {
+        "header": "from",
+        "contains": "team@kickstarnow.com"
+      },
+      {
+        "header": "from",
+        "contains": "support@backerplan.com"
+      },
+      {
+        "header": "from",
+        "contains": "team@backerhome.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@backerviews-media.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@backerpledge.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@kickstarter.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@backerviewslab.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@backerviews.net"
+      },
+      {
+        "header": "from",
+        "contains": "hello@backerhive.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@backerviews.info"
+      },
+      {
+        "header": "from",
+        "contains": "media@kickstartech.co"
+      },
+      {
+        "header": "from",
+        "contains": "contact@kickstargogo.com"
+      },
+      {
+        "header": "from",
+        "contains": "newsletter@backerclub.co"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Kickstarter"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

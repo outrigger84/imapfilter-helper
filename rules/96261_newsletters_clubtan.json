@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » ClubTan",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "post@clubtan.net"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/ClubTan"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

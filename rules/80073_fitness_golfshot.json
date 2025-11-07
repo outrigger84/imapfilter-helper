@@ -1,0 +1,28 @@
+{
+  "name": "Fitness » Golfshot",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "Noreply_at_promo_golfshot_com_z7wqpsc2xy_47ec21c6@privaterelay.appleid.com"
+      },
+      {
+        "header": "from",
+        "contains": "support_at_golfshot_com_zvsp7kw56f_ea295c3f@privaterelay.appleid.com"
+      },
+      {
+        "header": "from",
+        "contains": "support@golfshot.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Fitness/Golfshot"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

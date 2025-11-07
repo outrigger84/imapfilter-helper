@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » FreePrints",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "freeprints@freeprintsapp.com"
+      },
+      {
+        "header": "from",
+        "contains": "photobooks@freeprintsapp.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/FreePrints"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

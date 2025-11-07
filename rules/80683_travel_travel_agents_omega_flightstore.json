@@ -1,0 +1,28 @@
+{
+  "name": "Travel » Travel Agents » Omega Flightstore",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "payment-retry@omegatravel.net"
+      },
+      {
+        "header": "from",
+        "contains": "info@omegaflightstore.com"
+      },
+      {
+        "header": "from",
+        "contains": "cpipayments@omegatravel.net"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Travel Agents/Omega Flightstore"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Travel » Ground Transport » Uber",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "uber.uk@uber.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@uber.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Ground Transport/Uber"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

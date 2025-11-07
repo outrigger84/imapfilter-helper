@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » Just Giving",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "contact@justgiving.com"
+      },
+      {
+        "header": "subject",
+        "contains": "receipt"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Just Giving"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

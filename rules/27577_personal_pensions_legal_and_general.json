@@ -1,0 +1,24 @@
+{
+  "name": "Personal » Pensions » Legal and General",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "clientservices@pensioncomms.landg.com"
+      },
+      {
+        "header": "from",
+        "contains": "clientservices@pensions.landg.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Pensions/Legal and General"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

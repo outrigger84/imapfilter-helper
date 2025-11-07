@@ -1,0 +1,20 @@
+{
+  "name": "Property » Rental » Vouch",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "do_not_reply@mail.vouch.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Property/Rental/Vouch"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Quidco",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "quidco@mkt.quidco.com"
+      },
+      {
+        "header": "from",
+        "contains": "quidco@hello.quidco.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Quidco"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

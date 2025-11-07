@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Affordable Mobiles",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "latest@email.affordablemobiles.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@e.affordablemobiles.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "offers@affordablemobiles.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Affordable Mobiles"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

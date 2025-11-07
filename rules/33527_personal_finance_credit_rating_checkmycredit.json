@@ -1,0 +1,20 @@
+{
+  "name": "Personal » Finance » Credit Rating » CheckMyCredit",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "customer.care@mail.checkmyfile.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Finance/Credit Rating/CheckMyCredit"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

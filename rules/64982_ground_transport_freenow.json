@@ -1,0 +1,24 @@
+{
+  "name": "Ground Transport » Freenow",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply@my.free-now.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@mail.free-now.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Ground Transport/Freenow"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

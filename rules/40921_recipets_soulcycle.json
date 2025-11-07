@@ -1,0 +1,20 @@
+{
+  "name": "Recipets » Soulcycle",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "subject",
+        "contains": "SoulCycle Receipt:"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Soulcycle"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

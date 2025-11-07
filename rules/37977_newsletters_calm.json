@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Calm",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello_at_breathe_calm_com_ydjt6qtrg5_8695e743@privaterelay.appleid.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@breathe.calm.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Calm"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

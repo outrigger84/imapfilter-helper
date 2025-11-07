@@ -1,0 +1,28 @@
+{
+  "name": "Travel » Work Travel",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@claritybt\\.com$"
+      },
+      {
+        "header": "from",
+        "regex": "@railtix\\.co\\.uk$"
+      },
+      {
+        "header": "from",
+        "contains": "govonline@claritytm.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Work Travel"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

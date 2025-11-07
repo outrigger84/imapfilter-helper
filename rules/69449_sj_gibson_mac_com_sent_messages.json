@@ -1,0 +1,32 @@
+{
+  "name": "sj.gibson@mac.com » Sent Messages",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "sj.gibson@mac.com"
+      },
+      {
+        "header": "from",
+        "contains": "sj.gibson@me.com"
+      },
+      {
+        "header": "from",
+        "contains": "sj.gibson@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "stephenjgibson@gmail.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Sent Messages"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

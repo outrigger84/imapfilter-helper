@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Starbucks",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "Starbucks@e.starbucks.com"
+      },
+      {
+        "header": "from",
+        "contains": "news@rewards.starbucks.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Starbucks"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

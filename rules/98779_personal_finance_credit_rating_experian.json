@@ -1,0 +1,28 @@
+{
+  "name": "Personal » Finance » Credit Rating » Experian",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "email@alerts.experian.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "email@alert.experian.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "email@notify.experian.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Finance/Credit Rating/Experian"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

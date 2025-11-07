@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » AirVPN",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@airvpn.org"
+      },
+      {
+        "header": "from",
+        "contains": "receipts+acct_1l94gshvkreroaet@stripe.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/AirVPN"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

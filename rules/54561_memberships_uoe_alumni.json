@@ -1,0 +1,28 @@
+{
+  "name": "Memberships » UoE Alumni",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "business-school-alumni@exeter.ac.uk"
+      },
+      {
+        "header": "from",
+        "contains": "sportsalumni@exeter.ac.uk"
+      },
+      {
+        "header": "from",
+        "contains": "alumni@exeter.ac.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Memberships/UoE Alumni"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

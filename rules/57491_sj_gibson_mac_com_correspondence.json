@@ -1,0 +1,20 @@
+{
+  "name": "sj.gibson@mac.com » Correspondence",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "subject",
+        "contains": "Letter from constituent"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Correspondence"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Memberships » CIM",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "cim.info@cim.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "my.membership@cim.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Memberships/CIM"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

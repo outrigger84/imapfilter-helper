@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Majestic Wine",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "majestic@news.majestic.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "news@comms.majestic.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Majestic Wine"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Notifications » gov.uk",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply@access.service.gov.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@tax.service.gov.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/gov.uk"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

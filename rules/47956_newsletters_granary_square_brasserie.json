@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Granary Square Brasserie",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "updates@granarysquarebrasserie.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "update@news.granarysquarebrasserie.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Granary Square Brasserie"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

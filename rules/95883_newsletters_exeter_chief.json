@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Exeter Chief",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@exeterchiefs.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "exeterchiefs@mail.exeterchiefs.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Exeter Chief"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

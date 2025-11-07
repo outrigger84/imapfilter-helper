@@ -1,0 +1,36 @@
+{
+  "name": "Events » Clifford Stag",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hazel@bluewaterholidays.com"
+      },
+      {
+        "header": "from",
+        "contains": "abigail@bluewaterholidays.com"
+      },
+      {
+        "header": "from",
+        "contains": "justyna@bluewaterholidays.com"
+      },
+      {
+        "header": "from",
+        "contains": "karen@bluewaterholidays.com"
+      },
+      {
+        "header": "from",
+        "contains": "michelle@bluewaterholidays.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Events/Clifford Stag"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Zero",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply_at_marketing_zerolongevity_com_qc7f6s774c_ceab370d@privaterelay.appleid.com"
+      },
+      {
+        "header": "to",
+        "contains": "no-reply_at_marketing_zerolongevity_com_qc7f6s774c_ceab370d@privaterelay.appleid.com"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply_at_marketing_zerofasting_com_qc7f6s774c_3b5a423f@privaterelay.appleid.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Zero"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

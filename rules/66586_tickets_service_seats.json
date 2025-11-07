@@ -1,0 +1,20 @@
+{
+  "name": "Tickets » Service Seats",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "tickets@serviceseats.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Tickets/Service Seats"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "name": "Subscriptions » Raylo",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "dylan@raylo.intercom-mail.com"
+      },
+      {
+        "header": "from",
+        "contains": "help@raylo.com"
+      },
+      {
+        "header": "from",
+        "contains": "joshua@raylo.intercom-mail.com"
+      },
+      {
+        "header": "from",
+        "contains": "katelyn@raylo.intercom-mail.com"
+      },
+      {
+        "header": "from",
+        "contains": "niall@raylo.intercom-mail.com"
+      },
+      {
+        "header": "from",
+        "contains": "operator@raylo.intercom-mail.com"
+      },
+      {
+        "header": "from",
+        "contains": "returns@raylo.com"
+      },
+      {
+        "header": "from",
+        "contains": "service@raylo.com"
+      },
+      {
+        "header": "from",
+        "contains": "raylosupport@pierinsurance.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Subscriptions/Raylo"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

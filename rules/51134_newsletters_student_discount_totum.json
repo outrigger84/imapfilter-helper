@@ -1,0 +1,32 @@
+{
+  "name": "Newsletters » Student Discount » Totum",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@eb.totum.com"
+      },
+      {
+        "header": "from",
+        "contains": "marketing@email.totum.com"
+      },
+      {
+        "header": "from",
+        "contains": "totum-marketing@mail.totum.com"
+      },
+      {
+        "header": "from",
+        "contains": "membership@em.totum.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Student Discount/Totum"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Coursera",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "coursera@email.coursera.org"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@t.mail.coursera.org"
+      },
+      {
+        "header": "from",
+        "contains": "no-reply@m.mail.coursera.org"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Coursera"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

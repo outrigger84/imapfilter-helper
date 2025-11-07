@@ -1,0 +1,23 @@
+{
+  "name": "Notifications » Trakt",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@trakt.tv"
+      },
+      {
+        "header": "from",
+        "contains": "notify@trakt.tv"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Trakt"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird"
+  ]
+}

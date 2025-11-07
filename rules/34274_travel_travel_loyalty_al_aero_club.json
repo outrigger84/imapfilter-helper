@@ -1,0 +1,24 @@
+{
+  "name": "Travel » Travel Loyalty » AL Aero Club",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "aerclub@fly.aerlingus.com"
+      },
+      {
+        "header": "from",
+        "contains": "aerclub@flights.aerlingus.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Travel Loyalty/AL Aero Club"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

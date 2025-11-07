@@ -1,0 +1,24 @@
+{
+  "name": "Notifications » Apple » Subscriptions",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "no_reply@email.apple.com"
+      },
+      {
+        "header": "subject",
+        "contains": "Subscription"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Apple/Subscriptions"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

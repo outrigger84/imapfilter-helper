@@ -1,0 +1,20 @@
+{
+  "name": "21 Cleveland Street » Bills » TV License",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "confirmation_at_tvlicensing_co_uk_q9n524y7h879hq_y2bk0336@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Bills/TV License"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

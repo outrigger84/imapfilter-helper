@@ -1,0 +1,20 @@
+{
+  "name": "Server » NZB » Giganews",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@giganews.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Server/NZB/Giganews"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

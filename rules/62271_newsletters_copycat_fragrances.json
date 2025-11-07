@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Copycat Fragrances",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@copycatfragrances.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "hello@email.copycatfragrances.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "marketing@copycatfragrances.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Copycat Fragrances"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

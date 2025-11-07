@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Money Supermarket",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "news@mail.moneysupermarketmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "service@mail.moneysupermarketmail.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Money Supermarket"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "21 Cleveland Street » Tado",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply_at_my_tado_com_wz77e5fbwwkxc9_1b2x6453@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Tado"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

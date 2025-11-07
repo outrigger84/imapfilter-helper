@@ -1,0 +1,28 @@
+{
+  "name": "Server » NZB » NZB Finder",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@nzbfinder.ws"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@nzbfinder.ws"
+      },
+      {
+        "header": "from",
+        "contains": "receipts+acct_15foqhhf224l2jtu@stripe.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Server/NZB/NZB Finder"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

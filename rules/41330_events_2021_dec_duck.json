@@ -1,0 +1,20 @@
+{
+  "name": "Events » 2021 Dec - Duck",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "theduckatyeoford@gmail.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Events/2021 Dec - Duck"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

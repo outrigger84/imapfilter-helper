@@ -1,0 +1,28 @@
+{
+  "name": "Personal » Pensions » USS",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "notifications@updates.uss.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "members@updates.uss.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "members@news.uss.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Pensions/USS"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

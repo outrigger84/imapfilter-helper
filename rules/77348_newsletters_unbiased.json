@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Unbiased",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@unbiased.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "contact@unbiased.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Unbiased"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

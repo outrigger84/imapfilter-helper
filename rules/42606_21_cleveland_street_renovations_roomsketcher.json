@@ -1,0 +1,20 @@
+{
+  "name": "21 Cleveland Street » Renovations » RoomSketcher",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info_at_roomsketcher_com_sgkyw2qrgw_45c62a86@privaterelay.appleid.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Renovations/RoomSketcher"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

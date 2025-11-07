@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Clubhouse Golf",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "e-news@clubhousegolf.co.uk"
+      },
+      {
+        "header": "to",
+        "contains": "e-news@clubhousegolf.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Clubhouse Golf"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

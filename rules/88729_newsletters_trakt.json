@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » Trakt",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply@trakt.tv"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Trakt"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

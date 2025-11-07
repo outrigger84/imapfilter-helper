@@ -1,0 +1,24 @@
+{
+  "name": "Personal » Banking » Skipton",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "skiptonbs@skipton.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "info@skipton.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Banking/Skipton"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

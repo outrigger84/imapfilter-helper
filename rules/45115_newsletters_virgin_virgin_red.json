@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Virgin » Virgin Red",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@news.red.virgin.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@rewards.red.virgin.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Virgin/Virgin Red"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Tickets » eventim",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "customerservice@eventim.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Tickets/eventim"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

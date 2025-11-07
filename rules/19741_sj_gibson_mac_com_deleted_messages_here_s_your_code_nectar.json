@@ -1,0 +1,23 @@
+{
+  "name": "sj.gibson@mac.com » Deleted Messages [Here's your code - Nectar]",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "no-reply@mail.sainsburys.co.uk"
+      },
+      {
+        "header": "subject",
+        "contains": "Here's your code"
+      }
+    ]
+  },
+  "action": {},
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Delete",
+    "Unsupported action: Mark unread",
+    "Unsupported condition: age in days is greater than 0"
+  ]
+}

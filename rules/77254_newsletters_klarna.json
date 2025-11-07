@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Klarna",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@e.klarna.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@hello.klarna.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Klarna"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

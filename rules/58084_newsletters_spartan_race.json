@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Spartan Race",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "spartan@sr.spartan.com"
+      },
+      {
+        "header": "from",
+        "contains": "spartan@sri.spartan.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Spartan Race"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "Personal » Pensions » Aegon Guild",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "email@emails.aegon.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "Aegonresearch@inmoment.com"
+      },
+      {
+        "header": "from",
+        "contains": "aegonresearch@inmoment.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Pensions/Aegon Guild"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

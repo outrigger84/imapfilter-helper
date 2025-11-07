@@ -1,0 +1,20 @@
+{
+  "name": "Socials » Instagram",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "security@mail.instagram.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Socials/Instagram"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

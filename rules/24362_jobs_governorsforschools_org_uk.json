@@ -1,0 +1,28 @@
+{
+  "name": "Jobs » governorsforschools.org.uk",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@governorsforschools\\.org\\.uk$"
+      },
+      {
+        "header": "from",
+        "contains": "clerk@exminsterschool.co.uk"
+      },
+      {
+        "header": "to",
+        "contains": "clerk@exminsterschool.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Jobs/governorsforschools.org.uk"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

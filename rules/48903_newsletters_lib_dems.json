@@ -1,0 +1,40 @@
+{
+  "name": "Newsletters » Lib Dems",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@liberal\\.democrat$"
+      },
+      {
+        "header": "from",
+        "contains": "hello@exeterlibdems.org.uk"
+      },
+      {
+        "header": "from",
+        "contains": "exeterlibdems@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "info@devonlibdems.org.uk"
+      },
+      {
+        "header": "from",
+        "contains": "conference@devon-cornwall-libdems.org.uk"
+      },
+      {
+        "header": "from",
+        "contains": "campaigning@devon-libdems.org.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Lib Dems"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Komooot",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@komoot.de"
+      },
+      {
+        "header": "from",
+        "contains": "notification@komoot.de"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Komooot"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Jobs » Search » Microsoft Jobs",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "jobalerts@microsoft.com"
+      },
+      {
+        "header": "from",
+        "contains": "gtaanm@microsoft.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Jobs/Search/Microsoft Jobs"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Travel » Acomodation » Booking.com",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "subject",
+        "contains": "🛄 Thanks! Your booking is confirmed"
+      },
+      {
+        "header": "from",
+        "contains": "customer.service@booking.com"
+      },
+      {
+        "header": "from",
+        "regex": "@property\\.booking\\.com$"
+      },
+      {
+        "header": "from",
+        "contains": "24-22428124030_2727f58c9b4a44f6@support.booking.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Acomodation/Booking.com"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

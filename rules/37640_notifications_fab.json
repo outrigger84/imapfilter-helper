@@ -1,0 +1,24 @@
+{
+  "name": "Notifications » Fab",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "@fabguys.com"
+      },
+      {
+        "header": "from",
+        "contains": "@fabswingers.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Fab"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

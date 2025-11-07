@@ -1,0 +1,24 @@
+{
+  "name": "sj.gibson@mac.com » *PT Appt",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "james@replies.jgphysique.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "info@lifestylelean.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "*PT Appt"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

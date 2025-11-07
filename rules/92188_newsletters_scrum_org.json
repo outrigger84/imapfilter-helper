@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » scrum.org",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "eric.naiburg@sender.scrum.org"
+      },
+      {
+        "header": "from",
+        "contains": "marketing@sender.scrum.org"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/scrum.org"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Oliver Bonas",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "news@mail.oliverbonas.com"
+      },
+      {
+        "header": "from",
+        "contains": "askus@oliverbonas.com"
+      },
+      {
+        "header": "to",
+        "contains": "askus@oliverbonas.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Oliver Bonas"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

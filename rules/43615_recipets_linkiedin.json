@@ -1,0 +1,20 @@
+{
+  "name": "Recipets » LinkiedIn",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "billing-noreply@linkedin.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/LinkiedIn"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

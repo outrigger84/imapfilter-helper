@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Mind the Product",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@mindtheproduct.com"
+      },
+      {
+        "header": "from",
+        "contains": "team@mindtheproduct.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Mind the Product"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

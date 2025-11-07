@@ -1,0 +1,24 @@
+{
+  "name": "Fitness » Exeter Leisure",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "leisure@exeter.gov.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@legendonlineservices.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Fitness/Exeter Leisure"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "name": "21 Cleveland Street » Projects » Windows",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "creditcontrol@mpswindows.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "dannysansom@mpswindows.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "Survey@mpswindows.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@emails.anglianhome.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "anglianhomeimprovement@davies-technology.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "BarnstapleShowroom@Angliangroup.com"
+      },
+      {
+        "header": "from",
+        "contains": "ExeterShowroom@Angliangroup.com"
+      },
+      {
+        "header": "from",
+        "contains": "promarquote017@angliangroup.com"
+      },
+      {
+        "header": "from",
+        "contains": "Anglianhome@anglianhome.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "funding-illustration@ecof.online"
+      },
+      {
+        "header": "from",
+        "contains": "do.not.reply@safestyle.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "no_reply@qanw.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "spillings23@yahoo.com"
+      },
+      {
+        "header": "from",
+        "contains": "Richard.Parr@Angliangroup.com"
+      },
+      {
+        "header": "from",
+        "contains": "steven.bryant@angliangroup.com"
+      },
+      {
+        "header": "from",
+        "contains": "enquiries@mpswindows.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "21 Cleveland Street/Projects/Windows"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

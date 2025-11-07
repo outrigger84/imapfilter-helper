@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Wikipedia",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "daily-article-l@lists.wikimedia.org"
+      },
+      {
+        "header": "from",
+        "contains": "hello@wikimedia.org"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Wikipedia"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

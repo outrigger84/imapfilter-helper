@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » No1 Lounges",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "digital@no1lounges.com"
+      },
+      {
+        "header": "from",
+        "contains": "vicky.graham@no1lounges.com"
+      },
+      {
+        "header": "from",
+        "contains": "newsletter@no1lounges.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/No1 Lounges"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "Notifications » Deliveroo",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@t.deliveroo.com"
+      },
+      {
+        "header": "from",
+        "contains": "deliveroo@feedback.deliveroo.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@announce.deliveroo.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/Deliveroo"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

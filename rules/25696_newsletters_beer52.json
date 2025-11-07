@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Beer52",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "jack@beer52.com"
+      },
+      {
+        "header": "from",
+        "contains": "ebun.lennon@beer52.com"
+      },
+      {
+        "header": "from",
+        "contains": "blackfriday@beer52.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Beer52"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

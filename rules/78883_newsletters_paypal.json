@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Paypal",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "paypal@mail.paypal.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "paypal@emails.paypal.com"
+      },
+      {
+        "header": "from",
+        "contains": "PayPal@emails.paypal.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Paypal"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

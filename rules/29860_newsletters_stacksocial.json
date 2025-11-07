@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » StackSocial",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "shop@email.stackcommerce.com"
+      },
+      {
+        "header": "to",
+        "contains": "shop@email.stackcommerce.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/StackSocial"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

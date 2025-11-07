@@ -1,0 +1,24 @@
+{
+  "name": "Server » NZB » Usenet",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@usenetexpress.com"
+      },
+      {
+        "header": "from",
+        "contains": "support@usenetexpress.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Server/NZB/Usenet"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

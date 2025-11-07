@@ -1,0 +1,40 @@
+{
+  "name": "Travel » Insurance",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "claimsservice@cegagroup.com"
+      },
+      {
+        "header": "from",
+        "contains": "claimsservice-donotreply@cegagroup.com"
+      },
+      {
+        "header": "from",
+        "contains": "hello@comms.cedartreeinsurance.com"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@cedartreeinsurance.com"
+      },
+      {
+        "header": "from",
+        "contains": "support@cedartreeinsurance.com"
+      },
+      {
+        "header": "from",
+        "contains": "travel@estransactional.cedartreeinsurance.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Insurance"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

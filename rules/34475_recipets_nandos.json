@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » Nandos",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "exeterprincesshay@nandos.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@nandos.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Nandos"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

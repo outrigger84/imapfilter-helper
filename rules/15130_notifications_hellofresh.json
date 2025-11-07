@@ -1,0 +1,24 @@
+{
+  "name": "Notifications » HelloFresh",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "notifications@mail.hellofresh.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "notifications@active.hellofresh.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/HelloFresh"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

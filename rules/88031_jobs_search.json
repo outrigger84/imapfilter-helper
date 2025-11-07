@@ -1,0 +1,20 @@
+{
+  "name": "Jobs » Search",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "codonnell@venngroup.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Jobs/Search"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

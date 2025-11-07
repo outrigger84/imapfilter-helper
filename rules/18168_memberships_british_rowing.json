@@ -1,0 +1,36 @@
+{
+  "name": "Memberships » British Rowing",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "indoor@britishrowing.org"
+      },
+      {
+        "header": "from",
+        "contains": "info@britishrowing.org"
+      },
+      {
+        "header": "from",
+        "contains": "membership@britishrowing.org"
+      },
+      {
+        "header": "from",
+        "contains": "hello@email.britishrowing.org"
+      },
+      {
+        "header": "from",
+        "contains": "help@gocardless.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Memberships/British Rowing"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

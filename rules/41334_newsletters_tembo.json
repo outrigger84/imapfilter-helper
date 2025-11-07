@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Tembo",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@tembomoney.com"
+      },
+      {
+        "header": "from",
+        "contains": "savings@tembomoney.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Tembo"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

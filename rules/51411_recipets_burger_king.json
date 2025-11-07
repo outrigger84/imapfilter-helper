@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » Burger King",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "no-reply@your-way.burgerking.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "promos-coming@your-way.bk.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Burger King"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

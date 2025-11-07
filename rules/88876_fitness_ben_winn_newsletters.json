@@ -1,0 +1,20 @@
+{
+  "name": "Fitness » Ben Winn » Newsletters",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "ben@bwonlinecoaching.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Fitness/Ben Winn/Newsletters"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

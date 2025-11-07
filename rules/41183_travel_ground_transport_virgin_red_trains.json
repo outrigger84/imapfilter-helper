@@ -1,0 +1,24 @@
+{
+  "name": "Travel » Ground Transport » Virgin Red Trains",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "info@member.red.virgin.com"
+      },
+      {
+        "header": "subject",
+        "contains": "Booking Confirmation:"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Ground Transport/Virgin Red Trains"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

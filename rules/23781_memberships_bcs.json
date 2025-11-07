@@ -1,0 +1,32 @@
+{
+  "name": "Memberships » BCS",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@bcs.org"
+      },
+      {
+        "header": "from",
+        "contains": "swememsf@lists.bcs.uk"
+      },
+      {
+        "header": "from",
+        "contains": "bcsmembership@bcs.uk"
+      },
+      {
+        "header": "from",
+        "contains": "membership@bcs.digitalmembership.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Memberships/BCS"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

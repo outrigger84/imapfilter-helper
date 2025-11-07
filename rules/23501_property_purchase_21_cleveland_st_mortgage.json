@@ -1,0 +1,24 @@
+{
+  "name": "Property » Purchase » 21 Cleveland St » Mortgage",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@themortgagebrain\\.net$"
+      },
+      {
+        "header": "from",
+        "contains": "mortgageupdates@nationwide.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Property/Purchase/21 Cleveland St/Mortgage"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

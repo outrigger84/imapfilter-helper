@@ -1,0 +1,28 @@
+{
+  "name": "Newsletters » Nude",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hey@getnude.com"
+      },
+      {
+        "header": "from",
+        "contains": "news@getnude.com"
+      },
+      {
+        "header": "from",
+        "contains": "yo@adulti.sh"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Nude"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

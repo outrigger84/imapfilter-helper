@@ -1,0 +1,32 @@
+{
+  "name": "Newsletters » Amtrak",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "amtrak@e-mail.amtrak.com"
+      },
+      {
+        "header": "from",
+        "contains": "Amtrak@e-mail.amtrak.com"
+      },
+      {
+        "header": "from",
+        "contains": "promotions@amtrakvacations.com"
+      },
+      {
+        "header": "from",
+        "contains": "amtrakresearch@express.sea1.medallia.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Amtrak"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

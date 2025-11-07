@@ -1,0 +1,20 @@
+{
+  "name": "Server » PikaPods",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "support@pikapods.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Server/PikaPods"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Travel » Ground Transport » GWR",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@gwr.com"
+      },
+      {
+        "header": "from",
+        "contains": "greatwesternrailway@e.gwr.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Travel/Ground Transport/GWR"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

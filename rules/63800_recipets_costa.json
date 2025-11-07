@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » Costa",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "subject",
+        "contains": "Your Costa Coffee order confirmation"
+      },
+      {
+        "header": "from",
+        "contains": "costacoffee@costa.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Costa"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

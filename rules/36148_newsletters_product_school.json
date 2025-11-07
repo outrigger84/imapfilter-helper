@@ -1,0 +1,40 @@
+{
+  "name": "Newsletters » Product School",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "eva@events.productschool.com"
+      },
+      {
+        "header": "from",
+        "contains": "eva@productschool.com"
+      },
+      {
+        "header": "from",
+        "contains": "events@productschool.com"
+      },
+      {
+        "header": "from",
+        "contains": "anthony@productschool.com"
+      },
+      {
+        "header": "from",
+        "contains": "eva.friday@productschool.com"
+      },
+      {
+        "header": "from",
+        "contains": "saskia@productschool.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Product School"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

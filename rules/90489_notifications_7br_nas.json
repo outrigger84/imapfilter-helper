@@ -1,0 +1,24 @@
+{
+  "name": "Notifications » 7BR-NAS",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "subject",
+        "contains": "[192.168.1.100]"
+      },
+      {
+        "header": "subject",
+        "contains": "[br7-nas.de8.quickconnect.to]"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/7BR-NAS"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

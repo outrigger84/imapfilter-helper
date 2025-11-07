@@ -1,0 +1,28 @@
+{
+  "name": "Fitness » Body Coach",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@thebodycoach\\.co\\.uk$"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@thebodycoach.com"
+      },
+      {
+        "header": "from",
+        "contains": "motivation@thebodycoach.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Fitness/Body Coach"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

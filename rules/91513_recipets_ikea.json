@@ -1,0 +1,24 @@
+{
+  "name": "Recipets » Ikea",
+  "priority": 100,
+  "conditions": {
+    "all": [
+      {
+        "header": "from",
+        "contains": "@ikea.com"
+      },
+      {
+        "header": "subject",
+        "contains": "Proof of"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Recipets/Ikea"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

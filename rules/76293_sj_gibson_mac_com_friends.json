@@ -1,0 +1,208 @@
+{
+  "name": "sj.gibson@mac.com » Friends",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "aga.kluska@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "agarrod@bma.org.uk"
+      },
+      {
+        "header": "from",
+        "contains": "ajlemin@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "crook.alex@googlemail.com"
+      },
+      {
+        "header": "from",
+        "contains": "alex_pearson_@hotmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "alisoncreasy@yahoo.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "alibash1957@hotmail.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "andrew.lemin@wales.nhs.uk"
+      },
+      {
+        "header": "from",
+        "contains": "a.j.lemin@durham.ac.uk"
+      },
+      {
+        "header": "from",
+        "contains": "ilovepretzels@msn.com"
+      },
+      {
+        "header": "from",
+        "contains": "andrewpunter@hotmail.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "andy.bushell@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "notifications@withjoy.com"
+      },
+      {
+        "header": "from",
+        "contains": "notifications+maythefourthbewithyou24@withjoy.com"
+      },
+      {
+        "header": "from",
+        "contains": "anna.j.hutchinson@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "anna_marie_neville@yahoo.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "audrey.archer@3pb.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "jackie.bagnall@exeter.ac.uk"
+      },
+      {
+        "header": "from",
+        "contains": "bbryonedmond@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "tozerben@hotmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "benvanweede@btinternet.com"
+      },
+      {
+        "header": "from",
+        "contains": "bb@watermilltrading.com"
+      },
+      {
+        "header": "from",
+        "contains": "bnjvivian@googlemail.com"
+      },
+      {
+        "header": "from",
+        "contains": "kevin.blythe@gfk.com"
+      },
+      {
+        "header": "from",
+        "contains": "bobblinyud18@aol.com"
+      },
+      {
+        "header": "from",
+        "contains": "campandro@aol.com"
+      },
+      {
+        "header": "from",
+        "contains": "daniel.bluett@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "dannyclifford11@yahoo.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "david@davidmlewis.org"
+      },
+      {
+        "header": "from",
+        "contains": "j.l.davies@exeter.ac.uk"
+      },
+      {
+        "header": "from",
+        "contains": "n.k.davies2@exeter.ac.uk"
+      },
+      {
+        "header": "from",
+        "contains": "declan.t.murphy@hotmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "obrien.derek@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "dominee.reid@googlemail.com"
+      },
+      {
+        "header": "from",
+        "contains": "dominee.reid@exeter.ac.uk"
+      },
+      {
+        "header": "from",
+        "contains": "dominee.reid@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "dahorton123@yahoo.com"
+      },
+      {
+        "header": "from",
+        "contains": "dyerapr@fairpoint.net"
+      },
+      {
+        "header": "from",
+        "contains": "eb@watermilltrading.com"
+      },
+      {
+        "header": "from",
+        "contains": "elliott_8519@hotmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "dhooper228@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "dbcoop21@yahoo.com"
+      },
+      {
+        "header": "from",
+        "contains": "jonathan.bram@global-infra.com"
+      },
+      {
+        "header": "from",
+        "contains": "kpiatkowska@hotmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "matthew.cannings@3pb.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "matthewjcannings@gmail.com"
+      },
+      {
+        "header": "from",
+        "contains": "natasha.withinshaw@lloydstsb.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "teammatthews@btinternet.com"
+      },
+      {
+        "header": "to",
+        "contains": "teammatthews@btinternet.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Friends"
+  }
+}

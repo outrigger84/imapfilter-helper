@@ -1,0 +1,28 @@
+{
+  "name": "Personal » Finance » Loans » Santander",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "customerservices@santander.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "santander@email2.yoursantander.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "donotreply@communications.santander.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Personal/Finance/Loans/Santander"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

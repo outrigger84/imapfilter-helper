@@ -1,0 +1,36 @@
+{
+  "name": "Jobs » Current » UoE Exams",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "e-claims@exeter.ac.uk"
+      },
+      {
+        "header": "from",
+        "contains": "examsadmin@exeter.ac.uk"
+      },
+      {
+        "header": "from",
+        "contains": "jobs@exeter.ac.uk"
+      },
+      {
+        "header": "from",
+        "contains": "h.ward@exeter.ac.uk"
+      },
+      {
+        "header": "from",
+        "contains": "h.c.dunn@exeter.ac.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Jobs/Current/UoE Exams"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

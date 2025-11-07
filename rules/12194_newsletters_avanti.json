@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Avanti",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "hello@e.avantiwestcoast.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "clubavanti@e.avantiwestcoast.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Avanti"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

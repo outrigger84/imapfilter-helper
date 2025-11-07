@@ -1,0 +1,20 @@
+{
+  "name": "Memberships » Lympstone SC",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "regex": "@lympstonesailingclub\\.co\\.uk$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Memberships/Lympstone SC"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

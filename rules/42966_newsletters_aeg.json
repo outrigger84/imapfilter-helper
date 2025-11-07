@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » AEG",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "noreply@e-comms.Aegpresents.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "noreply@e-comms.aegpresents.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/AEG"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

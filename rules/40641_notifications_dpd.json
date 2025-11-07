@@ -1,0 +1,32 @@
+{
+  "name": "Notifications » DPD",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "yourdelivery@dpd.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "yourorder@dpd.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "yourorder_at_dpd_co_uk_"
+      },
+      {
+        "header": "from",
+        "contains": "yourdelivery_at_dpd_co_uk_"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Notifications/DPD"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

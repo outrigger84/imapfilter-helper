@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » LNER",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "info_at_email_lner_co_uk_sb9pe643m6sk03_6ctq8492@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "info_at_e_lner_co_uk_sb9pa520m6sk4b_d6tq8492@icloud.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/LNER"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

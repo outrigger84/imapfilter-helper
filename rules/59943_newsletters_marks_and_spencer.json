@@ -1,0 +1,24 @@
+{
+  "name": "Newsletters » Marks and Spencer",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "marksandspencer@news.marksandspencer.com"
+      },
+      {
+        "header": "from",
+        "contains": "sparks@news.marksandspencer.com"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Marks and Spencer"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

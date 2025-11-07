@@ -1,0 +1,20 @@
+{
+  "name": "Newsletters » GWOD",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "contact@gowod.eu"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/GWOD"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

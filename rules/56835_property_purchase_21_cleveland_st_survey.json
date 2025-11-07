@@ -1,0 +1,36 @@
+{
+  "name": "Property » Purchase » 21 Cleveland St » Survey",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "enquiries@mccluskeysurveyors.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "admin@sterensurveyors.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "compliance@sterensurveyors.co.uk"
+      },
+      {
+        "header": "from",
+        "contains": "info_at_coseyhomes_co_uk_8k8cppyfc44414_da269850@icloud.com"
+      },
+      {
+        "header": "from",
+        "contains": "jason@sterensurveyors.co.uk"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Property/Purchase/21 Cleveland St/Survey"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}

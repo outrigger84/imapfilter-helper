@@ -1,0 +1,36 @@
+{
+  "name": "Newsletters » Compare The Market",
+  "priority": 100,
+  "conditions": {
+    "any": [
+      {
+        "header": "from",
+        "contains": "newsletter@emails-comparethemarket.com"
+      },
+      {
+        "header": "from",
+        "contains": "renewals@emails-comparethemarket.com"
+      },
+      {
+        "header": "from",
+        "contains": "news@emails-comparethemarket.com"
+      },
+      {
+        "header": "from",
+        "regex": "@emails\\.comparethemarket\\.com$"
+      },
+      {
+        "header": "from",
+        "regex": "renewals@emails\\-comparethemarket\\.com$"
+      }
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Newsletters/Compare The Market"
+  },
+  "comments": [
+    "Rule disabled in Thunderbird",
+    "Unsupported action: Mark unread"
+  ]
+}
