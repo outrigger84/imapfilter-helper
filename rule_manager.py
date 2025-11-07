@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Interactive rule management console for IMAPFilter Helper.
 
-This tool provides a lightweight text-based UI (similar to the Proxmox
-Helper Scripts) for inspecting, creating, and editing rule definition files
-stored under the ``rules/`` directory.  Keyboard shortcuts are available for
-each action to keep the workflow fully navigable from the keyboard.
+This module provides a small text UI for inspecting, creating and editing
+rule definition files stored in the ``rules/`` directory.  Whenever the
+terminal supports :mod:`curses` we display scrollable menus, otherwise we
+fall back to simple numbered prompts.
 """
 from __future__ import annotations
 
@@ -14,9 +14,9 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
-try:  # pragma: no cover - terminal capability detection is environment-specific
+try:  # pragma: no cover - capability detection depends on the host terminal
     import curses
 except Exception:  # pragma: no cover - gracefully degrade when curses is missing
     curses = None  # type: ignore[assignment]
@@ -27,8 +27,11 @@ from core.logging_utils import JsonLogger
 from core.rule_engine import evaluate_rules, load_rules
 
 
+# ---------------------------------------------------------------------------
+# Generic input helpers
+
 def prompt(message: str, *, allow_empty: bool = False) -> str:
-    """Return user input for *message*, repeating until non-empty if needed."""
+    """Prompt the user for text, repeating until a value is provided."""
 
     while True:
         value = input(message).strip()
@@ -38,7 +41,7 @@ def prompt(message: str, *, allow_empty: bool = False) -> str:
 
 
 def prompt_int(message: str, *, default: int | None = None) -> int:
-    """Prompt for an integer value, repeating until a valid number is entered."""
+    """Prompt for an integer, repeating until a valid number is entered."""
 
     while True:
         raw = input(message).strip()
@@ -66,9 +69,9 @@ def confirm(message: str, *, default: bool = False) -> bool:
 
 
 def slugify(value: str) -> str:
-    """Return a filesystem-safe slug derived from *value*."""
+    """Return a filesystem safe slug derived from ``value``."""
 
-    safe = []
+    safe: list[str] = []
     for ch in value.lower():
         if ch.isalnum():
             safe.append(ch)
@@ -80,52 +83,25 @@ def slugify(value: str) -> str:
     return slug or "rule"
 
 
-def summarise_condition(node: Any) -> str:
-    """Return a compact, human-friendly description of a condition node."""
+# ---------------------------------------------------------------------------
+# Menu helpers
 
-    if not node:
-        return "(empty)"
-    if isinstance(node, dict):
-        if "all" in node or "any" in node:
-            key = "all" if "all" in node else "any"
-            children = node.get(key) or []
-            label = "ALL" if key == "all" else "ANY"
-            return f"Group {label} ({len(children)} entries)"
-        header = node.get("header", "<header>")
-        if "regex" in node:
-            return f"{header} ~= {node['regex']}"
-        if "contains" in node:
-            return f"{header} ⊃ {node['contains']}"
-        return f"{header} (custom)"
-    if isinstance(node, list):
-        return f"Implicit ALL ({len(node)})"
-    return str(node)
+def _supports_curses() -> bool:
+    return bool(
+        curses
+        and sys.stdin.isatty()
+        and sys.stdout.isatty()
+    )
 
 
-def summarise_action(action: Any) -> str:
-    """Return a concise description of an action block."""
+def interactive_menu(title: str, options: Sequence[str]) -> int | None:
+    """Display ``options`` using an interactive, scrollable curses menu.
 
-    if not isinstance(action, dict):
-        return "(no action)"
-    act_type = action.get("type", "move")
-    target = action.get("target")
-    if target:
-        summary = f"{act_type} → {target}"
-    else:
-        summary = act_type
-    extras = [key for key in action.keys() if key not in {"type", "target"}]
-    if extras:
-        summary += f" (+{len(extras)} extra field{'s' if len(extras) != 1 else ''})"
-    return summary
+    ``None`` is returned when the user aborts with ESC or ``q``.  A
+    ``RuntimeError`` is raised when curses support is unavailable.
+    """
 
-
-def interactive_menu(title: str, options: list[str]) -> int | None:
-    """Display *options* using an interactive, scrollable curses menu.
-
-    Returns the selected index, or ``None`` if the user aborts with ESC or ``q``.
-    Raises ``RuntimeError`` if curses support is unavailable in this environment."""
-
-    if curses is None or not sys.stdin.isatty() or not sys.stdout.isatty():
+    if not _supports_curses():
         raise RuntimeError("curses menu unavailable")
 
     selected = 0
@@ -182,7 +158,6 @@ def interactive_menu(title: str, options: list[str]) -> int | None:
             elif 32 <= key <= 126:
                 curses.beep()
 
-            # Adjust viewport to keep the current selection visible.
             if selected < top:
                 top = selected
             elif selected >= top + body_height:
@@ -198,61 +173,16 @@ def interactive_menu(title: str, options: list[str]) -> int | None:
     return selected
 
 
-def choose_menu_option(
+def _text_menu(
     title: str,
-    options: list[tuple[str, str]],
+    options: Sequence[str],
     *,
-    prompt_text: str = "Select action: ",
-) -> str | None:
-    """Return the hotkey for the selected *options* or ``None`` if cancelled."""
-
-    labels = [f"[{key.upper()}] {label}" for key, label in options]
-    try:
-        choice = interactive_menu(title, labels)
-    except RuntimeError:
-        choice = None
-    if choice is not None:
-        return options[choice][0]
-    if choice is None and curses is not None:
-        return None
-
-    while True:
-        print(f"\n{title}")
-        for key, label in options:
-            print(f"  [{key.upper()}] {label}")
-        raw = input(prompt_text).strip().lower()
-        if not raw:
-            continue
-        hotkey = raw[0]
-        for key, _ in options:
-            if hotkey == key:
-                return key
-        print("⚠️  Unknown option. Please choose one of the highlighted letters.")
-
-
-def choose_from_list(
-    title: str,
-    entries: list[str],
-    *,
-    prompt_text: str = "Enter number (blank to cancel): ",
+    prompt_text: str = "Enter number: ",
     allow_cancel: bool = True,
 ) -> int | None:
-    """Return the index of the selected entry or ``None`` if cancelled."""
-
-    if not entries:
-        return None
-    try:
-        choice = interactive_menu(title, entries)
-    except RuntimeError:
-        choice = None
-    if choice is not None:
-        return choice
-    if choice is None and curses is not None:
-        return None
-
     while True:
         print(f"\n{title}")
-        for idx, label in enumerate(entries, start=1):
+        for idx, label in enumerate(options, start=1):
             print(f"  {idx:>3}. {label}")
         raw = input(prompt_text).strip()
         if not raw:
@@ -264,13 +194,100 @@ def choose_from_list(
         except ValueError:
             print("⚠️  Please enter a number.")
             continue
-        if 0 <= index < len(entries):
+        if 0 <= index < len(options):
             return index
         print("⚠️  Number out of range.")
 
 
-def ensure_group(node: Any) -> dict:
-    """Normalise *node* into the internal group representation."""
+def choose_menu_option(
+    title: str,
+    options: Sequence[tuple[str, str]],
+    *,
+    prompt_text: str = "Select action: ",
+) -> str | None:
+    """Return the hotkey for the selected option or ``None`` if cancelled."""
+
+    labels = [f"[{key.upper()}] {label}" for key, label in options]
+    try:
+        choice = interactive_menu(title, labels)
+    except RuntimeError:
+        while True:
+            print(f"\n{title}")
+            for key, label in options:
+                print(f"  [{key.upper()}] {label}")
+            raw = input(prompt_text).strip().lower()
+            if not raw:
+                continue
+            hotkey = raw[0]
+            for key, _ in options:
+                if hotkey == key:
+                    return key
+            print("⚠️  Unknown option. Please choose one of the highlighted letters.")
+        return None  # pragma: no cover - loop above always returns
+    if choice is None:
+        return None
+    return options[choice][0]
+
+
+def choose_from_list(
+    title: str,
+    entries: Sequence[str],
+    *,
+    prompt_text: str = "Enter number (blank to cancel): ",
+    allow_cancel: bool = True,
+) -> int | None:
+    """Return the index of the selected entry or ``None`` if cancelled."""
+
+    if not entries:
+        return None
+    try:
+        choice = interactive_menu(title, list(entries))
+    except RuntimeError:
+        return _text_menu(title, entries, prompt_text=prompt_text, allow_cancel=allow_cancel)
+    return choice
+
+
+# ---------------------------------------------------------------------------
+# Rule editing helpers
+
+def summarise_condition(node: Any) -> str:
+    """Return a compact, human-friendly description of a condition node."""
+
+    if not node:
+        return "(empty)"
+    if isinstance(node, dict):
+        if "all" in node or "any" in node:
+            key = "all" if "all" in node else "any"
+            children = node.get(key) or []
+            label = "ALL" if key == "all" else "ANY"
+            return f"Group {label} ({len(children)} entries)"
+        header = node.get("header", "<header>")
+        if "regex" in node:
+            return f"{header} ~= {node['regex']}"
+        if "contains" in node:
+            return f"{header} ⊃ {node['contains']}"
+        return f"{header} (custom)"
+    if isinstance(node, list):
+        return f"Implicit ALL ({len(node)})"
+    return str(node)
+
+
+def summarise_action(action: Any) -> str:
+    """Return a concise description of an action block."""
+
+    if not isinstance(action, dict):
+        return "(no action)"
+    act_type = action.get("type", "move")
+    target = action.get("target")
+    summary = f"{act_type} → {target}" if target else act_type
+    extras = [key for key in action.keys() if key not in {"type", "target"}]
+    if extras:
+        summary += f" (+{len(extras)} extra field{'s' if len(extras) != 1 else ''})"
+    return summary
+
+
+def ensure_group(node: Any) -> dict[str, Any]:
+    """Normalise ``node`` into the internal group representation."""
 
     if not node:
         return {"all": []}
@@ -286,7 +303,7 @@ def ensure_group(node: Any) -> dict:
 
 
 def normalise_condition(node: Any) -> Any:
-    """Recursively ensure nested groups are using the internal structure."""
+    """Recursively ensure nested groups use the internal structure."""
 
     if isinstance(node, dict) and ("all" in node or "any" in node):
         key = "all" if "all" in node else "any"
@@ -300,13 +317,13 @@ def normalise_condition(node: Any) -> Any:
 
 
 def edit_generic_dict(data: dict[str, Any], *, protected: Iterable[str] = ()) -> None:
-    """Generic key/value editor for arbitrary dictionaries."""
+    """Generic key/value editor for dictionaries."""
 
-    protected = set(protected)
+    protected_keys = set(protected)
     while True:
         items = list(data.items())
         labels = [
-            f"{'*' if key in protected else ' '} {key}: {json.dumps(value, ensure_ascii=False)}"
+            f"{'*' if key in protected_keys else ' '} {key}: {json.dumps(value, ensure_ascii=False)}"
             for key, value in items
         ]
         add_index = len(labels)
@@ -315,27 +332,14 @@ def edit_generic_dict(data: dict[str, Any], *, protected: Iterable[str] = ()) ->
         labels.append("⬅ Back")
 
         selection = choose_from_list(
-            "Additional fields", labels, prompt_text="Select entry (blank to cancel): "
+            "Additional fields",
+            labels,
         )
         if selection is None or selection == back_index:
             return
         if selection == add_index:
-        print("\nCurrent values:")
-        if not data:
-            print("  (no entries)")
-        else:
-            for key, value in data.items():
-                marker = "*" if key in protected else " "
-                print(f"  {marker} {key}: {json.dumps(value, ensure_ascii=False)}")
-        print("Options: [A]dd  [E]dit  [R]emove  [B]ack")
-        choice = input("Select action: ").strip().lower()
-        if not choice:
-            continue
-        if choice[0] == "b":
-            return
-        if choice[0] == "a":
             key = prompt("  Key: ")
-            if key in protected:
+            if key in protected_keys:
                 print("⚠️  That key is managed elsewhere.")
                 continue
             raw = prompt("  Value (JSON encoded): ")
@@ -346,43 +350,23 @@ def edit_generic_dict(data: dict[str, Any], *, protected: Iterable[str] = ()) ->
             continue
 
         key, value = items[selection]
-        if key in protected:
+        if key in protected_keys:
             print("⚠️  That key is managed elsewhere.")
             continue
-
         action = choose_menu_option(
             f"Entry {key} = {json.dumps(value, ensure_ascii=False)}",
             [("e", "Edit value"), ("r", "Remove entry"), ("b", "Back")],
         )
-        if action is None or action == "b":
+        if action in {None, "b"}:
             continue
         if action == "e":
-        if choice[0] == "e":
-            key = prompt("  Key to edit: ")
-            if key not in data:
-                print("⚠️  Unknown key.")
-                continue
-            if key in protected:
-                print("⚠️  That key is managed elsewhere.")
-                continue
             raw = prompt("  New value (JSON encoded): ")
             try:
                 data[key] = json.loads(raw)
             except json.JSONDecodeError as exc:
                 print(f"⚠️  Invalid JSON: {exc}")
-            continue
-        if action == "r":
+        elif action == "r":
             del data[key]
-        if choice[0] == "r":
-            key = prompt("  Key to remove: ")
-            if key not in data:
-                print("⚠️  Unknown key.")
-                continue
-            if key in protected:
-                print("⚠️  That key cannot be removed here.")
-                continue
-            del data[key]
-            continue
 
 
 def edit_simple_condition(node: dict[str, Any]) -> dict[str, Any]:
@@ -392,75 +376,44 @@ def edit_simple_condition(node: dict[str, Any]) -> dict[str, Any]:
         header = node.get("header", "")
         match_field = "regex" if "regex" in node else "contains"
         match_value = node.get(match_field, "") if match_field in node else ""
-        other_keys = {k: v for k, v in node.items() if k not in {"header", "contains", "regex"}}
-
+        extras = {k: v for k, v in node.items() if k not in {"header", "contains", "regex"}}
         extras_summary = ", ".join(
-            f"{key}={json.dumps(value, ensure_ascii=False)}" for key, value in other_keys.items()
+            f"{key}={json.dumps(value, ensure_ascii=False)}" for key, value in extras.items()
+        ) or "(none)"
+
+        action = choose_menu_option(
+            "Condition editor",
+            [
+                ("h", f"Header     : {header or '<unset>'}"),
+                ("m", f"Match type : {match_field}"),
+                ("v", f"Value      : {match_value}"),
+                ("x", f"Extras     : {extras_summary}"),
+                ("b", "Back"),
+            ],
         )
-        if not extras_summary:
-            extras_summary = "(none)"
-
-        options = [
-            ("h", f"Header     : {header or '<unset>'}"),
-            ("m", f"Match type : {match_field}"),
-            ("v", f"Value      : {match_value}"),
-            ("x", f"Extras     : {extras_summary}"),
-            ("b", "Back"),
-        ]
-        action = choose_menu_option("Condition editor", options)
-        if action is None:
-            action = "b" if any(opt[0] == "b" for opt in options) else None
-        if not action:
-            continue
-        print("\nCondition editor")
-        print(f"  Header     : {header or '<unset>'}")
-        print(f"  Match type : {match_field}")
-        print(f"  Value      : {match_value}")
-        if other_keys:
-            print("  Extras     :")
-            for key, value in other_keys.items():
-                print(f"    - {key} = {json.dumps(value, ensure_ascii=False)}")
-        else:
-            print("  Extras     : (none)")
-
-        print("Options: [H]eader  [M]atch type  [V]alue  E[x]tras  [B]ack")
-        choice = input("Select action: ").strip().lower()
-        if not choice:
-            continue
-        action = choice[0]
-        if action == "b":
+        if action in {None, "b"}:
             return node
         if action == "h":
             node["header"] = prompt("  Header name: ")
-            continue
-        if action == "m":
+        elif action == "m":
             new_type = prompt("  Match field (contains/regex): ").lower()
             if new_type not in {"contains", "regex"}:
                 print("⚠️  Expected 'contains' or 'regex'.")
                 continue
-            value = prompt("  Match value: ")
             node.pop("contains", None)
             node.pop("regex", None)
-            node[new_type] = value
-            continue
-        if action == "v":
+            node[new_type] = prompt("  Match value: ")
+        elif action == "v":
             if match_field not in {"contains", "regex"}:
                 print("⚠️  Set the match type first.")
                 continue
             node[match_field] = prompt("  Match value: ", allow_empty=True)
-            continue
-        if action == "x":
-            extras = {k: v for k, v in node.items() if k not in {"header", "contains", "regex"}}
-            edit_generic_dict(extras)
-            for key in list(node):
-                if key not in {"header", "contains", "regex"}:
-                    node.pop(key)
-            node.update(extras)
-            continue
+        elif action == "x":
+            edit_generic_dict(node, protected={"header", "contains", "regex"})
 
 
 def make_condition() -> dict[str, Any]:
-    """Create a new match condition using interactive prompts."""
+    """Create a new match condition using prompts."""
 
     header = prompt("  Header name: ")
     while True:
@@ -478,104 +431,46 @@ def edit_condition_group(node: dict[str, Any]) -> dict[str, Any]:
     node = ensure_group(node)
     while True:
         key = "all" if "all" in node else "any"
-        children = node.get(key, [])
+        children = node.setdefault(key, [])
         mode_label = "ALL (AND)" if key == "all" else "ANY (OR)"
         options: list[tuple[str, str]] = [
             ("a", "Add condition"),
             ("g", "Add group"),
         ]
         if children:
-            options.extend(
-                [
-                    ("e", "Edit existing entry"),
-                    ("r", "Remove entry"),
-                ]
-            )
+            options.extend([("e", "Edit existing entry"), ("r", "Remove entry")])
         options.extend([("t", f"Toggle mode (currently {mode_label})"), ("b", "Back")])
 
         action = choose_menu_option("Condition group editor", options)
-        if action is None:
-            action = "b" if any(opt[0] == "b" for opt in options) else None
-        if not action:
-            continue
-        if action == "b":
+        if action in {None, "b"}:
             return node
         if action == "t":
             other_key = "any" if key == "all" else "all"
             node = {other_key: [normalise_condition(child) for child in children]}
-        print("\nCondition group editor")
-        print(f"  Mode : {'ALL (AND)' if key == 'all' else 'ANY (OR)'}")
-        if not children:
-            print("  (no entries)")
-        else:
-            for idx, child in enumerate(children, start=1):
-                print(f"  {idx:>3}. {summarise_condition(child)}")
-
-        print(
-            "Options: [A]dd condition  add [G]roup  [E]dit <n>  [R]emove <n>  "
-            "[T]oggle AND/OR  [B]ack"
-        )
-        choice = input("Select action: ").strip().lower()
-        if not choice:
-            continue
-        action = choice[0]
-        if action == "b":
-            return node
-        if action == "t":
-            new_key = "any" if key == "all" else "all"
-            node = {new_key: children}
             continue
         if action == "a":
             children.append(make_condition())
             continue
         if action == "g":
             children.append(edit_condition_group({"all": []}))
-            node[key] = children
             continue
         if not children:
             print("⚠️  No entries to operate on.")
             continue
-        entry_index = choose_from_list(
-            "Select condition entry", [summarise_condition(child) for child in children]
-        )
-        if entry_index is None:
+        summaries = [summarise_condition(child) for child in children]
+        index = choose_from_list("Select condition entry", summaries)
+        if index is None:
             continue
         if action == "r":
-            children.pop(entry_index)
-            node[key] = children
+            children.pop(index)
             continue
-        child = children[entry_index]
+        child = children[index]
         if isinstance(child, dict) and ("all" in child or "any" in child):
-            children[entry_index] = edit_condition_group(child)
+            children[index] = edit_condition_group(child)
         elif isinstance(child, list):
-            children[entry_index] = edit_condition_group({"all": child})
+            children[index] = edit_condition_group({"all": child})
         else:
-            children[entry_index] = edit_simple_condition(dict(child))
-        node[key] = children
-        continue
-            children.append({"all": []})
-            continue
-        if action in {"e", "r"}:
-            rest = choice[1:].strip() if len(choice) > 1 else input("  Item number: ")
-            try:
-                index = int(rest) - 1
-            except ValueError:
-                print("⚠️  Please provide a valid number.")
-                continue
-            if index < 0 or index >= len(children):
-                print("⚠️  Number out of range.")
-                continue
-            if action == "r":
-                children.pop(index)
-                continue
-            child = children[index]
-            if isinstance(child, dict) and ("all" in child or "any" in child):
-                children[index] = edit_condition_group(child)
-            elif isinstance(child, list):
-                children[index] = edit_condition_group({"all": child})
-            else:
-                children[index] = edit_simple_condition(dict(child))
-            continue
+            children[index] = edit_simple_condition(dict(child))
 
 
 def edit_action_block(action: dict[str, Any]) -> dict[str, Any]:
@@ -587,12 +482,9 @@ def edit_action_block(action: dict[str, Any]) -> dict[str, Any]:
         act_type = action.get("type", "move")
         target = action.get("target", "")
         extras = {k: v for k, v in action.items() if k not in {"type", "target"}}
-
         extras_summary = ", ".join(
             f"{key}={json.dumps(value, ensure_ascii=False)}" for key, value in extras.items()
-        )
-        if not extras_summary:
-            extras_summary = "(none)"
+        ) or "(none)"
 
         choice = choose_menu_option(
             "Action editor",
@@ -603,48 +495,19 @@ def edit_action_block(action: dict[str, Any]) -> dict[str, Any]:
                 ("b", "Back"),
             ],
         )
-        if choice is None:
-            choice = "b"
-        if choice == "b":
+        if choice in {None, "b"}:
             return action
         if choice == "t":
             action["type"] = prompt("  Action type: ", allow_empty=True) or act_type
-            continue
-        if choice == "r":
+        elif choice == "r":
             action["target"] = prompt("  Target folder: ", allow_empty=True)
-            continue
-        if choice == "x":
-        print("\nAction editor")
-        print(f"  Type   : {act_type}")
-        print(f"  Target : {target or '<unset>'}")
-        if extras:
-            print("  Extras :")
-            for key, value in extras.items():
-                print(f"    - {key} = {json.dumps(value, ensure_ascii=False)}")
-        else:
-            print("  Extras : (none)")
-
-        print("Options: [T]ype  [R]ename target  E[x]tras  [B]ack")
-        choice = input("Select action: ").strip().lower()
-        if not choice:
-            continue
-        action_key = choice[0]
-        if action_key == "b":
-            return action
-        if action_key == "t":
-            action["type"] = prompt("  Action type: ", allow_empty=True) or act_type
-            continue
-        if action_key == "r":
-            action["target"] = prompt("  Target folder: ", allow_empty=True)
-            continue
-        if action_key == "x":
+        elif choice == "x":
             extras = {k: v for k, v in action.items() if k not in {"type", "target"}}
             edit_generic_dict(extras)
             for key in list(action):
                 if key not in {"type", "target"}:
                     action.pop(key)
             action.update(extras)
-            continue
 
 
 def edit_comments_list(items: list[str]) -> list[str]:
@@ -657,56 +520,26 @@ def edit_comments_list(items: list[str]) -> list[str]:
         labels.append("➕ Add comment")
         labels.append("⬅ Back")
 
-        choice = choose_from_list(
-            "Comments", labels, prompt_text="Select comment (blank to cancel): "
-        )
+        choice = choose_from_list("Comments", labels)
         if choice is None or choice == back_index:
             return items
         if choice == add_index:
             items.append(prompt("  Comment: "))
             continue
-        comment_index = choice
         action = choose_menu_option(
-            f"Comment: {items[comment_index]}",
+            f"Comment: {items[choice]}",
             [("e", "Edit"), ("r", "Remove"), ("b", "Back")],
         )
-        if action is None or action == "b":
+        if action in {None, "b"}:
             continue
         if action == "e":
-            items[comment_index] = prompt("  New comment: ")
+            items[choice] = prompt("  New comment: ")
         elif action == "r":
-            items.pop(comment_index)
-        print("\nComments")
-        if not items:
-            print("  (no comments)")
-        else:
-            for idx, comment in enumerate(items, start=1):
-                print(f"  {idx:>3}. {comment}")
+            items.pop(choice)
 
-        print("Options: [A]dd  [E]dit <n>  [R]emove <n>  [B]ack")
-        choice = input("Select action: ").strip().lower()
-        if not choice:
-            continue
-        action = choice[0]
-        if action == "b":
-            return items
-        if action == "a":
-            items.append(prompt("  Comment: "))
-            continue
-        rest = choice[1:].strip() if len(choice) > 1 else input("  Item number: ")
-        try:
-            index = int(rest) - 1
-        except ValueError:
-            print("⚠️  Please provide a valid number.")
-            continue
-        if index < 0 or index >= len(items):
-            print("⚠️  Number out of range.")
-            continue
-        if action == "e":
-            items[index] = prompt("  New comment: ")
-        elif action == "r":
-            items.pop(index)
 
+# ---------------------------------------------------------------------------
+# High level rule manager
 
 @dataclass
 class RuleRecord:
@@ -762,41 +595,10 @@ class RuleManager:
             f"[{rule.priority:>4}] {rule.name} — {summarise_action(rule.data.get('action'))}"
             for rule in self.rules
         ]
-
-        selection = choose_from_list(
-            "Available rules (sorted by priority):", rule_labels
-        )
+        selection = choose_from_list("Available rules (sorted by priority):", rule_labels)
         if selection is None:
             return None
         return self.rules[selection]
-        try:
-            choice = interactive_menu("Available rules (sorted by priority):", rule_labels)
-            menu_used = True
-        except RuntimeError:
-            choice = None
-            menu_used = False
-
-        if choice is not None:
-            return self.rules[choice]
-
-        if menu_used:
-            return None
-
-        while True:
-            print("\nAvailable rules (sorted by priority):")
-            for idx, rule in enumerate(self.rules, start=1):
-                print(f"  {idx:>3}. [{rule.priority:>4}] {rule.name} ({rule.file.name})")
-            raw = input("Enter rule number (or blank to cancel): ").strip()
-            if not raw:
-                return None
-            try:
-                index = int(raw) - 1
-            except ValueError:
-                print("⚠️  Please enter a number.")
-                continue
-            if 0 <= index < len(self.rules):
-                return self.rules[index]
-            print("⚠️  Number out of range.")
 
     def generate_filename(self, name: str) -> Path:
         slug = slugify(name)
@@ -814,7 +616,10 @@ class RuleManager:
                     numeric_prefixes.append(int(prefix))
                 except ValueError:
                     continue
-        next_id = max(numeric_prefixes, default=int(datetime.now().strftime("%y%j%H%M"))) + 1
+        next_id = max(
+            numeric_prefixes,
+            default=int(datetime.now().strftime("%y%j%H%M")),
+        ) + 1
         filename = f"{next_id:05d}_{slug}.json"
         return self.rules_dir / filename
 
@@ -824,71 +629,41 @@ class RuleManager:
         name = prompt("  Rule name: ")
         priority = prompt_int("  Priority [100]: ", default=100)
         filename = self.generate_filename(name)
-        if confirm(f"Save rule as {filename.name}?", default=True):
-            record = RuleRecord(
-                file=filename,
-                data={
-                    "name": name,
-                    "priority": priority,
-                    "conditions": {"all": []},
-                    "action": {"type": "move", "target": ""},
-                },
-            )
-            self.rules.append(record)
-            self.edit_rule(record, new_rule=True)
-            self.rules.sort(key=lambda rule: (rule.priority, rule.name.lower()))
-        else:
+        if not confirm(f"Save rule as {filename.name}?", default=True):
             print("❌ Creation cancelled.")
+            return
+        record = RuleRecord(
+            file=filename,
+            data={
+                "name": name,
+                "priority": priority,
+                "conditions": {"all": []},
+                "action": {"type": "move", "target": ""},
+            },
+        )
+        self.rules.append(record)
+        self.edit_rule(record, new_rule=True)
+        self.rules.sort(key=lambda rule: (rule.priority, rule.name.lower()))
 
     def edit_rule(self, rule: RuleRecord, *, new_rule: bool = False) -> None:
         while True:
-            comments = rule.data.get("comments")
+            comments = rule.data.get("comments") or []
             options = [
                 ("n", f"Name      : {rule.data.get('name', '<unnamed>')}"),
                 ("p", f"Priority  : {rule.priority}"),
                 ("c", f"Conditions: {summarise_condition(rule.data.get('conditions'))}"),
                 ("a", f"Action    : {summarise_action(rule.data.get('action'))}"),
+                ("o", f"Comments ({len(comments)})" if comments else "Comments (none)"),
+                ("x", "Edit extra fields"),
+                ("t", "Dry-run test"),
+                ("s", "Save & exit"),
+                ("b", "Back"),
             ]
-            if comments:
-                options.append(("o", f"Comments ({len(comments)})"))
-            else:
-                options.append(("o", "Comments (none)"))
-            options.extend(
-                [
-                    ("x", "Edit extra fields"),
-                    ("t", "Dry-run test"),
-                    ("s", "Save & exit"),
-                    ("b", "Back"),
-                ]
-            )
-
             action = choose_menu_option(
-                f"🛠️  Editing rule — {rule.file.name}", options
+                f"🛠️  Editing rule — {rule.file.name}",
+                options,
             )
-            if action is None:
-                action = "b"
-            print("\n🛠️  Editing rule")
-            print(f"  File     : {rule.file.name}")
-            print(f"  Name     : {rule.data.get('name', '<unnamed>')}")
-            print(f"  Priority : {rule.priority}")
-            print(f"  Action   : {summarise_action(rule.data.get('action'))}")
-            print(f"  Conditions -> {summarise_condition(rule.data.get('conditions'))}")
-            if comments:
-                print("  Comments :")
-                for line in comments:
-                    print(f"    - {line}")
-            else:
-                print("  Comments : (none)")
-
-            print(
-                "Options: [N]ame  [P]riority  [C]onditions  [A]ction  "
-                "C[o]mments  E[x]tras  [T]est  [S]ave & exit  [B]ack"
-            )
-            choice = input("Select action: ").strip().lower()
-            if not choice:
-                continue
-            action = choice[0]
-            if action == "b":
+            if action in {None, "b"}:
                 if new_rule and confirm("Discard this new rule?", default=False):
                     self.rules.remove(rule)
                     if rule.file.exists():
@@ -903,51 +678,44 @@ class RuleManager:
                 return
             if action == "n":
                 rule.data["name"] = prompt("  Rule name: ")
-                continue
-            if action == "p":
+            elif action == "p":
                 rule.data["priority"] = prompt_int("  Priority: ", default=rule.priority)
-                continue
-            if action == "c":
+            elif action == "c":
                 existing = rule.data.get("conditions")
                 rule.data["conditions"] = edit_condition_group(existing or {"all": []})
-                continue
-            if action == "a":
+            elif action == "a":
                 rule.data["action"] = edit_action_block(dict(rule.data.get("action") or {}))
-                continue
-            if action == "o":
+            elif action == "o":
                 items = list(rule.data.get("comments") or [])
                 rule.data["comments"] = edit_comments_list(items)
-                continue
-            if action == "x":
+            elif action == "x":
                 extras = {
                     key: value
                     for key, value in rule.data.items()
                     if key not in {"name", "priority", "conditions", "action", "comments"}
                 }
                 edit_generic_dict(extras)
-                # Remove existing extras before applying updates.
                 for key in list(rule.data):
                     if key not in {"name", "priority", "conditions", "action", "comments"}:
                         rule.data.pop(key)
                 rule.data.update(extras)
-                continue
-            if action == "t":
+            elif action == "t":
                 self.test_rule(rule)
-                continue
 
     def delete_rule(self) -> None:
         rule = self.select_rule()
         if not rule:
             return
-        if confirm(f"Delete {rule.file.name}?", default=False):
-            if rule.file.exists():
-                backup = rule.file.with_suffix(".bak")
-                shutil.copy2(rule.file, backup)
-                rule.file.unlink()
-                print(f"🗑️  Rule deleted. Backup saved to {backup.name}.")
-            else:
-                print("🗑️  Rule removed (file did not exist on disk).")
-            self.rules.remove(rule)
+        if not confirm(f"Delete {rule.file.name}?", default=False):
+            return
+        if rule.file.exists():
+            backup = rule.file.with_suffix(".bak")
+            shutil.copy2(rule.file, backup)
+            rule.file.unlink()
+            print(f"🗑️  Rule deleted. Backup saved to {backup.name}.")
+        else:
+            print("🗑️  Rule removed (file did not exist on disk).")
+        self.rules.remove(rule)
 
     def test_rule(self, rule: RuleRecord) -> None:
         db_path = self.config.paths.db_file
@@ -982,26 +750,10 @@ class RuleManager:
             labels.append("💾 Save changes")
             labels.append("⬅ Back")
 
-            selection = choose_from_list(
-                "Priority manager — select a rule", labels
-            )
+            selection = choose_from_list("Priority manager — select a rule", labels)
             if selection is None or selection == back_index:
                 return
             if selection == save_index:
-            print("\nPriority manager")
-            for idx, rule in enumerate(ordered, start=1):
-                print(f"  {idx:>3}. [{rule.priority:>4}] {rule.name}")
-            print(
-                "Options: move [U]p <n>  move [D]own <n>  set [E]dit <n>  "
-                "[S]ave  [B]ack"
-            )
-            choice = input("Select action: ").strip().lower()
-            if not choice:
-                continue
-            action = choice[0]
-            if action == "b":
-                return
-            if action == "s":
                 for record in ordered:
                     self.save_rule(record)
                 self.refresh_rules()
@@ -1013,7 +765,7 @@ class RuleManager:
                 f"Adjust priority — [{rule.priority:>4}] {rule.name}",
                 [("u", "Move up"), ("d", "Move down"), ("e", "Edit value"), ("b", "Back")],
             )
-            if action is None or action == "b":
+            if action in {None, "b"}:
                 continue
             if action == "u":
                 if selection == 0:
@@ -1025,8 +777,7 @@ class RuleManager:
                 current_priority = current.data.get("priority", current.priority)
                 above_priority = above.data.get("priority", above.priority)
                 current.data["priority"], above.data["priority"] = above_priority, current_priority
-                continue
-            if action == "d":
+            elif action == "d":
                 if selection == len(ordered) - 1:
                     print("⚠️  Already at the bottom.")
                     continue
@@ -1036,47 +787,8 @@ class RuleManager:
                 current_priority = current.data.get("priority", current.priority)
                 below_priority = below.data.get("priority", below.priority)
                 current.data["priority"], below.data["priority"] = below_priority, current_priority
-                continue
-            if action == "e":
-                rule.data["priority"] = prompt_int(
-                    "  New priority: ", default=rule.priority
-            rest = choice[1:].strip()
-            if not rest:
-                rest = input("  Rule number: ").strip()
-            try:
-                index = int(rest) - 1
-            except ValueError:
-                print("⚠️  Please provide a valid number.")
-                continue
-            if index < 0 or index >= len(ordered):
-                print("⚠️  Number out of range.")
-                continue
-            if action == "u":
-                if index == 0:
-                    print("⚠️  Already at the top.")
-                    continue
-                ordered[index], ordered[index - 1] = ordered[index - 1], ordered[index]
-                ordered[index].data["priority"], ordered[index - 1].data["priority"] = (
-                    ordered[index - 1].data.get("priority", ordered[index - 1].priority),
-                    ordered[index].data.get("priority", ordered[index].priority),
-                )
-                continue
-            if action == "d":
-                if index == len(ordered) - 1:
-                    print("⚠️  Already at the bottom.")
-                    continue
-                ordered[index], ordered[index + 1] = ordered[index + 1], ordered[index]
-                ordered[index].data["priority"], ordered[index + 1].data["priority"] = (
-                    ordered[index + 1].data.get("priority", ordered[index + 1].priority),
-                    ordered[index].data.get("priority", ordered[index].priority),
-                )
-                continue
-            if action == "e":
-                current = ordered[index]
-                current.data["priority"] = prompt_int(
-                    "  New priority: ", default=current.priority
-                )
-                continue
+            elif action == "e":
+                rule.data["priority"] = prompt_int("  New priority: ", default=rule.priority)
 
     def run(self) -> None:
         while True:
@@ -1092,44 +804,31 @@ class RuleManager:
                     ("q", "Quit"),
                 ],
             )
-            if action is None:
-                action = "q"
-            print("\n📬 IMAPFilter Rule Manager")
-            print("  [L]ist rules  [C]reate  [E]dit  [D]elete  [P]riority manager  [R]eload  [Q]uit")
-            choice = input("Select action: ").strip().lower()
-            if not choice:
-                continue
-            action = choice[0]
-            if action == "q":
+            if action in {None, "q"}:
                 print("Goodbye!")
                 return
             if action == "r":
                 self.refresh_rules()
                 print("🔄 Rules reloaded from disk.")
-                continue
-            if action == "l":
+            elif action == "l":
                 self.refresh_rules()
                 self.select_rule()  # Listing happens within select_rule
-                continue
-            if action == "c":
+            elif action == "c":
                 self.refresh_rules()
                 self.create_rule()
-                continue
-            if action == "e":
+            elif action == "e":
                 self.refresh_rules()
                 rule = self.select_rule()
                 if rule:
                     self.edit_rule(rule)
-                continue
-            if action == "d":
+            elif action == "d":
                 self.refresh_rules()
                 self.delete_rule()
-                continue
-            if action == "p":
+            elif action == "p":
                 self.refresh_rules()
                 self.reorder_priorities()
-                continue
-            print("⚠️  Unknown option. Please choose one of the highlighted letters.")
+            else:
+                print("⚠️  Unknown option. Please choose one of the highlighted letters.")
 
 
 def main() -> int:
@@ -1147,4 +846,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
