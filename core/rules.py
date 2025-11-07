@@ -9,8 +9,7 @@ from typing import Sequence
 
 from tqdm import tqdm
 
-from core.logging_utils import JsonLogger, now_iso
-from core.timers import PhaseTimer
+from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 
 
 def load_rules(rule_dir: Path, logger: JsonLogger) -> list[dict]:
