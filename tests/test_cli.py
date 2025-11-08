@@ -98,7 +98,7 @@ def test_handle_build_cache_uses_default_inbox(monkeypatch, cli_context):
 
 def test_handle_evaluate_sets_dry_run(monkeypatch, cli_context):
     cfg, db, logger = cli_context
-    args = argparse.Namespace(cmd="evaluate", dry_run=True)
+    args = argparse.Namespace(cmd="evaluate", dry_run=True, verbose=False, debug_headers=False)
     seen = {}
 
     def fake_load_rules(path, log):
@@ -118,11 +118,13 @@ def test_handle_evaluate_sets_dry_run(monkeypatch, cli_context):
     assert cfg.executor.dry_run is True
     assert seen["dry_run"] is True
     assert seen["scope"] == cfg.executor.default_run_scope
+    assert seen["verbose"] is False
+    assert seen["debug_headers"] is False
 
 
 def test_handle_execute_dry_run(monkeypatch, cli_context):
     cfg, db, logger = cli_context
-    args = argparse.Namespace(cmd="execute", dry_run=True, strict=False)
+    args = argparse.Namespace(cmd="execute", dry_run=True, strict=False, verbose=False)
     seen = {}
 
     def fake_execute_actions(client, database, **kwargs):
@@ -142,11 +144,19 @@ def test_handle_execute_dry_run(monkeypatch, cli_context):
     assert cfg.executor.dry_run is True
     assert seen["dry_run"] is True
     assert seen["strict"] is False
+    assert seen["verbose"] is False
 
 
 def test_handle_run_all_summarises(monkeypatch, cli_context):
     cfg, db, logger = cli_context
-    args = argparse.Namespace(cmd="run-all", dry_run=True, strict=True, all_folders=True)
+    args = argparse.Namespace(
+        cmd="run-all",
+        dry_run=True,
+        strict=True,
+        all_folders=True,
+        verbose=False,
+        debug_headers=False,
+    )
     seen = {}
 
     class FakeClient:
@@ -175,10 +185,12 @@ def test_handle_run_all_summarises(monkeypatch, cli_context):
 
     def fake_evaluate_rules(database, rules, **kwargs):
         seen["evaluate_called"] = True
+        seen["evaluate_kwargs"] = kwargs
         return None, len(rules), 1
 
     def fake_execute_actions(client, database, **kwargs):
         seen["execute_called"] = True
+        seen["execute_kwargs"] = kwargs
         return None, {"done": 1, "skipped": 0, "failed": 0, "suppressed": 0}
 
     monkeypatch.setattr(cli, "imap_login", fake_login)
@@ -195,3 +207,6 @@ def test_handle_run_all_summarises(monkeypatch, cli_context):
     assert seen["cache_folders"] == ["INBOX", "Archive"]
     assert seen["evaluate_called"] is True
     assert seen["execute_called"] is True
+    assert seen["evaluate_kwargs"]["verbose"] is False
+    assert seen["evaluate_kwargs"]["debug_headers"] is False
+    assert seen["execute_kwargs"]["verbose"] is False

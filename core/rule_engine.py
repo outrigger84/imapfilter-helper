@@ -123,6 +123,7 @@ def evaluate_rules(
     dry_run: bool,
     show_progress: bool,
     logger: JsonLogger,
+    verbose: bool = False,
     debug_headers: bool = False,
 ) -> tuple[PhaseTimer, int, int]:
     rule_list = list(rules)
@@ -136,6 +137,28 @@ def evaluate_rules(
     for uid, folder, data in rows:
         folder_groups.setdefault(folder, []).append((uid, data))
 
+    logger.log(
+        "INFO",
+        "evaluate_log_hint",
+        {"log_file": str(logger.log_file)},
+        console=f"📝 Detailed logs: {logger.log_file}",
+    )
+
+    if verbose and folder_groups:
+        overview = {
+            folder: len(items)
+            for folder, items in sorted(folder_groups.items(), key=lambda kv: kv[0])
+        }
+        lines = "\n".join(f"      • {folder}: {count}" for folder, count in overview.items())
+        logger.log(
+            "INFO",
+            "evaluate_overview",
+            {"folders": overview, "total_messages": len(rows)},
+            console=(
+                "📂 Folders queued for evaluation:" + (f"\n{lines}" if lines else "")
+            ),
+        )
+
     folders_bar = tqdm(
         folder_groups.items(),
         desc="🧩 Evaluating folders",
@@ -147,8 +170,17 @@ def evaluate_rules(
     )
 
     total_matches = 0
+    folder_match_counts: dict[str, int] = {}
+    rule_match_counts: dict[str, int] = {}
     for folder, msgs in folders_bar:
         folders_bar.set_postfix_str(folder)
+        if verbose:
+            logger.log(
+                "INFO",
+                "evaluate_folder_start",
+                {"folder": folder, "messages": len(msgs)},
+                console=f"🔍 Evaluating {folder} ({len(msgs)} messages)",
+            )
         msgs_bar = tqdm(
             msgs,
             desc=f"   🎯 Checking {folder}",
@@ -196,6 +228,13 @@ def evaluate_rules(
                         ),
                     )
                     total_matches += 1
+                    folder_match_counts[folder] = folder_match_counts.get(folder, 0) + 1
+                    rule_name = rule.get("name") or "(unnamed)"
+                    rule_match_counts[rule_name] = rule_match_counts.get(rule_name, 0) + 1
+                    console_msg: str | None = None
+                    if verbose:
+                        target = action.get("target") or "(no target)"
+                        console_msg = f"✅ {rule_name} matched {folder}/{uid} → {target}"
                     logger.log(
                         "INFO",
                         "rule_match",
@@ -207,12 +246,41 @@ def evaluate_rules(
                             "target": action.get("target"),
                             "dry_run": dry_run,
                         },
+                        console=console_msg,
                     )
 
         db.commit()
+        if verbose:
+            logger.log(
+                "INFO",
+                "evaluate_folder_complete",
+                {
+                    "folder": folder,
+                    "messages": len(msgs),
+                    "matches": folder_match_counts.get(folder, 0),
+                },
+                console=f"📦 Completed {folder}: {folder_match_counts.get(folder, 0)} matches",
+            )
 
     timer.stop()
     timer.count = total_matches
+    folder_summary = sorted(folder_match_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    rule_summary = sorted(rule_match_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+    def _fmt_summary(title: str, entries: list[tuple[str, int]]) -> str:
+        if not entries:
+            return ""
+        lines = "\n".join(f"      • {name}: {count}" for name, count in entries)
+        return f"   {title}\n{lines}\n"
+
+    summary_console = (
+        "\n📊 Summary — Evaluate Rules\n"
+        f"   🧩  Rules evaluated: {len(rule_list)}\n"
+        f"   🎯  Matches found: {total_matches}\n"
+        f"   ⏱️  Duration: {timer.fmt()} ({timer.rate():.1f} msg/s)\n"
+        + _fmt_summary("📂  Matches by folder:", folder_summary[:5])
+        + _fmt_summary("🧠  Matches by rule:", rule_summary[:5])
+    )
     logger.log(
         "INFO",
         "phase_summary",
@@ -222,12 +290,9 @@ def evaluate_rules(
             "matches": total_matches,
             "elapsed_sec": timer.elapsed,
             "rate": timer.rate(),
+            "matches_by_folder": folder_match_counts,
+            "matches_by_rule": rule_match_counts,
         },
-        console=(
-            "\n📊 Summary — Evaluate Rules\n"
-            f"   🧩  Rules evaluated: {len(rule_list)}\n"
-            f"   🎯  Matches found: {total_matches}\n"
-            f"   ⏱️  Duration: {timer.fmt()} ({timer.rate():.1f} msg/s)\n"
-        ),
+        console=summary_console,
     )
     return timer, len(rule_list), total_matches
