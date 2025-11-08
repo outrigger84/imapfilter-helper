@@ -2,11 +2,44 @@
 from __future__ import annotations
 
 import imaplib
-from typing import Dict
+from typing import Dict, Iterable
 
 from tqdm import tqdm
 
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
+
+
+def _imap_response_text(response: Iterable[bytes | str] | None) -> str:
+    if not response:
+        return ""
+    parts: list[str] = []
+    for item in response:
+        if not item:
+            continue
+        if isinstance(item, bytes):
+            parts.append(item.decode("utf-8", "ignore"))
+        else:
+            parts.append(str(item))
+    return " ".join(part for part in parts if part).strip()
+
+
+def _format_imap_details(response: Iterable[bytes | str] | None) -> str:
+    text = _imap_response_text(response)
+    return f": {text}" if text else ""
+
+
+def _should_try_create_folder(response: Iterable[bytes | str] | None) -> bool:
+    text = _imap_response_text(response).lower()
+    if not text:
+        return False
+    keywords = (
+        "trycreate",
+        "no such mailbox",
+        "does not exist",
+        "not found",
+        "nonexistent",
+    )
+    return any(keyword in text for keyword in keywords)
 
 
 def execute_actions(
@@ -217,18 +250,38 @@ def execute_actions(
                 if sel_typ != "OK":
                     raise imaplib.IMAP4.error(f"Cannot open folder {folder}")
 
+                target_ready = target is None
                 for a_id, uid in current_items:
                     deleted_flagged = False
                     try:
                         typ1, copy_resp = client.uid("COPY", uid, f'"{target}"')
+                        if (
+                            typ1 != "OK"
+                            and target
+                            and not target_ready
+                            and _should_try_create_folder(copy_resp)
+                        ):
+                            create_typ, create_resp = client.create(f'"{target}"')
+                            if create_typ != "OK":
+                                create_details = _format_imap_details(create_resp)
+                                raise imaplib.IMAP4.error(
+                                    f"CREATE {target} failed{create_details}"
+                                )
+                            target_ready = True
+                            logger.log(
+                                "INFO",
+                                "create_missing_target",
+                                {"folder": folder, "target": target},
+                                console=f"   📁 Created missing folder {target}",
+                            )
+                            typ1, copy_resp = client.uid("COPY", uid, f'"{target}"')
+
                         if typ1 != "OK":
-                            details = ""
-                            if copy_resp and copy_resp[0]:
-                                try:
-                                    details = f": {copy_resp[0].decode('utf-8', 'ignore')}"
-                                except AttributeError:
-                                    details = f": {copy_resp[0]}"
+                            details = _format_imap_details(copy_resp)
                             raise imaplib.IMAP4.error(f"UID COPY failed{details}")
+
+                        if target and not target_ready:
+                            target_ready = True
 
                         typ2, _ = client.uid("STORE", uid, "+FLAGS", "\\Deleted")
                         if typ2 != "OK":
