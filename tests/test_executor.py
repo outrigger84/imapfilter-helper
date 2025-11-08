@@ -101,6 +101,14 @@ class MissingFolderClient(FakeClient):
         return "OK", [b""]
 
 
+class MissingMessageClient(FakeClient):
+    def uid(self, command: str, uid: str, *args):  # type: ignore[override]
+        if command == "COPY":
+            self.commands.append((command, uid))
+            return "NO", [b"NO such message"]
+        return super().uid(command, uid, *args)
+
+
 def test_execute_actions_respects_limit(tmp_path: Path):
     db, logger = _prepare_db(tmp_path)
     client = FakeClient()
@@ -190,5 +198,47 @@ def test_execute_actions_creates_missing_folder(tmp_path: Path):
         "SELECT status FROM actions WHERE uid='msg-10'",
     ).fetchone()[0]
     assert status == "done"
+
+    db.close()
+
+
+def test_execute_actions_logs_missing_uid_skip(tmp_path: Path):
+    db, logger = _prepare_db_with_actions(
+        tmp_path,
+        [("missing-uid", "INBOX", "rule", "Archive", 100, "pending", "2024-01-05T00:00:00Z")],
+    )
+    client = MissingMessageClient()
+
+    _timer, stats = execute_actions(
+        client,
+        db,
+        show_progress=False,
+        dry_run=False,
+        strict=False,
+        logger=logger,
+        verbose=True,
+    )
+
+    assert stats["skipped"] == 1
+
+    status = db.execute(
+        "SELECT status FROM actions WHERE uid='missing-uid'",
+    ).fetchone()[0]
+    assert status == "skipped"
+
+    log_entries = []
+    with logger.log_file.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                log_entries.append(json.loads(line))
+
+    skip_entries = [entry for entry in log_entries if entry.get("message") == "message_missing_skipped"]
+
+    assert len(skip_entries) == 1
+    skip_context = skip_entries[0]["context"]
+    assert skip_context["uid"] == "missing-uid"
+    assert skip_context["folder"] == "INBOX"
+    assert skip_context["target"] == "Archive"
+    assert "no such message" in skip_context["error"].lower()
 
     db.close()
