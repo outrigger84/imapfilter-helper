@@ -124,7 +124,7 @@ def test_handle_evaluate_sets_dry_run(monkeypatch, cli_context):
 
 def test_handle_execute_dry_run(monkeypatch, cli_context):
     cfg, db, logger = cli_context
-    args = argparse.Namespace(cmd="execute", dry_run=True, strict=False, verbose=False)
+    args = argparse.Namespace(cmd="execute", dry_run=True, strict=False, verbose=False, limit=5)
     seen = {}
 
     def fake_execute_actions(client, database, **kwargs):
@@ -145,6 +145,7 @@ def test_handle_execute_dry_run(monkeypatch, cli_context):
     assert seen["dry_run"] is True
     assert seen["strict"] is False
     assert seen["verbose"] is False
+    assert seen["limit"] == 5
 
 
 def test_handle_run_all_summarises(monkeypatch, cli_context):
@@ -156,6 +157,7 @@ def test_handle_run_all_summarises(monkeypatch, cli_context):
         all_folders=True,
         verbose=False,
         debug_headers=False,
+        limit=None,
     )
     seen = {}
 
@@ -210,3 +212,4 @@ def test_handle_run_all_summarises(monkeypatch, cli_context):
     assert seen["evaluate_kwargs"]["verbose"] is False
     assert seen["evaluate_kwargs"]["debug_headers"] is False
     assert seen["execute_kwargs"]["verbose"] is False
+    assert seen["execute_kwargs"]["limit"] is None
