@@ -293,13 +293,15 @@ def execute_actions(
                             (now_iso(), a_id),
                         )
                         stats["done"] += 1
+                        console_msg: str | None = None
                         if verbose:
-                            logger.log(
-                                "INFO",
-                                "execute_uid_done",
-                                {"folder": folder, "target": target, "uid": uid},
-                                console=f"   ✅ Moved {folder}/{uid} → {display_target}",
-                            )
+                            console_msg = f"   ✅ Moved {folder}/{uid} → {display_target}"
+                        logger.log(
+                            "INFO",
+                            "execute_uid_done",
+                            {"folder": folder, "target": target, "uid": uid},
+                            console=console_msg,
+                        )
 
                     except imaplib.IMAP4.error as exc:
                         if deleted_flagged:
