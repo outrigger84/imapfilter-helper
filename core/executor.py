@@ -18,6 +18,7 @@ def execute_actions(
     strict: bool,
     logger: JsonLogger,
     verbose: bool = False,
+    limit: int | None = None,
 ) -> tuple[PhaseTimer, Dict[str, int]]:
     if not dry_run and client is None:
         raise ValueError("An IMAP client is required when not running in dry-run mode")
@@ -43,6 +44,7 @@ def execute_actions(
     distinct_uids = distinct_cur.fetchone()[0] or 0
     suppressed = pending_total - distinct_uids
 
+    order_clause = "ORDER BY folder, target, priority DESC, created_at ASC, id ASC"
     dedup_cte = """
         WITH ranked AS (
             SELECT
@@ -61,12 +63,27 @@ def execute_actions(
             WHERE status='pending'
         )
     """
+    selection_source = "ranked WHERE rn=1"
+    dedup_params: tuple[int, ...] = ()
+    if limit is not None:
+        dedup_cte += (
+            "    , limited AS (\n"
+            "        SELECT id, uid, folder, target, rule_name, priority, created_at\n"
+            "        FROM ranked\n"
+            "        WHERE rn=1\n"
+            f"        {order_clause}\n"
+            "        LIMIT ?\n"
+            "    )\n"
+        )
+        selection_source = "limited"
+        dedup_params = (int(limit),)
 
     if suppressed > 0:
         duplicates_cur = db.cursor()
         duplicates_cur.execute(
             dedup_cte
-            + "SELECT id, uid, folder, target, rule_name, priority FROM ranked WHERE rn>1 ORDER BY uid"
+            + "SELECT id, uid, folder, target, rule_name, priority FROM ranked WHERE rn>1 ORDER BY uid",
+            dedup_params,
         )
         while True:
             rows = duplicates_cur.fetchmany(256)
@@ -93,7 +110,8 @@ def execute_actions(
     group_counts_cur = db.cursor()
     group_counts_cur.execute(
         dedup_cte
-        + "SELECT folder, target, COUNT(*) FROM ranked WHERE rn=1 GROUP BY folder, target ORDER BY folder, target"
+        + f"SELECT folder, target, COUNT(*) FROM {selection_source} GROUP BY folder, target ORDER BY folder, target",
+        dedup_params,
     )
     group_counts = group_counts_cur.fetchall()
     group_totals = {(folder, target): count for folder, target, count in group_counts}
@@ -136,8 +154,9 @@ def execute_actions(
     select_cur.execute(
         dedup_cte
         + "SELECT id, uid, folder, target, rule_name, priority, created_at "
-        "FROM ranked WHERE rn=1 "
-        "ORDER BY folder, target, priority DESC, created_at ASC, id ASC"
+        f"FROM {selection_source} "
+        f"{order_clause}",
+        dedup_params,
     )
 
     chunk_size = 512

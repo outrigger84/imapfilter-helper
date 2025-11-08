@@ -45,6 +45,7 @@ class ExecutorConfig:
     default_run_scope: str = "inbox"
     dry_run: bool = False
     strict: bool = False
+    limit: Optional[int] = None
 
 
 @dataclass
