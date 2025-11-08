@@ -350,6 +350,21 @@ def execute_actions(
                                     {"uid": uid, "folder": folder, "error": str(cleanup_exc)},
                                 )
                             stats["skipped"] += 1
+                            logger.log(
+                                "WARN",
+                                "message_missing_skipped",
+                                {
+                                    "uid": uid,
+                                    "folder": folder,
+                                    "target": target,
+                                    "error": str(exc),
+                                },
+                                console=(
+                                    f"   ⚠️ Skipped missing {folder}/{uid}: {exc}"
+                                    if verbose
+                                    else None
+                                ),
+                            )
                             continue
 
                         db.execute(
