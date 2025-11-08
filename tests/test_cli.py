@@ -213,3 +213,32 @@ def test_handle_run_all_summarises(monkeypatch, cli_context):
     assert seen["evaluate_kwargs"]["debug_headers"] is False
     assert seen["execute_kwargs"]["verbose"] is False
     assert seen["execute_kwargs"]["limit"] is None
+
+
+def test_handle_clear_pending_removes_actions(cli_context):
+    cfg, db, logger = cli_context
+    args = argparse.Namespace(cmd="clear-pending")
+
+    db.executemany(
+        "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+            ("uid-1", "INBOX", "rule-a", "Archive", 100, "pending", "2024-01-01T00:00:00Z"),
+            ("uid-2", "INBOX", "rule-b", "Archive", 100, "pending", "2024-01-02T00:00:00Z"),
+            ("uid-3", "INBOX", "rule-c", "Archive", 100, "done", "2024-01-03T00:00:00Z"),
+        ],
+    )
+    db.commit()
+
+    result = cli.handle_clear_pending(args, cfg, db, logger)
+
+    assert result == 0
+
+    cur = db.cursor()
+    cur.execute("SELECT COUNT(*) FROM actions WHERE status='pending'")
+    (remaining,) = cur.fetchone()
+    assert remaining == 0
+
+    cur.execute("SELECT COUNT(*) FROM actions WHERE status!='pending'")
+    (others,) = cur.fetchone()
+    assert others == 1
