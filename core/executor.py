@@ -218,14 +218,22 @@ def execute_actions(
                     raise imaplib.IMAP4.error(f"Cannot open folder {folder}")
 
                 for a_id, uid in current_items:
+                    deleted_flagged = False
                     try:
-                        typ1, _ = client.uid("COPY", uid, f'"{target}"')
+                        typ1, copy_resp = client.uid("COPY", uid, f'"{target}"')
                         if typ1 != "OK":
-                            raise imaplib.IMAP4.error("UID COPY failed")
+                            details = ""
+                            if copy_resp and copy_resp[0]:
+                                try:
+                                    details = f": {copy_resp[0].decode('utf-8', 'ignore')}"
+                                except AttributeError:
+                                    details = f": {copy_resp[0]}"
+                            raise imaplib.IMAP4.error(f"UID COPY failed{details}")
 
                         typ2, _ = client.uid("STORE", uid, "+FLAGS", "\\Deleted")
                         if typ2 != "OK":
                             raise imaplib.IMAP4.error("UID STORE +FLAGS \\Deleted failed")
+                        deleted_flagged = True
 
                         db.execute(
                             "UPDATE actions SET status='done', executed_at=? WHERE id=?",
@@ -241,6 +249,11 @@ def execute_actions(
                             )
 
                     except imaplib.IMAP4.error as exc:
+                        if deleted_flagged:
+                            try:
+                                client.uid("STORE", uid, "-FLAGS", "\\Deleted")
+                            except Exception:  # pragma: no cover - best effort cleanup
+                                pass
                         message = str(exc).lower()
                         if (
                             "no such message" in message
@@ -295,6 +308,13 @@ def execute_actions(
                             {"uid": uid, "folder": folder, "target": target, "error": str(exc)},
                             console=f"❌ {folder}/{uid}: {exc}",
                         )
+                    except Exception:
+                        if deleted_flagged:
+                            try:
+                                client.uid("STORE", uid, "-FLAGS", "\\Deleted")
+                            except Exception:  # pragma: no cover - best effort cleanup
+                                pass
+                        raise
                     finally:
                         msgs_bar.update(1)
 
