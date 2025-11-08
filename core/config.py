@@ -37,6 +37,7 @@ class PathsConfig:
 @dataclass
 class LoggingConfig:
     show_progress: bool = True
+    verbose: bool = False
 
 
 @dataclass

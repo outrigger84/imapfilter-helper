@@ -29,15 +29,40 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_eval = sub.add_parser("evaluate", help="Evaluate rules against cache")
     p_eval.add_argument("--dry-run", action="store_true", help="Simulate rule matches only")
+    p_eval.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed match information during evaluation",
+    )
+    p_eval.add_argument(
+        "--debug-headers",
+        action="store_true",
+        help="Log message headers for troubleshooting",
+    )
 
     p_exec = sub.add_parser("execute", help="Execute queued actions")
     p_exec.add_argument("--dry-run", action="store_true", help="Simulate execution only (no IMAP writes)")
     p_exec.add_argument("--strict", action="store_true", help="Abort on missing/failed IMAP ops")
+    p_exec.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed progress for each moved message",
+    )
 
     p_run = sub.add_parser("run-all", help="Build cache, evaluate, and execute")
     p_run.add_argument("--dry-run", action="store_true", help="Simulate everything (no IMAP writes)")
     p_run.add_argument("--all-folders", action="store_true", help="Process all folders, not just INBOX")
     p_run.add_argument("--strict", action="store_true", help="Abort on missing/failed IMAP ops during execute")
+    p_run.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed progress for evaluate/execute phases",
+    )
+    p_run.add_argument(
+        "--debug-headers",
+        action="store_true",
+        help="Log message headers while evaluating rules",
+    )
 
     return parser
 
@@ -70,6 +95,7 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
 def handle_evaluate(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
     """Handle the ``evaluate`` command."""
     cfg.executor.dry_run = args.dry_run
+    cfg.logging.verbose = args.verbose
     rules = load_rules(cfg.paths.rules_dir, logger)
     evaluate_rules(
         db,
@@ -78,6 +104,8 @@ def handle_evaluate(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLo
         dry_run=cfg.executor.dry_run,
         show_progress=cfg.logging.show_progress,
         logger=logger,
+        verbose=cfg.logging.verbose,
+        debug_headers=args.debug_headers,
     )
     return 0
 
@@ -86,6 +114,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     """Handle the ``execute`` command."""
     cfg.executor.dry_run = args.dry_run
     cfg.executor.strict = args.strict
+    cfg.logging.verbose = args.verbose
     client = None if args.dry_run else imap_login(cfg.paths.secrets_file, logger)
     try:
         execute_actions(
@@ -95,6 +124,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             dry_run=cfg.executor.dry_run,
             strict=cfg.executor.strict,
             logger=logger,
+            verbose=cfg.logging.verbose,
         )
     finally:
         if client is not None:
@@ -106,6 +136,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     """Handle the ``run-all`` command."""
     cfg.executor.dry_run = args.dry_run
     cfg.executor.strict = args.strict
+    cfg.logging.verbose = args.verbose
     run_timer = PhaseTimer("run-all")
     client = imap_login(cfg.paths.secrets_file, logger)
     try:
@@ -125,6 +156,8 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             dry_run=cfg.executor.dry_run,
             show_progress=cfg.logging.show_progress,
             logger=logger,
+            verbose=cfg.logging.verbose,
+            debug_headers=args.debug_headers,
         )
         _exec_timer, stats = execute_actions(
             client,
@@ -133,6 +166,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             dry_run=cfg.executor.dry_run,
             strict=cfg.executor.strict,
             logger=logger,
+            verbose=cfg.logging.verbose,
         )
         run_timer.stop()
         summary_context: dict[str, object] = {

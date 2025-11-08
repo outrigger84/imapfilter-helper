@@ -20,6 +20,7 @@ def execute_actions(
     dry_run: bool,
     strict: bool,
     logger: JsonLogger,
+    verbose: bool = False,
 ) -> tuple[PhaseTimer, Dict[str, int]]:
     if not dry_run and client is None:
         raise ValueError("An IMAP client is required when not running in dry-run mode")
@@ -32,6 +33,13 @@ def execute_actions(
         "FROM actions WHERE status='pending' ORDER BY priority DESC, created_at ASC"
     )
     actions: List[ActionRow] = cur.fetchall()
+
+    logger.log(
+        "INFO",
+        "execute_log_hint",
+        {"log_file": str(logger.log_file)},
+        console=f"📝 Detailed logs: {logger.log_file}",
+    )
 
     if not actions:
         logger.log("INFO", "execute_nothing", {"dry_run": dry_run}, console="ℹ️ No pending actions")
@@ -63,6 +71,21 @@ def execute_actions(
     for a_id, uid, folder, target, rule_name, priority, status, created_at in chosen:
         grouped.setdefault((folder, target), []).append((a_id, uid, rule_name, priority))
 
+    if verbose:
+        groups_context = {
+            f"{folder}→{target or '(no target)'}": len(items)
+            for (folder, target), items in grouped.items()
+        }
+        lines = "\n".join(
+            f"      • {pair}: {count}" for pair, count in sorted(groups_context.items())
+        )
+        logger.log(
+            "INFO",
+            "execute_overview",
+            {"groups": groups_context, "dry_run": dry_run, "strict": strict},
+            console=("📂 Execution plan:" + (f"\n{lines}" if lines else "")),
+        )
+
     folders_bar = tqdm(
         list(grouped.items()),
         desc="📦 Executing folders",
@@ -75,9 +98,18 @@ def execute_actions(
 
     stats = {"done": 0, "skipped": 0, "failed": 0, "suppressed": suppressed}
 
+    if verbose and suppressed:
+        logger.log(
+            "INFO",
+            "execute_suppressed_duplicates",
+            {"suppressed": suppressed},
+            console=f"🚫 Suppressed {suppressed} duplicate actions",
+        )
+
     for (folder, target), items in folders_bar:
         folders_bar.set_postfix_str(f"{folder} → {target}")
         uids = [uid for _, uid, _, _ in items]
+        display_target = target or "(no target)"
 
         msgs_bar = tqdm(
             uids,
@@ -94,8 +126,16 @@ def execute_actions(
                 "INFO",
                 "dry_action_group",
                 {"folder": folder, "target": target, "count": len(uids)},
-                console=f"🧪 Dry run: {folder} → {target} ({len(uids)})",
+                console=f"🧪 Dry run: {folder} → {display_target} ({len(uids)})",
             )
+            if verbose:
+                for uid in uids:
+                    logger.log(
+                        "INFO",
+                        "dry_action_preview",
+                        {"folder": folder, "target": target, "uid": uid},
+                        console=f"   📝 Would move {folder}/{uid} → {display_target}",
+                    )
             continue
 
         assert client is not None  # for type checkers
@@ -120,6 +160,13 @@ def execute_actions(
 
                     db.execute("UPDATE actions SET status='done', executed_at=? WHERE id=?", (now_iso(), a_id))
                     stats["done"] += 1
+                    if verbose:
+                        logger.log(
+                            "INFO",
+                            "execute_uid_done",
+                            {"folder": folder, "target": target, "uid": uid},
+                            console=f"   ✅ Moved {folder}/{uid} → {display_target}",
+                        )
 
                 except imaplib.IMAP4.error as exc:
                     message = str(exc).lower()
@@ -171,7 +218,7 @@ def execute_actions(
                 "INFO",
                 "execute_folder_done",
                 {"folder": folder, "target": target, "moved": len(uids)},
-                console=f"✅ {folder}: handled {len(uids)} → {target}",
+                console=f"✅ {folder}: handled {len(uids)} → {display_target}",
             )
 
         except Exception as exc:
