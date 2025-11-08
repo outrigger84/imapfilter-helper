@@ -74,6 +74,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Process at most this many pending actions during the execute phase",
     )
 
+    p_clear = sub.add_parser("clear-pending", help="Remove all pending actions without executing them")
+
     return parser
 
 
@@ -213,11 +215,43 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     return 0
 
 
+def handle_clear_pending(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
+    """Handle the ``clear-pending`` command."""
+
+    del args, cfg  # Unused for now – kept for consistent handler signature
+
+    cursor = db.cursor()
+    cursor.execute("SELECT COUNT(*) FROM actions WHERE status='pending'")
+    (pending_count,) = cursor.fetchone()
+
+    if pending_count == 0:
+        logger.log(
+            "INFO",
+            "clear_pending_empty",
+            {"removed": 0},
+            console="ℹ️ No pending actions to clear",
+        )
+        return 0
+
+    db.execute("DELETE FROM actions WHERE status='pending'")
+    db.commit()
+
+    logger.log(
+        "INFO",
+        "clear_pending_removed",
+        {"removed": pending_count},
+        console=f"🧹 Cleared {pending_count} pending action{'s' if pending_count != 1 else ''}",
+    )
+
+    return 0
+
+
 COMMAND_HANDLERS: dict[str, Handler] = {
     "build-cache": handle_build_cache,
     "evaluate": handle_evaluate,
     "execute": handle_execute,
     "run-all": handle_run_all,
+    "clear-pending": handle_clear_pending,
 }
 
 
@@ -250,4 +284,5 @@ __all__ = [
     "handle_evaluate",
     "handle_execute",
     "handle_run_all",
+    "handle_clear_pending",
 ]
