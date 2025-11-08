@@ -33,6 +33,7 @@ python -m core.cli <command> [flags]
 | `evaluate` | Loads rules from `rules/` and evaluates them against the cached messages, enqueueing matching actions. | `--dry-run` – report matches without mutating the database. |
 | `execute` | Executes any queued actions against the IMAP server. | `--dry-run` – preview without performing IMAP writes.<br>`--strict` – abort if required IMAP operations are missing or fail.<br>`--limit` – process at most the specified number of pending actions. |
 | `run-all` | Convenience command that runs `build-cache`, `evaluate`, and `execute` sequentially. | `--dry-run` – perform a full simulation without IMAP writes.<br>`--all-folders` – include every folder when building the cache.<br>`--strict` – stop on missing/failed IMAP operations during execute.<br>`--limit` – cap how many pending actions are executed during the final phase. |
+| `clear-pending` | Removes all pending actions from the queue without contacting the IMAP server. | *(no flags)* |
 
 ### Rule management console
 
