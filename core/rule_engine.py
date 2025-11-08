@@ -305,19 +305,24 @@ def evaluate_rules(
     folder_summary = sorted(folder_match_counts.items(), key=lambda kv: (-kv[1], kv[0]))
     rule_summary = sorted(rule_match_counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
-    def _fmt_summary(title: str, entries: list[tuple[str, int]]) -> str:
+    def _fmt_summary(title: str, entries: list[tuple[str, int]], limit: int = 5) -> str:
         if not entries:
             return ""
-        lines = "\n".join(f"      • {name}: {count}" for name, count in entries)
-        return f"   {title}\n{lines}\n"
+        shown = entries[:limit]
+        lines = "\n".join(f"      • {name}: {count}" for name, count in shown)
+        extra = ""
+        remaining = len(entries) - len(shown)
+        if remaining > 0:
+            extra = f"\n      • … and {remaining} more"
+        return f"   {title}\n{lines}{extra}\n"
 
     summary_console = (
         "\n📊 Summary — Evaluate Rules\n"
         f"   🧩  Rules evaluated: {len(rule_list)}\n"
         f"   🎯  Matches found: {total_matches}\n"
         f"   ⏱️  Duration: {timer.fmt()} ({timer.rate():.1f} msg/s)\n"
-        + _fmt_summary("📂  Matches by folder:", folder_summary[:5])
-        + _fmt_summary("🧠  Matches by rule:", rule_summary[:5])
+        + _fmt_summary("📂  Matches by folder:", folder_summary)
+        + _fmt_summary("🧠  Matches by rule:", rule_summary)
     )
     logger.log(
         "INFO",
