@@ -48,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show detailed progress for each moved message",
     )
+    p_exec.add_argument(
+        "--limit",
+        type=int,
+        help="Process at most this many pending actions during execution",
+    )
 
     p_run = sub.add_parser("run-all", help="Build cache, evaluate, and execute")
     p_run.add_argument("--dry-run", action="store_true", help="Simulate everything (no IMAP writes)")
@@ -62,6 +67,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--debug-headers",
         action="store_true",
         help="Log message headers while evaluating rules",
+    )
+    p_run.add_argument(
+        "--limit",
+        type=int,
+        help="Process at most this many pending actions during the execute phase",
     )
 
     return parser
@@ -114,6 +124,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     """Handle the ``execute`` command."""
     cfg.executor.dry_run = args.dry_run
     cfg.executor.strict = args.strict
+    cfg.executor.limit = args.limit
     cfg.logging.verbose = args.verbose
     client = None if args.dry_run else imap_login(cfg.paths.secrets_file, logger)
     try:
@@ -125,6 +136,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             strict=cfg.executor.strict,
             logger=logger,
             verbose=cfg.logging.verbose,
+            limit=cfg.executor.limit,
         )
     finally:
         if client is not None:
@@ -136,6 +148,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     """Handle the ``run-all`` command."""
     cfg.executor.dry_run = args.dry_run
     cfg.executor.strict = args.strict
+    cfg.executor.limit = args.limit
     cfg.logging.verbose = args.verbose
     run_timer = PhaseTimer("run-all")
     client = imap_login(cfg.paths.secrets_file, logger)
@@ -167,6 +180,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             strict=cfg.executor.strict,
             logger=logger,
             verbose=cfg.logging.verbose,
+            limit=cfg.executor.limit,
         )
         run_timer.stop()
         summary_context: dict[str, object] = {
