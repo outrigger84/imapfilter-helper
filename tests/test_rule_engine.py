@@ -106,3 +106,60 @@ def test_evaluate_rules_with_mixed_logic(rule_test_env):
 
     assert count == 1
     assert matches == 1
+
+
+def test_evaluate_rules_streaming_large_dataset(tmp_path: Path):
+    db_path = tmp_path / "large_rules.db"
+    log_path = tmp_path / "large_log.jsonl"
+
+    logger = JsonLogger(log_path)
+    db = init_db(db_path, logger=logger)
+
+    try:
+        total_folders = 5
+        messages_per_folder = 300
+        expected_matches = 0
+
+        for folder_idx in range(total_folders):
+            folder = f"Folder-{folder_idx}"
+            for msg_idx in range(messages_per_folder):
+                subject = "Match me" if msg_idx % 10 == 0 else "Other"
+                header = f"From: sender{folder_idx}@example.com\nSubject: {subject}\n\n"
+                db.execute(
+                    "INSERT INTO headers (uid, folder, data, updated_at) VALUES (?, ?, ?, ?)",
+                    (
+                        f"{folder_idx}-{msg_idx}",
+                        folder,
+                        json.dumps({"header": header}),
+                        None,
+                    ),
+                )
+                if subject == "Match me":
+                    expected_matches += 1
+
+        db.commit()
+
+        rule = {
+            "name": "Subject contains match",
+            "conditions": {"header": "subject", "contains": "Match me"},
+            "action": {"type": "move", "target": "Matches"},
+        }
+
+        _timer, count, matches = evaluate_rules(
+            db,
+            [rule],
+            scope="all",
+            dry_run=True,
+            show_progress=False,
+            logger=logger,
+        )
+
+        assert count == 1
+        assert matches == expected_matches
+
+        cursor = db.cursor()
+        cursor.execute("SELECT COUNT(*) FROM actions")
+        (action_count,) = cursor.fetchone()
+        assert action_count == expected_matches
+    finally:
+        db.close()

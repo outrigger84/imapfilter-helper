@@ -130,12 +130,16 @@ def evaluate_rules(
     timer = PhaseTimer("evaluate")
 
     cur = db.cursor()
-    cur.execute("SELECT uid, folder, data FROM headers")
-    rows = cur.fetchall()
 
-    folder_groups: dict[str, list[tuple[str, str]]] = {}
-    for uid, folder, data in rows:
-        folder_groups.setdefault(folder, []).append((uid, data))
+    folder_totals: dict[str, int] = {}
+    totals_cursor = db.cursor()
+    totals_cursor.execute(
+        "SELECT folder, COUNT(*) FROM headers GROUP BY folder ORDER BY folder"
+    )
+    for folder, count in totals_cursor.fetchall():
+        folder_totals[folder] = count
+
+    cur.execute("SELECT uid, folder, data FROM headers ORDER BY folder, uid")
 
     logger.log(
         "INFO",
@@ -144,23 +148,23 @@ def evaluate_rules(
         console=f"📝 Detailed logs: {logger.log_file}",
     )
 
-    if verbose and folder_groups:
-        overview = {
-            folder: len(items)
-            for folder, items in sorted(folder_groups.items(), key=lambda kv: kv[0])
-        }
+    if verbose and folder_totals:
+        overview = dict(sorted(folder_totals.items(), key=lambda kv: kv[0]))
         lines = "\n".join(f"      • {folder}: {count}" for folder, count in overview.items())
         logger.log(
             "INFO",
             "evaluate_overview",
-            {"folders": overview, "total_messages": len(rows)},
+            {"folders": overview, "total_messages": sum(folder_totals.values())},
             console=(
                 "📂 Folders queued for evaluation:" + (f"\n{lines}" if lines else "")
             ),
         )
 
+    total_matches = 0
+    folder_match_counts: dict[str, int] = {}
+    rule_match_counts: dict[str, int] = {}
     folders_bar = tqdm(
-        folder_groups.items(),
+        total=len(folder_totals) if folder_totals else None,
         desc="🧩 Evaluating folders",
         unit="folder",
         dynamic_ncols=True,
@@ -169,31 +173,76 @@ def evaluate_rules(
         disable=not show_progress,
     )
 
-    total_matches = 0
-    folder_match_counts: dict[str, int] = {}
-    rule_match_counts: dict[str, int] = {}
-    for folder, msgs in folders_bar:
-        folders_bar.set_postfix_str(folder)
+    current_folder: str | None = None
+    current_folder_total = 0
+    current_folder_count = 0
+    msgs_bar: tqdm | None = None
+
+    def _finalize_folder() -> None:
+        nonlocal current_folder, current_folder_total, current_folder_count, msgs_bar
+        if current_folder is None:
+            return
+        if msgs_bar is not None:
+            msgs_bar.close()
+            msgs_bar = None
+        folders_bar.update(1)
+        db.commit()
         if verbose:
             logger.log(
                 "INFO",
-                "evaluate_folder_start",
-                {"folder": folder, "messages": len(msgs)},
-                console=f"🔍 Evaluating {folder} ({len(msgs)} messages)",
+                "evaluate_folder_complete",
+                {
+                    "folder": current_folder,
+                    "messages": max(current_folder_total, current_folder_count),
+                    "processed": current_folder_count,
+                    "matches": folder_match_counts.get(current_folder, 0),
+                },
+                console=(
+                    f"📦 Completed {current_folder}: "
+                    f"{folder_match_counts.get(current_folder, 0)} matches"
+                ),
             )
-        msgs_bar = tqdm(
-            msgs,
-            desc=f"   🎯 Checking {folder}",
-            unit="msg",
-            dynamic_ncols=True,
-            leave=False,
-            position=1,
-            disable=not show_progress,
-        )
+        current_folder = None
+        current_folder_total = 0
+        current_folder_count = 0
 
-        for uid, data in msgs_bar:
+    chunk_size = 512
+    while True:
+        rows = cur.fetchmany(chunk_size)
+        if not rows:
+            break
+        for uid, folder, data in rows:
+            if folder != current_folder:
+                _finalize_folder()
+                current_folder = folder
+                current_folder_total = folder_totals.get(folder, 0)
+                current_folder_count = 0
+                folders_bar.set_postfix_str(folder)
+                msgs_bar = tqdm(
+                    total=current_folder_total or None,
+                    desc=f"   🎯 Checking {folder}",
+                    unit="msg",
+                    dynamic_ncols=True,
+                    leave=False,
+                    position=1,
+                    disable=not show_progress,
+                )
+                if verbose:
+                    logger.log(
+                        "INFO",
+                        "evaluate_folder_start",
+                        {"folder": folder, "messages": current_folder_total},
+                        console=(
+                            f"🔍 Evaluating {folder} "
+                            f"({current_folder_total} messages)"
+                        ),
+                    )
+
             raw_header = _extract_raw_header(data)
             header = _parse_header_map(raw_header)
+            current_folder_count += 1
+            if msgs_bar is not None:
+                msgs_bar.update(1)
 
             if debug_headers:
                 logger.log(
@@ -249,19 +298,8 @@ def evaluate_rules(
                         console=console_msg,
                     )
 
-        db.commit()
-        if verbose:
-            logger.log(
-                "INFO",
-                "evaluate_folder_complete",
-                {
-                    "folder": folder,
-                    "messages": len(msgs),
-                    "matches": folder_match_counts.get(folder, 0),
-                },
-                console=f"📦 Completed {folder}: {folder_match_counts.get(folder, 0)} matches",
-            )
-
+    _finalize_folder()
+    folders_bar.close()
     timer.stop()
     timer.count = total_matches
     folder_summary = sorted(folder_match_counts.items(), key=lambda kv: (-kv[1], kv[0]))
