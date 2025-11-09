@@ -62,7 +62,7 @@ def cli_context(tmp_path: Path):
 
 def test_handle_build_cache_uses_default_inbox(monkeypatch, cli_context):
     cfg, db, logger = cli_context
-    args = argparse.Namespace(cmd="build-cache", all_folders=False)
+    args = argparse.Namespace(cmd="build-cache", all_folders=False, folder=None)
     seen = {}
 
     class FakeClient:
@@ -155,6 +155,7 @@ def test_handle_run_all_summarises(monkeypatch, cli_context):
         dry_run=True,
         strict=True,
         all_folders=True,
+        folder=None,
         verbose=False,
         debug_headers=False,
         limit=None,
@@ -213,6 +214,91 @@ def test_handle_run_all_summarises(monkeypatch, cli_context):
     assert seen["evaluate_kwargs"]["debug_headers"] is False
     assert seen["execute_kwargs"]["verbose"] is False
     assert seen["execute_kwargs"]["limit"] is None
+
+
+def test_handle_build_cache_uses_specific_folder(monkeypatch, cli_context):
+    cfg, db, logger = cli_context
+    args = argparse.Namespace(cmd="build-cache", all_folders=False, folder="Archive/2024")
+    seen = {}
+
+    class FakeClient:
+        def logout(self) -> None:
+            return None
+
+    def fake_login(path, log):
+        seen["secrets_path"] = path
+        return FakeClient()
+
+    def fake_build_cache(client, database, folders, **kwargs):
+        seen["folders"] = list(folders)
+        return None, len(folders), 0
+
+    def fail_list_all_folders(client):  # pragma: no cover - defensive
+        raise AssertionError("list_all_folders should not be called")
+
+    monkeypatch.setattr(cli, "imap_login", fake_login)
+    monkeypatch.setattr(cli, "build_cache", fake_build_cache)
+    monkeypatch.setattr(cli, "list_all_folders", fail_list_all_folders)
+
+    result = cli.handle_build_cache(args, cfg, db, logger)
+
+    assert result == 0
+    assert seen["folders"] == ["Archive/2024"]
+
+
+def test_handle_run_all_uses_specific_folder(monkeypatch, cli_context):
+    cfg, db, logger = cli_context
+    args = argparse.Namespace(
+        cmd="run-all",
+        dry_run=False,
+        strict=False,
+        all_folders=False,
+        folder="Archive/2024",
+        verbose=False,
+        debug_headers=False,
+        limit=10,
+    )
+    seen = {}
+
+    class FakeClient:
+        def logout(self) -> None:
+            return None
+
+    def fake_login(path, log):
+        seen["secrets_path"] = path
+        return FakeClient()
+
+    def fake_build_cache(client, database, folders, **kwargs):
+        seen["cache_folders"] = list(folders)
+        return None, len(folders), 1
+
+    def fake_load_rules(path, log):
+        return []
+
+    def fake_evaluate_rules(database, rules, **kwargs):
+        seen["evaluate_kwargs"] = kwargs
+        return None, 0, 0
+
+    def fake_execute_actions(client, database, **kwargs):
+        seen["execute_kwargs"] = kwargs
+        return None, {"done": 0, "skipped": 0, "failed": 0, "suppressed": 0}
+
+    def fail_list_all_folders(client):  # pragma: no cover - defensive
+        raise AssertionError("list_all_folders should not be called")
+
+    monkeypatch.setattr(cli, "imap_login", fake_login)
+    monkeypatch.setattr(cli, "list_all_folders", fail_list_all_folders)
+    monkeypatch.setattr(cli, "build_cache", fake_build_cache)
+    monkeypatch.setattr(cli, "load_rules", fake_load_rules)
+    monkeypatch.setattr(cli, "evaluate_rules", fake_evaluate_rules)
+    monkeypatch.setattr(cli, "execute_actions", fake_execute_actions)
+
+    result = cli.handle_run_all(args, cfg, db, logger)
+
+    assert result == 0
+    assert seen["cache_folders"] == ["Archive/2024"]
+    assert seen["evaluate_kwargs"]["verbose"] is False
+    assert seen["execute_kwargs"]["limit"] == 10
 
 
 def test_handle_clear_pending_removes_actions(cli_context):
