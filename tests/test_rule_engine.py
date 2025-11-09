@@ -45,6 +45,7 @@ def _run_rule(db, logger, rule):
         dry_run=True,
         show_progress=False,
         logger=logger,
+        folders=None,
     )
 
 
@@ -163,3 +164,26 @@ def test_evaluate_rules_streaming_large_dataset(tmp_path: Path):
         assert action_count == expected_matches
     finally:
         db.close()
+
+
+def test_evaluate_rules_respects_folder_filter(rule_test_env):
+    db, logger = rule_test_env
+
+    rule = {
+        "name": "Match anything",
+        "conditions": {"header": "subject", "contains": "Urgent"},
+        "action": {"type": "move", "target": "Archive"},
+    }
+
+    _timer, count, matches = evaluate_rules(
+        db,
+        [rule],
+        scope="all",
+        dry_run=True,
+        show_progress=False,
+        logger=logger,
+        folders=["Archive"],
+    )
+
+    assert count == 1
+    assert matches == 0

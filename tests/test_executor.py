@@ -199,6 +199,37 @@ def test_execute_actions_creates_missing_folder(tmp_path: Path):
     ).fetchone()[0]
     assert status == "done"
 
+
+def test_execute_actions_filters_folders(tmp_path: Path):
+    db, logger = _prepare_db_with_actions(
+        tmp_path,
+        [
+            ("msg-1", "Archive", "rule-archive", "Processed", 100, "pending", "2024-01-01T00:00:00Z"),
+            ("msg-2", "INBOX", "rule-inbox", "Processed", 100, "pending", "2024-01-02T00:00:00Z"),
+        ],
+    )
+    client = FakeClient()
+
+    _timer, stats = execute_actions(
+        client,
+        db,
+        show_progress=False,
+        dry_run=False,
+        strict=False,
+        logger=logger,
+        verbose=False,
+        folders=["Archive"],
+    )
+
+    assert stats["done"] == 1
+
+    remaining = db.execute(
+        "SELECT uid, folder, status FROM actions ORDER BY uid",
+    ).fetchall()
+    status_by_uid = {uid: status for uid, _folder, status in remaining}
+    assert status_by_uid["msg-1"] == "done"
+    assert status_by_uid["msg-2"] == "pending"
+
     db.close()
 
 
