@@ -125,11 +125,22 @@ def evaluate_rules(
     logger: JsonLogger,
     verbose: bool = False,
     debug_headers: bool = False,
+    folders: Sequence[str] | None = None,
 ) -> tuple[PhaseTimer, int, int]:
     rule_list = list(rules)
     timer = PhaseTimer("evaluate")
 
     cur = db.cursor()
+
+    normalized_scope = (scope or "all").lower()
+    folder_filter = {folder: None for folder in folders} if folders else None
+
+    def folder_allowed(folder_name: str) -> bool:
+        if folder_filter is not None:
+            return folder_name in folder_filter
+        if normalized_scope == "inbox":
+            return folder_name.lower().endswith("inbox")
+        return True
 
     folder_totals: dict[str, int] = {}
     totals_cursor = db.cursor()
@@ -137,7 +148,8 @@ def evaluate_rules(
         "SELECT folder, COUNT(*) FROM headers GROUP BY folder ORDER BY folder"
     )
     for folder, count in totals_cursor.fetchall():
-        folder_totals[folder] = count
+        if folder_allowed(folder):
+            folder_totals[folder] = count
 
     cur.execute("SELECT uid, folder, data FROM headers ORDER BY folder, uid")
 
@@ -214,6 +226,11 @@ def evaluate_rules(
         for uid, folder, data in rows:
             if folder != current_folder:
                 _finalize_folder()
+                if not folder_allowed(folder):
+                    current_folder = None
+                    current_folder_total = 0
+                    current_folder_count = 0
+                    continue
                 current_folder = folder
                 current_folder_total = folder_totals.get(folder, 0)
                 current_folder_count = 0
@@ -238,6 +255,9 @@ def evaluate_rules(
                         ),
                     )
 
+            if current_folder is None:
+                continue
+
             raw_header = _extract_raw_header(data)
             header = _parse_header_map(raw_header)
             current_folder_count += 1
@@ -257,9 +277,6 @@ def evaluate_rules(
                 )
 
             for rule in rule_list:
-                if scope == "inbox" and not folder.lower().endswith("inbox"):
-                    continue
-
                 conds = rule.get("conditions")
                 if conditions_match(header, conds):
                     action = rule.get("action", {})

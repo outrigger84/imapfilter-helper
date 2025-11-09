@@ -29,8 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
     build_scope.add_argument("--all-folders", action="store_true", help="Scan all folders")
     build_scope.add_argument(
         "--folder",
-        type=str,
-        help="Scan only the specified folder (e.g. 'Archive/2024')",
+        action="append",
+        help="Scan only the specified folder (can be repeated)",
     )
 
     p_eval = sub.add_parser("evaluate", help="Evaluate rules against cache")
@@ -44,6 +44,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--debug-headers",
         action="store_true",
         help="Log message headers for troubleshooting",
+    )
+    eval_scope = p_eval.add_mutually_exclusive_group()
+    eval_scope.add_argument(
+        "--all-folders",
+        action="store_true",
+        help="Evaluate rules against every cached folder",
+    )
+    eval_scope.add_argument(
+        "--folder",
+        action="append",
+        help="Evaluate rules only for the specified folder(s)",
     )
 
     p_exec = sub.add_parser("execute", help="Execute queued actions")
@@ -59,6 +70,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="Process at most this many pending actions during execution",
     )
+    exec_scope = p_exec.add_mutually_exclusive_group()
+    exec_scope.add_argument(
+        "--all-folders",
+        action="store_true",
+        help="Execute pending actions for every folder",
+    )
+    exec_scope.add_argument(
+        "--folder",
+        action="append",
+        help="Execute only the pending actions for the specified folder(s)",
+    )
 
     p_run = sub.add_parser("run-all", help="Build cache, evaluate, and execute")
     p_run.add_argument("--dry-run", action="store_true", help="Simulate everything (no IMAP writes)")
@@ -66,8 +88,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_scope.add_argument("--all-folders", action="store_true", help="Process all folders, not just INBOX")
     run_scope.add_argument(
         "--folder",
-        type=str,
-        help="Process only the specified folder during cache build",
+        action="append",
+        help="Process only the specified folder(s) during cache build",
     )
     p_run.add_argument("--strict", action="store_true", help="Abort on missing/failed IMAP ops during execute")
     p_run.add_argument(
@@ -88,6 +110,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_clear = sub.add_parser("clear-pending", help="Remove all pending actions without executing them")
 
+    p_clear_cache = sub.add_parser(
+        "clear-cache",
+        help="Remove cached message headers and pending actions",
+    )
+
     return parser
 
 
@@ -99,6 +126,41 @@ def _ensure_layout(cfg: AppConfig) -> None:
     cfg.paths.log_file.parent.mkdir(parents=True, exist_ok=True)
 
 
+def _normalize_folder_list(
+    folders: Sequence[str] | str | None,
+) -> list[str] | None:
+    """Return a cleaned list of folder names or ``None`` if empty."""
+
+    if folders is None:
+        return None
+    if isinstance(folders, str):
+        value = folders.strip()
+        return [value] if value else None
+
+    cleaned = [folder for folder in (item.strip() for item in folders) if folder]
+    return cleaned or None
+
+
+def _resolve_scope_selection(
+    *,
+    all_folders: bool,
+    folders: list[str] | None,
+    default_scope: str,
+) -> tuple[list[str] | None, str]:
+    """Determine the folder filter and evaluation scope to use."""
+
+    if all_folders:
+        return None, "all"
+
+    if folders:
+        return folders, "all"
+
+    normalized = (default_scope or "all").lower()
+    if normalized not in {"all", "inbox"}:
+        normalized = "all"
+    return None, normalized
+
+
 def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
     """Handle the ``build-cache`` command."""
     client = imap_login(cfg.paths.secrets_file, logger)
@@ -106,7 +168,8 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
         if args.all_folders:
             folders = list_all_folders(client)
         else:
-            folders = [args.folder] if args.folder else [DEFAULT_INBOX]
+            selected = _normalize_folder_list(args.folder)
+            folders = selected if selected else [DEFAULT_INBOX]
         build_cache(
             client,
             db,
@@ -123,16 +186,23 @@ def handle_evaluate(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLo
     """Handle the ``evaluate`` command."""
     cfg.executor.dry_run = args.dry_run
     cfg.logging.verbose = args.verbose
+    selected = _normalize_folder_list(args.folder)
+    eval_folders, scope = _resolve_scope_selection(
+        all_folders=args.all_folders,
+        folders=selected,
+        default_scope=cfg.executor.default_run_scope,
+    )
     rules = load_rules(cfg.paths.rules_dir, logger)
     evaluate_rules(
         db,
         rules,
-        scope=cfg.executor.default_run_scope,
+        scope=scope,
         dry_run=cfg.executor.dry_run,
         show_progress=cfg.logging.show_progress,
         logger=logger,
         verbose=cfg.logging.verbose,
         debug_headers=args.debug_headers,
+        folders=eval_folders,
     )
     return 0
 
@@ -143,6 +213,12 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     cfg.executor.strict = args.strict
     cfg.executor.limit = args.limit
     cfg.logging.verbose = args.verbose
+    selected = _normalize_folder_list(args.folder)
+    exec_folders, _ = _resolve_scope_selection(
+        all_folders=args.all_folders,
+        folders=selected,
+        default_scope=cfg.executor.default_run_scope,
+    )
     client = None if args.dry_run else imap_login(cfg.paths.secrets_file, logger)
     try:
         execute_actions(
@@ -154,6 +230,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             logger=logger,
             verbose=cfg.logging.verbose,
             limit=cfg.executor.limit,
+            folders=exec_folders,
         )
     finally:
         if client is not None:
@@ -170,10 +247,16 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     run_timer = PhaseTimer("run-all")
     client = imap_login(cfg.paths.secrets_file, logger)
     try:
+        selected = _normalize_folder_list(args.folder)
         if args.all_folders:
             folders = list_all_folders(client)
         else:
-            folders = [args.folder] if args.folder else [DEFAULT_INBOX]
+            folders = selected if selected else [DEFAULT_INBOX]
+        eval_folders, scope = _resolve_scope_selection(
+            all_folders=args.all_folders,
+            folders=selected,
+            default_scope=cfg.executor.default_run_scope,
+        )
         _cache_timer, folders_count, msg_count = build_cache(
             client,
             db,
@@ -185,12 +268,13 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
         _eval_timer, rules_count, matches = evaluate_rules(
             db,
             rules,
-            scope=cfg.executor.default_run_scope,
+            scope=scope,
             dry_run=cfg.executor.dry_run,
             show_progress=cfg.logging.show_progress,
             logger=logger,
             verbose=cfg.logging.verbose,
             debug_headers=args.debug_headers,
+            folders=eval_folders,
         )
         _exec_timer, stats = execute_actions(
             client,
@@ -201,6 +285,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             logger=logger,
             verbose=cfg.logging.verbose,
             limit=cfg.executor.limit,
+            folders=eval_folders,
         )
         run_timer.stop()
         summary_context: dict[str, object] = {
@@ -264,12 +349,48 @@ def handle_clear_pending(args: argparse.Namespace, cfg: AppConfig, db, logger: J
     return 0
 
 
+def handle_clear_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
+    """Handle the ``clear-cache`` command."""
+
+    del args, cfg  # Unused – kept for consistent handler signature
+
+    cursor = db.cursor()
+    cursor.execute("SELECT COUNT(*) FROM headers")
+    headers_count = cursor.fetchone()[0] or 0
+    cursor.execute("SELECT COUNT(*) FROM actions")
+    actions_count = cursor.fetchone()[0] or 0
+    cursor.execute("SELECT COUNT(*) FROM folders")
+    folders_count = cursor.fetchone()[0] or 0
+
+    with db:
+        db.execute("DELETE FROM headers")
+        db.execute("DELETE FROM actions")
+        db.execute("DELETE FROM folders")
+
+    logger.log(
+        "INFO",
+        "cache_cleared",
+        {
+            "headers": headers_count,
+            "actions": actions_count,
+            "folders": folders_count,
+        },
+        console=(
+            "🗑️ Cleared cache"
+            f" — headers: {headers_count}, actions: {actions_count}, folders: {folders_count}"
+        ),
+    )
+
+    return 0
+
+
 COMMAND_HANDLERS: dict[str, Handler] = {
     "build-cache": handle_build_cache,
     "evaluate": handle_evaluate,
     "execute": handle_execute,
     "run-all": handle_run_all,
     "clear-pending": handle_clear_pending,
+    "clear-cache": handle_clear_cache,
 }
 
 
@@ -303,4 +424,5 @@ __all__ = [
     "handle_execute",
     "handle_run_all",
     "handle_clear_pending",
+    "handle_clear_cache",
 ]

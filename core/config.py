@@ -42,7 +42,7 @@ class LoggingConfig:
 
 @dataclass
 class ExecutorConfig:
-    default_run_scope: str = "inbox"
+    default_run_scope: str = "all"
     dry_run: bool = False
     strict: bool = False
     limit: Optional[int] = None
