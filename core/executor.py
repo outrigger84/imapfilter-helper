@@ -216,6 +216,37 @@ def execute_actions(
     current_key: tuple[str, str | None] | None = None
     current_items: list[tuple[int, str]] = []
 
+    def log_imap_call(
+        message: str,
+        *,
+        op_label: str,
+        status: str,
+        response,
+        folder: str,
+        target: str | None = None,
+        uid: str | None = None,
+    ) -> None:
+        if not verbose:
+            return
+        details = _format_imap_details(response)
+        context: dict[str, str] = {"folder": folder, "status": status, "details": details}
+        if target is not None:
+            context["target"] = target
+        if uid is not None:
+            context["uid"] = uid
+        suffix_parts: list[str] = []
+        if uid is not None:
+            suffix_parts.append(f"UID {uid}")
+        if target is not None:
+            suffix_parts.append(f"→ {target}")
+        suffix = f" ({', '.join(suffix_parts)})" if suffix_parts else ""
+        logger.log(
+            "DEBUG",
+            message,
+            context,
+            console=f"      ↪ {op_label} {status}{details}{suffix}",
+        )
+
     def flush_group() -> None:
         nonlocal current_key, current_items
         if current_key is None or not current_items:
@@ -266,7 +297,14 @@ def execute_actions(
                 disable=not show_progress,
             )
             try:
-                sel_typ, _ = client.select(f'"{folder}"')
+                sel_typ, sel_resp = client.select(f'"{folder}"')
+                log_imap_call(
+                    "imap_select",
+                    op_label=f'SELECT "{folder}"',
+                    status=sel_typ,
+                    response=sel_resp,
+                    folder=folder,
+                )
                 if sel_typ != "OK":
                     raise imaplib.IMAP4.error(f"Cannot open folder {folder}")
 
@@ -275,13 +313,46 @@ def execute_actions(
                     deleted_flagged = False
                     try:
                         typ1, copy_resp = client.uid("COPY", uid, f'"{target}"')
+                        log_imap_call(
+                            "imap_uid_copy",
+                            op_label="UID COPY",
+                            status=typ1,
+                            response=copy_resp,
+                            folder=folder,
+                            target=target,
+                            uid=uid,
+                        )
                         if (
                             typ1 != "OK"
                             and target
                             and not target_ready
                             and _should_try_create_folder(copy_resp)
                         ):
+                            if verbose:
+                                logger.log(
+                                    "WARN",
+                                    "imap_copy_missing_target",
+                                    {
+                                        "folder": folder,
+                                        "target": target,
+                                        "uid": uid,
+                                        "status": typ1,
+                                        "details": _format_imap_details(copy_resp),
+                                    },
+                                    console=(
+                                        f"      ↪ UID COPY retry required {typ1}{_format_imap_details(copy_resp)}"
+                                        f" (UID {uid} → {target})"
+                                    ),
+                                )
                             create_typ, create_resp = client.create(f'"{target}"')
+                            log_imap_call(
+                                "imap_create",
+                                op_label="CREATE",
+                                status=create_typ,
+                                response=create_resp,
+                                folder=folder,
+                                target=target,
+                            )
                             if create_typ != "OK":
                                 create_details = _format_imap_details(create_resp)
                                 raise imaplib.IMAP4.error(
@@ -295,6 +366,15 @@ def execute_actions(
                                 console=f"   📁 Created missing folder {target}",
                             )
                             typ1, copy_resp = client.uid("COPY", uid, f'"{target}"')
+                            log_imap_call(
+                                "imap_uid_copy",
+                                op_label="UID COPY",
+                                status=typ1,
+                                response=copy_resp,
+                                folder=folder,
+                                target=target,
+                                uid=uid,
+                            )
 
                         if typ1 != "OK":
                             details = _format_imap_details(copy_resp)
@@ -303,7 +383,16 @@ def execute_actions(
                         if target and not target_ready:
                             target_ready = True
 
-                        typ2, _ = client.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
+                        typ2, store_resp = client.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
+                        log_imap_call(
+                            "imap_uid_store",
+                            op_label="UID STORE +FLAGS",
+                            status=typ2,
+                            response=store_resp,
+                            folder=folder,
+                            target=target,
+                            uid=uid,
+                        )
                         if typ2 != "OK":
                             raise imaplib.IMAP4.error("UID STORE +FLAGS \\Deleted failed")
                         deleted_flagged = True
@@ -326,7 +415,18 @@ def execute_actions(
                     except imaplib.IMAP4.error as exc:
                         if deleted_flagged:
                             try:
-                                client.uid("STORE", uid, "-FLAGS", "(\\Deleted)")
+                                cleanup_typ, cleanup_resp = client.uid(
+                                    "STORE", uid, "-FLAGS", "(\\Deleted)"
+                                )
+                                log_imap_call(
+                                    "imap_uid_store_cleanup",
+                                    op_label="UID STORE -FLAGS",
+                                    status=cleanup_typ,
+                                    response=cleanup_resp,
+                                    folder=folder,
+                                    target=target,
+                                    uid=uid,
+                                )
                             except Exception:  # pragma: no cover - best effort cleanup
                                 pass
                         message = str(exc).lower()
@@ -401,7 +501,18 @@ def execute_actions(
                     except Exception:
                         if deleted_flagged:
                             try:
-                                client.uid("STORE", uid, "-FLAGS", "(\\Deleted)")
+                                cleanup_typ, cleanup_resp = client.uid(
+                                    "STORE", uid, "-FLAGS", "(\\Deleted)"
+                                )
+                                log_imap_call(
+                                    "imap_uid_store_cleanup",
+                                    op_label="UID STORE -FLAGS",
+                                    status=cleanup_typ,
+                                    response=cleanup_resp,
+                                    folder=folder,
+                                    target=target,
+                                    uid=uid,
+                                )
                             except Exception:  # pragma: no cover - best effort cleanup
                                 pass
                         raise
@@ -409,7 +520,15 @@ def execute_actions(
                         msgs_bar.update(1)
 
                 try:
-                    client.expunge()
+                    exp_typ, exp_resp = client.expunge()
+                    log_imap_call(
+                        "imap_expunge",
+                        op_label="EXPUNGE",
+                        status=exp_typ,
+                        response=exp_resp,
+                        folder=folder,
+                        target=target,
+                    )
                 except Exception:  # pragma: no cover - best effort cleanup
                     pass
 
