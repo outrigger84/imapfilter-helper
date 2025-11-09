@@ -303,7 +303,7 @@ def execute_actions(
                         if target and not target_ready:
                             target_ready = True
 
-                        typ2, _ = client.uid("STORE", uid, "+FLAGS", "\\Deleted")
+                        typ2, _ = client.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
                         if typ2 != "OK":
                             raise imaplib.IMAP4.error("UID STORE +FLAGS \\Deleted failed")
                         deleted_flagged = True
@@ -326,7 +326,7 @@ def execute_actions(
                     except imaplib.IMAP4.error as exc:
                         if deleted_flagged:
                             try:
-                                client.uid("STORE", uid, "-FLAGS", "\\Deleted")
+                                client.uid("STORE", uid, "-FLAGS", "(\\Deleted)")
                             except Exception:  # pragma: no cover - best effort cleanup
                                 pass
                         message = str(exc).lower()
@@ -401,7 +401,7 @@ def execute_actions(
                     except Exception:
                         if deleted_flagged:
                             try:
-                                client.uid("STORE", uid, "-FLAGS", "\\Deleted")
+                                client.uid("STORE", uid, "-FLAGS", "(\\Deleted)")
                             except Exception:  # pragma: no cover - best effort cleanup
                                 pass
                         raise
