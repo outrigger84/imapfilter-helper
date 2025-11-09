@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import imaplib
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Sequence
 
 from tqdm import tqdm
 
@@ -52,6 +52,7 @@ def execute_actions(
     logger: JsonLogger,
     verbose: bool = False,
     limit: int | None = None,
+    folders: Sequence[str] | None = None,
 ) -> tuple[PhaseTimer, Dict[str, int]]:
     if not dry_run and client is None:
         raise ValueError("An IMAP client is required when not running in dry-run mode")
@@ -65,15 +66,27 @@ def execute_actions(
         console=f"📝 Detailed logs: {logger.log_file}",
     )
 
+    folder_params = tuple(folders) if folders else ()
+    folder_filter = ""
+    if folder_params:
+        placeholders = ",".join("?" for _ in folder_params)
+        folder_filter = f" AND folder IN ({placeholders})"
+
     pending_cur = db.cursor()
-    pending_cur.execute("SELECT COUNT(*) FROM actions WHERE status='pending'")
+    pending_cur.execute(
+        "SELECT COUNT(*) FROM actions WHERE status='pending'" + folder_filter,
+        folder_params,
+    )
     pending_total = pending_cur.fetchone()[0] or 0
     if pending_total == 0:
         logger.log("INFO", "execute_nothing", {"dry_run": dry_run}, console="ℹ️ No pending actions")
         return timer, {"done": 0, "skipped": 0, "failed": 0, "suppressed": 0}
 
     distinct_cur = db.cursor()
-    distinct_cur.execute("SELECT COUNT(DISTINCT uid) FROM actions WHERE status='pending'")
+    distinct_cur.execute(
+        "SELECT COUNT(DISTINCT uid) FROM actions WHERE status='pending'" + folder_filter,
+        folder_params,
+    )
     distinct_uids = distinct_cur.fetchone()[0] or 0
     suppressed = pending_total - distinct_uids
 
@@ -94,10 +107,15 @@ def execute_actions(
                 ) AS rn
             FROM actions
             WHERE status='pending'
+    )
+"""
+    if folder_filter:
+        dedup_cte = dedup_cte.replace(
+            "WHERE status='pending'",
+            f"WHERE status='pending'{folder_filter}",
         )
-    """
     selection_source = "ranked WHERE rn=1"
-    dedup_params: tuple[int, ...] = ()
+    limit_param: tuple[int, ...] = ()
     if limit is not None:
         dedup_cte += (
             "    , limited AS (\n"
@@ -109,7 +127,9 @@ def execute_actions(
             "    )\n"
         )
         selection_source = "limited"
-        dedup_params = (int(limit),)
+        limit_param = (int(limit),)
+
+    dedup_params = folder_params + limit_param
 
     if suppressed > 0:
         duplicates_cur = db.cursor()

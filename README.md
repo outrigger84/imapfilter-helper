@@ -29,11 +29,16 @@ python -m core.cli <command> [flags]
 
 | Command | Purpose | Key flags |
 | --- | --- | --- |
-| `build-cache` | Fetches mail from the IMAP server and stores a local cache in `data/cache.db`. | `--all-folders` – scan every folder instead of just `INBOX`. |
-| `evaluate` | Loads rules from `rules/` and evaluates them against the cached messages, enqueueing matching actions. | `--dry-run` – report matches without mutating the database. |
-| `execute` | Executes any queued actions against the IMAP server. | `--dry-run` – preview without performing IMAP writes.<br>`--strict` – abort if required IMAP operations are missing or fail.<br>`--limit` – process at most the specified number of pending actions. |
-| `run-all` | Convenience command that runs `build-cache`, `evaluate`, and `execute` sequentially. | `--dry-run` – perform a full simulation without IMAP writes.<br>`--all-folders` – include every folder when building the cache.<br>`--strict` – stop on missing/failed IMAP operations during execute.<br>`--limit` – cap how many pending actions are executed during the final phase. |
+| `build-cache` | Fetches mail from the IMAP server and stores a local cache in `data/cache.db`. | `--all-folders` – scan every folder instead of just `INBOX`.<br>`--folder NAME` – cache only the specified folder (repeatable). |
+| `evaluate` | Loads rules from `rules/` and evaluates them against the cached messages, enqueueing matching actions. | `--dry-run` – report matches without mutating the database.<br>`--all-folders` – consider every cached folder.<br>`--folder NAME` – evaluate only the selected folder(s). |
+| `execute` | Executes any queued actions against the IMAP server. | `--dry-run` – preview without performing IMAP writes.<br>`--strict` – abort if required IMAP operations are missing or fail.<br>`--limit` – process at most the specified number of pending actions.<br>`--all-folders` / `--folder` – limit execution to particular folders, mirroring `evaluate`. |
+| `run-all` | Convenience command that runs `build-cache`, `evaluate`, and `execute` sequentially. | `--dry-run` – perform a full simulation without IMAP writes.<br>`--all-folders` – include every folder when building the cache.<br>`--folder NAME` – restrict all three phases to the specified folder(s).<br>`--strict` – stop on missing/failed IMAP operations during execute.<br>`--limit` – cap how many pending actions are executed during the final phase. |
 | `clear-pending` | Removes all pending actions from the queue without contacting the IMAP server. | *(no flags)* |
+| `clear-cache` | Deletes cached message headers, folder metadata, and any queued actions. | *(no flags)* |
+
+When no folder flags are supplied the `evaluate` and `execute` commands operate on every cached message by default. This makes it easy to build the cache for several folders (either in one run with repeated `--folder` flags or by invoking `build-cache` multiple times) and then apply the rules to the aggregated cache in a later step.
+
+Use `clear-cache` whenever you need to discard the existing cache database and start again.
 
 ### Rule management console
 
