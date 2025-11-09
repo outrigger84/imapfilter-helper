@@ -25,7 +25,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_build = sub.add_parser("build-cache", help="Build local message cache")
-    p_build.add_argument("--all-folders", action="store_true", help="Scan all folders")
+    build_scope = p_build.add_mutually_exclusive_group()
+    build_scope.add_argument("--all-folders", action="store_true", help="Scan all folders")
+    build_scope.add_argument(
+        "--folder",
+        type=str,
+        help="Scan only the specified folder (e.g. 'Archive/2024')",
+    )
 
     p_eval = sub.add_parser("evaluate", help="Evaluate rules against cache")
     p_eval.add_argument("--dry-run", action="store_true", help="Simulate rule matches only")
@@ -56,7 +62,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run-all", help="Build cache, evaluate, and execute")
     p_run.add_argument("--dry-run", action="store_true", help="Simulate everything (no IMAP writes)")
-    p_run.add_argument("--all-folders", action="store_true", help="Process all folders, not just INBOX")
+    run_scope = p_run.add_mutually_exclusive_group()
+    run_scope.add_argument("--all-folders", action="store_true", help="Process all folders, not just INBOX")
+    run_scope.add_argument(
+        "--folder",
+        type=str,
+        help="Process only the specified folder during cache build",
+    )
     p_run.add_argument("--strict", action="store_true", help="Abort on missing/failed IMAP ops during execute")
     p_run.add_argument(
         "--verbose",
@@ -91,7 +103,10 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
     """Handle the ``build-cache`` command."""
     client = imap_login(cfg.paths.secrets_file, logger)
     try:
-        folders = list_all_folders(client) if args.all_folders else [DEFAULT_INBOX]
+        if args.all_folders:
+            folders = list_all_folders(client)
+        else:
+            folders = [args.folder] if args.folder else [DEFAULT_INBOX]
         build_cache(
             client,
             db,
@@ -155,7 +170,10 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     run_timer = PhaseTimer("run-all")
     client = imap_login(cfg.paths.secrets_file, logger)
     try:
-        folders = list_all_folders(client) if args.all_folders else [DEFAULT_INBOX]
+        if args.all_folders:
+            folders = list_all_folders(client)
+        else:
+            folders = [args.folder] if args.folder else [DEFAULT_INBOX]
         _cache_timer, folders_count, msg_count = build_cache(
             client,
             db,
