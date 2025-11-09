@@ -63,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_exec.add_argument(
         "--verbose",
         action="store_true",
-        help="Show detailed progress for each moved message",
+        help="Show per-message progress and log IMAP server replies",
     )
     p_exec.add_argument(
         "--limit",
@@ -95,7 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument(
         "--verbose",
         action="store_true",
-        help="Show detailed progress for evaluate/execute phases",
+        help="Show detailed progress and log IMAP replies during evaluate/execute",
     )
     p_run.add_argument(
         "--debug-headers",
