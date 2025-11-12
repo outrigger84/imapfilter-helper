@@ -312,90 +312,126 @@ def execute_actions(
                 for a_id, uid in current_items:
                     deleted_flagged = False
                     try:
-                        typ1, copy_resp = client.uid("COPY", uid, f'"{target}"')
-                        log_imap_call(
-                            "imap_uid_copy",
-                            op_label="UID COPY",
-                            status=typ1,
-                            response=copy_resp,
-                            folder=folder,
-                            target=target,
-                            uid=uid,
-                        )
-                        if (
-                            typ1 != "OK"
-                            and target
-                            and not target_ready
-                            and _should_try_create_folder(copy_resp)
-                        ):
-                            if verbose:
-                                logger.log(
-                                    "WARN",
-                                    "imap_copy_missing_target",
-                                    {
-                                        "folder": folder,
-                                        "target": target,
-                                        "uid": uid,
-                                        "status": typ1,
-                                        "details": _format_imap_details(copy_resp),
-                                    },
-                                    console=(
-                                        f"      ↪ UID COPY retry required {typ1}{_format_imap_details(copy_resp)}"
-                                        f" (UID {uid} → {target})"
-                                    ),
-                                )
-                            create_typ, create_resp = client.create(f'"{target}"')
-                            log_imap_call(
-                                "imap_create",
-                                op_label="CREATE",
-                                status=create_typ,
-                                response=create_resp,
-                                folder=folder,
-                                target=target,
-                            )
-                            if create_typ != "OK":
-                                create_details = _format_imap_details(create_resp)
-                                raise imaplib.IMAP4.error(
-                                    f"CREATE {target} failed{create_details}"
-                                )
-                            target_ready = True
-                            logger.log(
-                                "INFO",
-                                "create_missing_target",
-                                {"folder": folder, "target": target},
-                                console=f"   📁 Created missing folder {target}",
-                            )
-                            typ1, copy_resp = client.uid("COPY", uid, f'"{target}"')
-                            log_imap_call(
-                                "imap_uid_copy",
-                                op_label="UID COPY",
-                                status=typ1,
-                                response=copy_resp,
-                                folder=folder,
-                                target=target,
-                                uid=uid,
-                            )
+                      # ✅ First try UID MOVE (preferred on iCloud)
+try:
+    move_typ, move_resp = client.uid("MOVE", uid, f'"{target}"')
+    log_imap_call(
+        "imap_uid_move",
+        op_label="UID MOVE",
+        status=move_typ,
+        response=move_resp,
+        folder=folder,
+        target=target,
+        uid=uid,
+    )
+except Exception:
+    move_typ = "NO"
+    move_resp = None
 
-                        if typ1 != "OK":
-                            details = _format_imap_details(copy_resp)
-                            raise imaplib.IMAP4.error(f"UID COPY failed{details}")
+# ✅ If UID MOVE succeeded, skip COPY/DELETE/EXPUNGE entirely
+if move_typ == "OK":
+    db.execute(
+        "UPDATE actions SET status='done', executed_at=? WHERE id=?",
+        (now_iso(), a_id),
+    )
+    stats["done"] += 1
+    if verbose:
+        logger.log(
+            "INFO",
+            "execute_uid_done",
+            {"folder": folder, "target": target, "uid": uid},
+            console=f"   ✅ Moved {folder}/{uid} → {display_target}",
+        )
+    msgs_bar.update(1)
+    continue
 
-                        if target and not target_ready:
-                            target_ready = True
 
-                        typ2, store_resp = client.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
-                        log_imap_call(
-                            "imap_uid_store",
-                            op_label="UID STORE +FLAGS",
-                            status=typ2,
-                            response=store_resp,
-                            folder=folder,
-                            target=target,
-                            uid=uid,
-                        )
-                        if typ2 != "OK":
-                            raise imaplib.IMAP4.error("UID STORE +FLAGS \\Deleted failed")
-                        deleted_flagged = True
+# ✅ --- FALLBACK PATH (your original COPY + DELETE) ---
+
+typ1, copy_resp = client.uid("COPY", uid, f'"{target}"')
+log_imap_call(
+    "imap_uid_copy",
+    op_label="UID COPY",
+    status=typ1,
+    response=copy_resp,
+    folder=folder,
+    target=target,
+    uid=uid,
+)
+if (
+    typ1 != "OK"
+    and target
+    and not target_ready
+    and _should_try_create_folder(copy_resp)
+):
+    if verbose:
+        logger.log(
+            "WARN",
+            "imap_copy_missing_target",
+            {
+                "folder": folder,
+                "target": target,
+                "uid": uid,
+                "status": typ1,
+                "details": _format_imap_details(copy_resp),
+            },
+            console=(
+                f"      ↪ UID COPY retry required {typ1}{_format_imap_details(copy_resp)}"
+                f" (UID {uid} → {target})"
+            ),
+        )
+    create_typ, create_resp = client.create(f'"{target}"')
+    log_imap_call(
+        "imap_create",
+        op_label="CREATE",
+        status=create_typ,
+        response=create_resp,
+        folder=folder,
+        target=target,
+    )
+    if create_typ != "OK":
+        create_details = _format_imap_details(create_resp)
+        raise imaplib.IMAP4.error(
+            f"CREATE {target} failed{create_details}"
+        )
+    target_ready = True
+    logger.log(
+        "INFO",
+        "create_missing_target",
+        {"folder": folder, "target": target},
+        console=f"   📁 Created missing folder {target}",
+    )
+    typ1, copy_resp = client.uid("COPY", uid, f'"{target}"')
+    log_imap_call(
+        "imap_uid_copy",
+        op_label="UID COPY",
+        status=typ1,
+        response=copy_resp,
+        folder=folder,
+        target=target,
+        uid=uid,
+    )
+
+if typ1 != "OK":
+    details = _format_imap_details(copy_resp)
+    raise imaplib.IMAP4.error(f"UID COPY failed{details}")
+
+if target and not target_ready:
+    target_ready = True
+
+typ2, store_resp = client.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
+log_imap_call(
+    "imap_uid_store",
+    op_label="UID STORE +FLAGS",
+    status=typ2,
+    response=store_resp,
+    folder=folder,
+    target=target,
+    uid=uid,
+)
+if typ2 != "OK":
+    raise imaplib.IMAP4.error("UID STORE +FLAGS \\Deleted failed")
+deleted_flagged = True
 
                         db.execute(
                             "UPDATE actions SET status='done', executed_at=? WHERE id=?",
