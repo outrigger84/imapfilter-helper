@@ -42,6 +42,7 @@ from core.logging_utils import JsonLogger
 class FakeClient:
     def __init__(self) -> None:
         self.commands: list[tuple[str, str]] = []
+        self.capabilities: tuple[bytes, ...] = (b"IMAP4REV1",)
 
     def select(self, folder: str):
         return "OK", [b"1"]
@@ -52,6 +53,18 @@ class FakeClient:
 
     def expunge(self):
         return "OK", []
+
+
+class MoveCapableClient(FakeClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.capabilities = (b"MOVE",)
+
+    def uid(self, command: str, uid: str, *args):  # type: ignore[override]
+        if command == "MOVE":
+            self.commands.append((command, uid))
+            return "OK", [b""]
+        return super().uid(command, uid, *args)
 
 
 def _prepare_db_with_actions(
@@ -166,6 +179,33 @@ def test_execute_actions_logs_uid_completion(tmp_path: Path):
     assert len(done_entries) == 3
     assert all("context" in entry for entry in done_entries)
     assert {entry["context"]["uid"] for entry in done_entries} == {"msg-1", "msg-2", "msg-3"}
+
+    db.close()
+
+
+def test_execute_actions_prefers_uid_move(tmp_path: Path):
+    db, logger = _prepare_db(tmp_path)
+    client = MoveCapableClient()
+
+    _timer, stats = execute_actions(
+        client,
+        db,
+        show_progress=False,
+        dry_run=False,
+        strict=False,
+        logger=logger,
+        verbose=False,
+    )
+
+    assert stats["done"] == 3
+
+    move_commands = [cmd for cmd in client.commands if cmd[0] == "MOVE"]
+    copy_commands = [cmd for cmd in client.commands if cmd[0] == "COPY"]
+    store_commands = [cmd for cmd in client.commands if cmd[0] == "STORE"]
+
+    assert len(move_commands) == 3
+    assert not copy_commands
+    assert not store_commands
 
     db.close()
 
