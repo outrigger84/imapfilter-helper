@@ -76,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_exec.add_argument("--dry-run", action="store_true", help="Simulate execution only (no IMAP writes)")
     p_exec.add_argument("--strict", action="store_true", help="Abort on missing/failed IMAP ops")
     p_exec.add_argument(
+        "--verify-moves",
+        action="store_true",
+        help="Confirm successful moves by searching for Message-ID in source and destination mailboxes",
+    )
+    p_exec.add_argument(
         "--verbose",
         action="store_true",
         help="Show per-message progress and log IMAP server replies",
@@ -107,6 +112,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Process only the specified folder(s) during cache build",
     )
     p_run.add_argument("--strict", action="store_true", help="Abort on missing/failed IMAP ops during execute")
+    p_run.add_argument(
+        "--verify-moves",
+        action="store_true",
+        help="Confirm successful moves by searching for Message-ID in source and destination mailboxes",
+    )
     p_run.add_argument(
         "--verbose",
         action="store_true",
@@ -251,6 +261,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     cfg.executor.dry_run = args.dry_run
     cfg.executor.strict = args.strict
     cfg.executor.limit = args.limit
+    cfg.executor.verify_moves = getattr(args, "verify_moves", False)
     cfg.logging.verbose = args.verbose
     selected = _normalize_folder_list(args.folder)
     exec_folders, _ = _resolve_scope_selection(
@@ -270,6 +281,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             verbose=cfg.logging.verbose,
             limit=cfg.executor.limit,
             folders=exec_folders,
+            verify_moves=cfg.executor.verify_moves,
         )
     finally:
         if client is not None:
@@ -282,6 +294,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     cfg.executor.dry_run = args.dry_run
     cfg.executor.strict = args.strict
     cfg.executor.limit = args.limit
+    cfg.executor.verify_moves = getattr(args, "verify_moves", False)
     cfg.logging.verbose = args.verbose
     cfg.cache.limit = args.cache_limit
     if args.cache_order:
@@ -333,6 +346,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             verbose=cfg.logging.verbose,
             limit=cfg.executor.limit,
             folders=eval_folders,
+            verify_moves=cfg.executor.verify_moves,
         )
         run_timer.stop()
         summary_context: dict[str, object] = {

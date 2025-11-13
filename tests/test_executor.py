@@ -43,8 +43,10 @@ class FakeClient:
     def __init__(self) -> None:
         self.commands: list[tuple[str, str]] = []
         self.capabilities: tuple[bytes, ...] = (b"IMAP4REV1",)
+        self.selected: str | None = None
 
-    def select(self, folder: str):
+    def select(self, folder: str, readonly: bool = False):
+        self.selected = folder.strip('"')
         return "OK", [b"1"]
 
     def uid(self, command: str, uid: str, *args):
@@ -52,6 +54,10 @@ class FakeClient:
         return "OK", [b""]
 
     def expunge(self):
+        return "OK", []
+
+    def close(self):
+        self.selected = None
         return "OK", []
 
 
@@ -64,6 +70,23 @@ class MoveCapableClient(FakeClient):
         if command == "MOVE":
             self.commands.append((command, uid))
             return "OK", [b""]
+        return super().uid(command, uid, *args)
+
+
+class VerifyingClient(MoveCapableClient):
+    def __init__(self, *, source_has: bool, dest_has: bool) -> None:
+        super().__init__()
+        self.source_has = source_has
+        self.dest_has = dest_has
+
+    def uid(self, command: str, uid, *args):  # type: ignore[override]
+        if command == "SEARCH":
+            mailbox = (self.selected or "").strip()
+            if mailbox == "INBOX":
+                return "OK", [b"1"] if self.source_has else [b""]
+            if mailbox == "Archive":
+                return "OK", [b"1"] if self.dest_has else [b""]
+            return "NO", [b""]
         return super().uid(command, uid, *args)
 
 
@@ -90,6 +113,18 @@ def _prepare_db(tmp_path: Path):
             ("msg-2", "INBOX", "rule-1", "Archive", 200, "pending", "2024-01-02T00:00:00Z"),
             ("msg-3", "INBOX", "rule-2", "Archive", 150, "pending", "2024-01-03T00:00:00Z"),
         ],
+    )
+
+
+def _cache_header(db, folder: str, uid: str, message_id: str) -> None:
+    db.execute(
+        "INSERT OR REPLACE INTO headers (folder, uid, data, updated_at) VALUES (?,?,?,?)",
+        (
+            folder,
+            uid,
+            json.dumps({"header": f"Message-ID: <{message_id}>\n"}),
+            "2024-01-10T00:00:00Z",
+        ),
     )
 
 
@@ -311,5 +346,76 @@ def test_execute_actions_logs_missing_uid_skip(tmp_path: Path):
     assert skip_context["folder"] == "INBOX"
     assert skip_context["target"] == "Archive"
     assert "no such message" in skip_context["error"].lower()
+
+    db.close()
+
+
+def test_execute_actions_verifies_moves_success(tmp_path: Path):
+    db, logger = _prepare_db_with_actions(
+        tmp_path,
+        [("verify-ok", "INBOX", "rule", "Archive", 100, "pending", "2024-02-01T00:00:00Z")],
+    )
+    with db:
+        _cache_header(db, "INBOX", "verify-ok", "success@example.com")
+    client = VerifyingClient(source_has=False, dest_has=True)
+
+    _timer, stats = execute_actions(
+        client,
+        db,
+        show_progress=False,
+        dry_run=False,
+        strict=False,
+        logger=logger,
+        verbose=False,
+        verify_moves=True,
+    )
+
+    assert stats["done"] == 1
+    status = db.execute(
+        "SELECT status FROM actions WHERE uid='verify-ok'",
+    ).fetchone()[0]
+    assert status == "done"
+
+    db.close()
+
+
+def test_execute_actions_verifies_moves_failure(tmp_path: Path):
+    db, logger = _prepare_db_with_actions(
+        tmp_path,
+        [("verify-missing", "INBOX", "rule", "Archive", 100, "pending", "2024-02-02T00:00:00Z")],
+    )
+    with db:
+        _cache_header(db, "INBOX", "verify-missing", "missing@example.com")
+    client = VerifyingClient(source_has=False, dest_has=False)
+
+    _timer, stats = execute_actions(
+        client,
+        db,
+        show_progress=False,
+        dry_run=False,
+        strict=False,
+        logger=logger,
+        verbose=True,
+        verify_moves=True,
+    )
+
+    assert stats["failed"] == 1
+    status = db.execute(
+        "SELECT status FROM actions WHERE uid='verify-missing'",
+    ).fetchone()[0]
+    assert status == "failed"
+
+    log_entries = []
+    with logger.log_file.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                log_entries.append(json.loads(line))
+
+    failure_entries = [
+        entry for entry in log_entries if entry.get("message") == "execute_verify_failed"
+    ]
+    assert failure_entries
+    issues = failure_entries[0]["context"].get("issues", [])
+    assert "destination_missing" in issues
 
     db.close()
