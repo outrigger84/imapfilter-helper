@@ -62,7 +62,13 @@ def cli_context(tmp_path: Path):
 
 def test_handle_build_cache_uses_default_inbox(monkeypatch, cli_context):
     cfg, db, logger = cli_context
-    args = argparse.Namespace(cmd="build-cache", all_folders=False, folder=None)
+    args = argparse.Namespace(
+        cmd="build-cache",
+        all_folders=False,
+        folder=None,
+        limit=None,
+        order=None,
+    )
     seen = {}
 
     class FakeClient:
@@ -80,6 +86,8 @@ def test_handle_build_cache_uses_default_inbox(monkeypatch, cli_context):
 
     def fake_build_cache(client, database, folders, **kwargs):
         seen["folders"] = list(folders)
+        seen["limit"] = kwargs.get("limit")
+        seen["order"] = kwargs.get("order")
         return None, len(folders), 0
 
     def fail_list_all_folders(client):  # pragma: no cover - defensive
@@ -93,6 +101,8 @@ def test_handle_build_cache_uses_default_inbox(monkeypatch, cli_context):
 
     assert result == 0
     assert seen["folders"] == [cli.DEFAULT_INBOX]
+    assert seen["limit"] is None
+    assert seen["order"] == "newest"
     assert fake_client.logged_out is True
 
 
@@ -105,6 +115,10 @@ def test_handle_evaluate_sets_dry_run(monkeypatch, cli_context):
         debug_headers=False,
         all_folders=False,
         folder=None,
+        limit=None,
+        order=None,
+        cache_limit=None,
+        cache_order=None,
     )
     seen = {}
 
@@ -139,6 +153,10 @@ def test_handle_evaluate_with_specific_folders(monkeypatch, cli_context):
         debug_headers=False,
         all_folders=False,
         folder=["Archive/2024", "Archive/2023"],
+        limit=None,
+        order=None,
+        cache_limit=None,
+        cache_order=None,
     )
     seen = {}
 
@@ -171,6 +189,8 @@ def test_handle_execute_dry_run(monkeypatch, cli_context):
         limit=5,
         all_folders=False,
         folder=None,
+        cache_limit=None,
+        cache_order=None,
     )
     seen = {}
 
@@ -206,6 +226,8 @@ def test_handle_execute_with_folder(monkeypatch, cli_context):
         limit=None,
         all_folders=False,
         folder=["Projects/Archive"],
+        cache_limit=None,
+        cache_order=None,
     )
     seen = {}
 
@@ -249,6 +271,8 @@ def test_handle_run_all_summarises(monkeypatch, cli_context):
         verbose=False,
         debug_headers=False,
         limit=None,
+        cache_limit=2,
+        cache_order="oldest",
     )
     seen = {}
 
@@ -270,6 +294,8 @@ def test_handle_run_all_summarises(monkeypatch, cli_context):
 
     def fake_build_cache(client, database, folders, **kwargs):
         seen["cache_folders"] = list(folders)
+        seen["cache_limit"] = kwargs.get("limit")
+        seen["cache_order"] = kwargs.get("order")
         return None, len(folders), 2
 
     def fake_load_rules(path, log):
@@ -298,6 +324,8 @@ def test_handle_run_all_summarises(monkeypatch, cli_context):
     assert result == 0
     assert fake_client.logged_out is True
     assert seen["cache_folders"] == ["INBOX", "Archive"]
+    assert seen["cache_limit"] == 2
+    assert seen["cache_order"] == "oldest"
     assert seen["evaluate_called"] is True
     assert seen["execute_called"] is True
     assert seen["evaluate_kwargs"]["verbose"] is False
@@ -312,6 +340,8 @@ def test_handle_run_all_summarises(monkeypatch, cli_context):
 def test_handle_build_cache_uses_specific_folder(monkeypatch, cli_context):
     cfg, db, logger = cli_context
     args = argparse.Namespace(cmd="build-cache", all_folders=False, folder="Archive/2024")
+    args.limit = None
+    args.order = "random"
     seen = {}
 
     class FakeClient:
@@ -324,6 +354,7 @@ def test_handle_build_cache_uses_specific_folder(monkeypatch, cli_context):
 
     def fake_build_cache(client, database, folders, **kwargs):
         seen["folders"] = list(folders)
+        seen["order"] = kwargs.get("order")
         return None, len(folders), 0
 
     def fail_list_all_folders(client):  # pragma: no cover - defensive
@@ -337,6 +368,7 @@ def test_handle_build_cache_uses_specific_folder(monkeypatch, cli_context):
 
     assert result == 0
     assert seen["folders"] == ["Archive/2024"]
+    assert seen["order"] == "random"
 
 
 def test_handle_run_all_uses_specific_folder(monkeypatch, cli_context):
@@ -350,6 +382,8 @@ def test_handle_run_all_uses_specific_folder(monkeypatch, cli_context):
         verbose=False,
         debug_headers=False,
         limit=10,
+        cache_limit=None,
+        cache_order=None,
     )
     seen = {}
 
@@ -363,6 +397,7 @@ def test_handle_run_all_uses_specific_folder(monkeypatch, cli_context):
 
     def fake_build_cache(client, database, folders, **kwargs):
         seen["cache_folders"] = list(folders)
+        seen["cache_kwargs"] = kwargs
         return None, len(folders), 1
 
     def fake_load_rules(path, log):
@@ -390,6 +425,8 @@ def test_handle_run_all_uses_specific_folder(monkeypatch, cli_context):
 
     assert result == 0
     assert seen["cache_folders"] == ["Archive/2024"]
+    assert seen["cache_kwargs"]["limit"] is None
+    assert seen["cache_kwargs"]["order"] == "newest"
     assert seen["evaluate_kwargs"]["verbose"] is False
     assert seen["execute_kwargs"]["limit"] == 10
     assert seen["evaluate_kwargs"]["folders"] == ["Archive/2024"]
