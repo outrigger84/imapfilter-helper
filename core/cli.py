@@ -32,6 +32,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Scan only the specified folder (can be repeated)",
     )
+    p_build.add_argument(
+        "--limit",
+        type=int,
+        help="Cache at most this many messages per folder",
+    )
+    p_build.add_argument(
+        "--order",
+        choices=["newest", "oldest", "random"],
+        help="When limiting, choose which messages to keep (default: newest)",
+    )
 
     p_eval = sub.add_parser("evaluate", help="Evaluate rules against cache")
     p_eval.add_argument("--dry-run", action="store_true", help="Simulate rule matches only")
@@ -107,6 +117,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="Process at most this many pending actions during the execute phase",
     )
+    p_run.add_argument(
+        "--cache-limit",
+        type=int,
+        help="Cache at most this many messages per folder during the cache phase",
+    )
+    p_run.add_argument(
+        "--cache-order",
+        choices=["newest", "oldest", "random"],
+        help="When limiting cache, choose which messages to keep (default: newest)",
+    )
 
     p_clear = sub.add_parser("clear-pending", help="Remove all pending actions without executing them")
 
@@ -165,6 +185,9 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
     """Handle the ``build-cache`` command."""
     client = imap_login(cfg.paths.secrets_file, logger)
     try:
+        cfg.cache.limit = args.limit
+        if args.order:
+            cfg.cache.order = args.order
         if args.all_folders:
             folders = list_all_folders(client)
         else:
@@ -176,6 +199,8 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
             folders,
             show_progress=cfg.logging.show_progress,
             logger=logger,
+            limit=cfg.cache.limit,
+            order=cfg.cache.order,
         )
     finally:
         client.logout()
@@ -244,6 +269,9 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     cfg.executor.strict = args.strict
     cfg.executor.limit = args.limit
     cfg.logging.verbose = args.verbose
+    cfg.cache.limit = args.cache_limit
+    if args.cache_order:
+        cfg.cache.order = args.cache_order
     run_timer = PhaseTimer("run-all")
     client = imap_login(cfg.paths.secrets_file, logger)
     try:
@@ -263,6 +291,8 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             folders,
             show_progress=cfg.logging.show_progress,
             logger=logger,
+            limit=cfg.cache.limit,
+            order=cfg.cache.order,
         )
         rules = load_rules(cfg.paths.rules_dir, logger)
         _eval_timer, rules_count, matches = evaluate_rules(

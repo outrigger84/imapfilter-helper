@@ -120,6 +120,8 @@ def test_build_cache_stores_headers_per_folder(tmp_path: Path, monkeypatch: pyte
             ["Inbox", "Archive"],
             show_progress=False,
             logger=logger,
+            limit=None,
+            order="newest",
         )
 
         rows = db.execute(
@@ -137,5 +139,49 @@ def test_build_cache_stores_headers_per_folder(tmp_path: Path, monkeypatch: pyte
                 '{"header": "Subject: Inbox 1\\r\\n"}',
             ),
         ]
+    finally:
+        db.close()
+
+
+def test_build_cache_respects_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    db_path = tmp_path / "imap.db"
+    log_path = tmp_path / "log.json"
+    logger = JsonLogger(log_path)
+    db = init_db(db_path, logger=logger)
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.current_folder = ""
+
+        def select(self, folder: str, readonly: bool = True):
+            self.current_folder = folder.strip('"')
+            return "OK", []
+
+        def fetch(self, uid: bytes, _query: str):
+            header = f"Subject: {self.current_folder} {uid.decode()}\r\n"
+            return "OK", [(None, header.encode())]
+
+    fake_client = FakeClient()
+
+    def fake_safe_search_all(client):
+        return [b"1", b"2", b"3", b"4"]
+
+    monkeypatch.setattr("core.cache_builder.safe_search_all", fake_safe_search_all)
+
+    try:
+        build_cache(
+            fake_client,
+            db,
+            ["Inbox"],
+            show_progress=False,
+            logger=logger,
+            limit=2,
+            order="oldest",
+        )
+
+        rows = db.execute(
+            "SELECT folder, uid FROM headers ORDER BY uid"
+        ).fetchall()
+        assert rows == [("Inbox", "1"), ("Inbox", "2")]
     finally:
         db.close()
