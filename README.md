@@ -74,3 +74,12 @@ Install the dependencies and run the tests:
 pip install -r requirements.txt  # if available
 pytest
 ```
+
+### Diagnostic helpers
+
+Two standalone scripts live under `core/tools/` to assist with troubleshooting:
+
+* `python -m core.tools.sample_messages` – interactively copies random messages from `INBOX` into the `Test` folder for manual inspection.
+* `python -m core.tools.move_diagnostics [--destination MAILBOX] [--ensure-destination]` – appends fresh test messages to `INBOX` and exercises the `UID MOVE` and fallback copy/delete flows, logging the IMAP server responses and verifying that each message arrives in the destination folder.
+
+Both tools reuse the credentials and logging configuration from `data/secrets.json` and `data/log.json` respectively.
