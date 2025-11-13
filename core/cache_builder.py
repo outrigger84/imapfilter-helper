@@ -2,12 +2,34 @@
 from __future__ import annotations
 
 import json
+import random
 from typing import Sequence
 
 from tqdm import tqdm
 
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 from core.imap_client import safe_search_all
+
+
+VALID_LIMIT_ORDERS = {"newest", "oldest", "random"}
+
+
+def _select_uids(
+    uids: Sequence[bytes], limit: int | None, order: str
+) -> tuple[list[bytes], str]:
+    """Return the UIDs that should be cached based on the requested limit."""
+
+    items = list(uids)
+    if limit is None or limit <= 0 or limit >= len(items):
+        return items, "newest" if order not in VALID_LIMIT_ORDERS else order
+
+    normalized = order if order in VALID_LIMIT_ORDERS else "newest"
+
+    if normalized == "oldest":
+        return items[:limit], normalized
+    if normalized == "random":
+        return random.sample(items, k=limit), normalized
+    return items[-limit:], normalized
 
 
 def build_cache(
@@ -17,6 +39,8 @@ def build_cache(
     *,
     show_progress: bool,
     logger: JsonLogger,
+    limit: int | None,
+    order: str,
 ) -> tuple[PhaseTimer, int, int]:
     timer = PhaseTimer("cache")
     folders_bar = tqdm(
@@ -54,8 +78,26 @@ def build_cache(
                 db.commit()
                 continue
 
+            limited_uids, applied_order = _select_uids(uids, limit, order)
+            if limit is not None and limit > 0 and len(limited_uids) < len(uids):
+                logger.log(
+                    "INFO",
+                    "cache_folder_limited",
+                    {
+                        "folder": folder,
+                        "requested_limit": limit,
+                        "order": applied_order,
+                        "total": len(uids),
+                        "cached": len(limited_uids),
+                    },
+                    console=(
+                        f"⚖️ {folder}: limited to {len(limited_uids)}"
+                        f" of {len(uids)} messages"
+                    ),
+                )
+
             msgs_bar = tqdm(
-                uids,
+                limited_uids,
                 desc=f"   ✉️ Fetching {folder}",
                 unit="msg",
                 dynamic_ncols=True,
@@ -86,12 +128,12 @@ def build_cache(
                 (folder, "/".join(folder.split("/")[:-1]), now_iso()),
             )
             db.commit()
-            total_msgs += len(uids)
+            total_msgs += len(limited_uids)
             logger.log(
                 "INFO",
                 "cache_folder_done",
-                {"folder": folder, "messages": len(uids)},
-                console=f"✅ {folder}: {len(uids)} messages cached",
+                {"folder": folder, "messages": len(limited_uids)},
+                console=f"✅ {folder}: {len(limited_uids)} messages cached",
             )
 
         except Exception as exc:  # pragma: no cover - defensive logging

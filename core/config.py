@@ -41,6 +41,12 @@ class LoggingConfig:
 
 
 @dataclass
+class CacheConfig:
+    limit: Optional[int] = None
+    order: str = "newest"
+
+
+@dataclass
 class ExecutorConfig:
     default_run_scope: str = "all"
     dry_run: bool = False
@@ -52,6 +58,7 @@ class ExecutorConfig:
 class AppConfig:
     paths: PathsConfig
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    cache: CacheConfig = field(default_factory=CacheConfig)
     executor: ExecutorConfig = field(default_factory=ExecutorConfig)
 
 
