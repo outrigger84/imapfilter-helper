@@ -55,6 +55,7 @@ class ExecutorConfig:
     dry_run: bool = False
     strict: bool = False
     limit: Optional[int] = None
+    verify_moves: bool = False
 
 
 @dataclass
