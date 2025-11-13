@@ -216,6 +216,22 @@ def execute_actions(
     current_key: tuple[str, str | None] | None = None
     current_items: list[tuple[int, str]] = []
 
+    def _has_capability(name: str) -> bool:
+        if dry_run or client is None:
+            return False
+        caps = getattr(client, "capabilities", ())
+        desired = name.upper()
+        for cap in caps:
+            if isinstance(cap, bytes):
+                cap_text = cap.decode("ascii", "ignore").upper()
+            else:
+                cap_text = str(cap).upper()
+            if cap_text == desired:
+                return True
+        return False
+
+    supports_uid_move = _has_capability("MOVE")
+
     def log_imap_call(
         message: str,
         *,
@@ -312,6 +328,54 @@ def execute_actions(
                 for a_id, uid in current_items:
                     deleted_flagged = False
                     try:
+                        move_typ = "NO"
+                        move_resp = None
+                        if supports_uid_move and target:
+                            try:
+                                move_typ, move_resp = client.uid(
+                                    "MOVE", uid, f'"{target}"'
+                                )
+                            except Exception as move_exc:
+                                log_imap_call(
+                                    "imap_uid_move",
+                                    op_label="UID MOVE",
+                                    status="ERROR",
+                                    response=[str(move_exc)],
+                                    folder=folder,
+                                    target=target,
+                                    uid=uid,
+                                )
+                            else:
+                                log_imap_call(
+                                    "imap_uid_move",
+                                    op_label="UID MOVE",
+                                    status=move_typ,
+                                    response=move_resp,
+                                    folder=folder,
+                                    target=target,
+                                    uid=uid,
+                                )
+                                if move_typ == "OK":
+                                    if target and not target_ready:
+                                        target_ready = True
+                                    db.execute(
+                                        "UPDATE actions SET status='done', executed_at=? WHERE id=?",
+                                        (now_iso(), a_id),
+                                    )
+                                    stats["done"] += 1
+                                    console_msg: str | None = None
+                                    if verbose:
+                                        console_msg = (
+                                            f"   ✅ Moved {folder}/{uid} → {display_target}"
+                                        )
+                                    logger.log(
+                                        "INFO",
+                                        "execute_uid_done",
+                                        {"folder": folder, "target": target, "uid": uid},
+                                        console=console_msg,
+                                    )
+                                    continue
+
                         typ1, copy_resp = client.uid("COPY", uid, f'"{target}"')
                         log_imap_call(
                             "imap_uid_copy",
