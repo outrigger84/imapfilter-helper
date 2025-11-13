@@ -122,6 +122,8 @@ def test_build_cache_stores_headers_per_folder(tmp_path: Path, monkeypatch: pyte
             logger=logger,
             limit=None,
             order="newest",
+            backup_enabled=False,
+            backup_dir=tmp_path / "backups",
         )
 
         rows = db.execute(
@@ -177,6 +179,8 @@ def test_build_cache_respects_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPa
             logger=logger,
             limit=2,
             order="oldest",
+            backup_enabled=False,
+            backup_dir=tmp_path / "backups",
         )
 
         rows = db.execute(

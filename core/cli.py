@@ -42,6 +42,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["newest", "oldest", "random"],
         help="When limiting, choose which messages to keep (default: newest)",
     )
+    p_build.add_argument(
+        "--backup",
+        action="store_true",
+        help="Also export cached messages as mbox backups",
+    )
 
     p_eval = sub.add_parser("evaluate", help="Evaluate rules against cache")
     p_eval.add_argument("--dry-run", action="store_true", help="Simulate rule matches only")
@@ -127,6 +132,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["newest", "oldest", "random"],
         help="When limiting cache, choose which messages to keep (default: newest)",
     )
+    p_run.add_argument(
+        "--backup",
+        action="store_true",
+        help="Export cached messages as mbox backups during the cache phase",
+    )
 
     p_clear = sub.add_parser("clear-pending", help="Remove all pending actions without executing them")
 
@@ -144,6 +154,7 @@ def _ensure_layout(cfg: AppConfig) -> None:
     cfg.paths.rules_dir.mkdir(parents=True, exist_ok=True)
     cfg.paths.db_file.parent.mkdir(parents=True, exist_ok=True)
     cfg.paths.log_file.parent.mkdir(parents=True, exist_ok=True)
+    cfg.paths.backup_dir.mkdir(parents=True, exist_ok=True)
 
 
 def _normalize_folder_list(
@@ -188,6 +199,7 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
         cfg.cache.limit = args.limit
         if args.order:
             cfg.cache.order = args.order
+        cfg.cache.backup_enabled = bool(args.backup)
         if args.all_folders:
             folders = list_all_folders(client)
         else:
@@ -201,6 +213,8 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
             logger=logger,
             limit=cfg.cache.limit,
             order=cfg.cache.order,
+            backup_enabled=cfg.cache.backup_enabled,
+            backup_dir=cfg.paths.backup_dir,
         )
     finally:
         client.logout()
@@ -272,6 +286,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     cfg.cache.limit = args.cache_limit
     if args.cache_order:
         cfg.cache.order = args.cache_order
+    cfg.cache.backup_enabled = bool(args.backup)
     run_timer = PhaseTimer("run-all")
     client = imap_login(cfg.paths.secrets_file, logger)
     try:
@@ -293,6 +308,8 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             logger=logger,
             limit=cfg.cache.limit,
             order=cfg.cache.order,
+            backup_enabled=cfg.cache.backup_enabled,
+            backup_dir=cfg.paths.backup_dir,
         )
         rules = load_rules(cfg.paths.rules_dir, logger)
         _eval_timer, rules_count, matches = evaluate_rules(
