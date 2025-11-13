@@ -3,8 +3,12 @@ from __future__ import annotations
 
 import json
 import random
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Sequence
 
+from email import message_from_bytes
+import mailbox
 from tqdm import tqdm
 
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
@@ -41,6 +45,8 @@ def build_cache(
     logger: JsonLogger,
     limit: int | None,
     order: str,
+    backup_enabled: bool,
+    backup_dir: Path,
 ) -> tuple[PhaseTimer, int, int]:
     timer = PhaseTimer("cache")
     folders_bar = tqdm(
@@ -57,6 +63,8 @@ def build_cache(
     for folder in folders_bar:
         folders_bar.set_postfix_str(folder)
         logger.log("INFO", "cache_folder_start", {"folder": folder})
+        backup_path: Path | None = None
+        backup_mbox: mailbox.mbox | None = None
         try:
             sel_typ, _ = client.select(f'"{folder}"', readonly=True)
             if sel_typ != "OK":
@@ -123,6 +131,46 @@ def build_cache(
                     ),
                 )
 
+            if backup_enabled and limited_uids:
+                backup_dir.mkdir(parents=True, exist_ok=True)
+                safe_name = folder.replace("/", "_").replace(" ", "_") or "folder"
+                timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                backup_path = backup_dir / f"{safe_name}_{timestamp}.mbox"
+                logger.log(
+                    "INFO",
+                    "cache_backup_start",
+                    {"folder": folder, "path": str(backup_path)},
+                    console=f"💾 {folder}: starting backup",
+                )
+                backup_mbox = mailbox.mbox(str(backup_path))
+
+                backup_bar = tqdm(
+                    limited_uids,
+                    desc=f"   📦 Backing up {folder}",
+                    unit="msg",
+                    dynamic_ncols=True,
+                    leave=False,
+                    position=2,
+                    disable=not show_progress,
+                )
+
+                for uid in backup_bar:
+                    typ, msg_data = client.fetch(uid, "(BODY.PEEK[])")
+                    if typ != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
+                        continue
+                    raw_msg = msg_data[0][1]
+                    try:
+                        backup_mbox.add(mailbox.mboxMessage(message_from_bytes(raw_msg)))
+                    except Exception:  # pragma: no cover - defensive
+                        continue
+                backup_mbox.flush()
+                logger.log(
+                    "INFO",
+                    "cache_backup_done",
+                    {"folder": folder, "path": str(backup_path), "messages": len(limited_uids)},
+                    console=f"✅ {folder}: backup saved to {backup_path.name}",
+                )
+
             db.execute(
                 "INSERT OR REPLACE INTO folders VALUES(NULL,?,?,?)",
                 (folder, "/".join(folder.split("/")[:-1]), now_iso()),
@@ -143,6 +191,16 @@ def build_cache(
                 {"folder": folder, "error": str(exc)},
                 console=f"❌ {folder}: {exc}",
             )
+        finally:
+            if backup_mbox is not None:
+                try:
+                    backup_mbox.flush()
+                except Exception:  # pragma: no cover - defensive
+                    pass
+                try:
+                    backup_mbox.close()
+                except Exception:  # pragma: no cover - defensive
+                    pass
 
     timer.stop()
     timer.count = total_msgs

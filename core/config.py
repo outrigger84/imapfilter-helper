@@ -23,6 +23,7 @@ class PathsConfig:
     secrets_file: Path = field(init=False)
     db_file: Path = field(init=False)
     log_file: Path = field(init=False)
+    backup_dir: Path = field(init=False)
 
     def __post_init__(self) -> None:
         base = Path(self.base_dir).resolve()
@@ -32,6 +33,7 @@ class PathsConfig:
         self.secrets_file = base / DEFAULT_SECRETS_PATH
         self.db_file = base / DEFAULT_CACHE_PATH
         self.log_file = base / DEFAULT_LOG_PATH
+        self.backup_dir = self.data_dir / "backups"
 
 
 @dataclass
@@ -44,6 +46,7 @@ class LoggingConfig:
 class CacheConfig:
     limit: Optional[int] = None
     order: str = "newest"
+    backup_enabled: bool = False
 
 
 @dataclass
