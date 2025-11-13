@@ -68,6 +68,7 @@ def test_handle_build_cache_uses_default_inbox(monkeypatch, cli_context):
         folder=None,
         limit=None,
         order=None,
+        backup=False,
     )
     seen = {}
 
@@ -88,6 +89,8 @@ def test_handle_build_cache_uses_default_inbox(monkeypatch, cli_context):
         seen["folders"] = list(folders)
         seen["limit"] = kwargs.get("limit")
         seen["order"] = kwargs.get("order")
+        seen["backup_enabled"] = kwargs.get("backup_enabled")
+        seen["backup_dir"] = kwargs.get("backup_dir")
         return None, len(folders), 0
 
     def fail_list_all_folders(client):  # pragma: no cover - defensive
@@ -103,6 +106,55 @@ def test_handle_build_cache_uses_default_inbox(monkeypatch, cli_context):
     assert seen["folders"] == [cli.DEFAULT_INBOX]
     assert seen["limit"] is None
     assert seen["order"] == "newest"
+    assert seen["backup_enabled"] is False
+    assert seen["backup_dir"] == cfg.paths.backup_dir
+    assert fake_client.logged_out is True
+
+
+def test_handle_build_cache_enables_backup(monkeypatch, cli_context):
+    cfg, db, logger = cli_context
+    args = argparse.Namespace(
+        cmd="build-cache",
+        all_folders=True,
+        folder=None,
+        limit=None,
+        order=None,
+        backup=True,
+    )
+    seen = {}
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.logged_out = False
+
+        def logout(self) -> None:
+            self.logged_out = True
+
+    fake_client = FakeClient()
+
+    def fake_login(path, log):
+        seen["secrets_path"] = path
+        return fake_client
+
+    def fake_list_all_folders(_client):
+        return ["INBOX", "Archive"]
+
+    def fake_build_cache(client, database, folders, **kwargs):
+        seen["folders"] = list(folders)
+        seen["backup_enabled"] = kwargs.get("backup_enabled")
+        seen["backup_dir"] = kwargs.get("backup_dir")
+        return None, len(folders), 0
+
+    monkeypatch.setattr(cli, "imap_login", fake_login)
+    monkeypatch.setattr(cli, "build_cache", fake_build_cache)
+    monkeypatch.setattr(cli, "list_all_folders", fake_list_all_folders)
+
+    result = cli.handle_build_cache(args, cfg, db, logger)
+
+    assert result == 0
+    assert seen["folders"] == ["INBOX", "Archive"]
+    assert seen["backup_enabled"] is True
+    assert seen["backup_dir"] == cfg.paths.backup_dir
     assert fake_client.logged_out is True
 
 
@@ -119,6 +171,7 @@ def test_handle_evaluate_sets_dry_run(monkeypatch, cli_context):
         order=None,
         cache_limit=None,
         cache_order=None,
+        backup=False,
     )
     seen = {}
 
@@ -157,6 +210,7 @@ def test_handle_evaluate_with_specific_folders(monkeypatch, cli_context):
         order=None,
         cache_limit=None,
         cache_order=None,
+        backup=False,
     )
     seen = {}
 
@@ -191,6 +245,7 @@ def test_handle_execute_dry_run(monkeypatch, cli_context):
         folder=None,
         cache_limit=None,
         cache_order=None,
+        backup=False,
     )
     seen = {}
 
@@ -228,6 +283,7 @@ def test_handle_execute_with_folder(monkeypatch, cli_context):
         folder=["Projects/Archive"],
         cache_limit=None,
         cache_order=None,
+        backup=False,
     )
     seen = {}
 
@@ -273,6 +329,7 @@ def test_handle_run_all_summarises(monkeypatch, cli_context):
         limit=None,
         cache_limit=2,
         cache_order="oldest",
+        backup=True,
     )
     seen = {}
 
@@ -296,6 +353,8 @@ def test_handle_run_all_summarises(monkeypatch, cli_context):
         seen["cache_folders"] = list(folders)
         seen["cache_limit"] = kwargs.get("limit")
         seen["cache_order"] = kwargs.get("order")
+        seen["cache_backup"] = kwargs.get("backup_enabled")
+        seen["cache_backup_dir"] = kwargs.get("backup_dir")
         return None, len(folders), 2
 
     def fake_load_rules(path, log):
@@ -326,6 +385,8 @@ def test_handle_run_all_summarises(monkeypatch, cli_context):
     assert seen["cache_folders"] == ["INBOX", "Archive"]
     assert seen["cache_limit"] == 2
     assert seen["cache_order"] == "oldest"
+    assert seen["cache_backup"] is True
+    assert seen["cache_backup_dir"] == cfg.paths.backup_dir
     assert seen["evaluate_called"] is True
     assert seen["execute_called"] is True
     assert seen["evaluate_kwargs"]["verbose"] is False
@@ -342,6 +403,7 @@ def test_handle_build_cache_uses_specific_folder(monkeypatch, cli_context):
     args = argparse.Namespace(cmd="build-cache", all_folders=False, folder="Archive/2024")
     args.limit = None
     args.order = "random"
+    args.backup = False
     seen = {}
 
     class FakeClient:
@@ -355,6 +417,7 @@ def test_handle_build_cache_uses_specific_folder(monkeypatch, cli_context):
     def fake_build_cache(client, database, folders, **kwargs):
         seen["folders"] = list(folders)
         seen["order"] = kwargs.get("order")
+        seen["backup_enabled"] = kwargs.get("backup_enabled")
         return None, len(folders), 0
 
     def fail_list_all_folders(client):  # pragma: no cover - defensive
@@ -369,6 +432,7 @@ def test_handle_build_cache_uses_specific_folder(monkeypatch, cli_context):
     assert result == 0
     assert seen["folders"] == ["Archive/2024"]
     assert seen["order"] == "random"
+    assert seen["backup_enabled"] is False
 
 
 def test_handle_run_all_uses_specific_folder(monkeypatch, cli_context):
@@ -384,6 +448,7 @@ def test_handle_run_all_uses_specific_folder(monkeypatch, cli_context):
         limit=10,
         cache_limit=None,
         cache_order=None,
+        backup=False,
     )
     seen = {}
 
@@ -427,6 +492,8 @@ def test_handle_run_all_uses_specific_folder(monkeypatch, cli_context):
     assert seen["cache_folders"] == ["Archive/2024"]
     assert seen["cache_kwargs"]["limit"] is None
     assert seen["cache_kwargs"]["order"] == "newest"
+    assert seen["cache_kwargs"]["backup_enabled"] is False
+    assert seen["cache_kwargs"]["backup_dir"] == cfg.paths.backup_dir
     assert seen["evaluate_kwargs"]["verbose"] is False
     assert seen["execute_kwargs"]["limit"] == 10
     assert seen["evaluate_kwargs"]["folders"] == ["Archive/2024"]
