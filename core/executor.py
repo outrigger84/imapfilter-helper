@@ -1,12 +1,18 @@
 """Execute queued actions."""
 from __future__ import annotations
 
+import json
 import imaplib
+from email.parser import HeaderParser
+from email.policy import default
 from typing import Dict, Iterable, Sequence
 
 from tqdm import tqdm
 
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
+
+
+HEADER_PARSER = HeaderParser(policy=default)
 
 
 def _imap_response_text(response: Iterable[bytes | str] | None) -> str:
@@ -53,6 +59,7 @@ def execute_actions(
     verbose: bool = False,
     limit: int | None = None,
     folders: Sequence[str] | None = None,
+    verify_moves: bool = False,
 ) -> tuple[PhaseTimer, Dict[str, int]]:
     if not dry_run and client is None:
         raise ValueError("An IMAP client is required when not running in dry-run mode")
@@ -203,6 +210,137 @@ def execute_actions(
             console=f"🚫 Suppressed {suppressed} duplicate actions",
         )
 
+    message_id_cache: dict[tuple[str, str], str | None] = {}
+
+    def _cached_message_id(folder: str, uid: str) -> str | None:
+        key = (folder, uid)
+        if key in message_id_cache:
+            return message_id_cache[key]
+        message_id: str | None = None
+        try:
+            row = db.execute(
+                "SELECT data FROM headers WHERE folder=? AND uid=?",
+                (folder, uid),
+            ).fetchone()
+        except Exception:
+            row = None
+        if row and row[0]:
+            try:
+                payload = json.loads(row[0])
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict):
+                header_text = payload.get("header")
+                if isinstance(header_text, str):
+                    try:
+                        parsed = HEADER_PARSER.parsestr(header_text)
+                    except Exception:
+                        parsed = None
+                    if parsed is not None:
+                        value = parsed.get("Message-ID") or parsed.get("Message-Id")
+                        if isinstance(value, str) and value.strip():
+                            message_id = value.strip()
+        message_id_cache[key] = message_id
+        return message_id
+
+    def _message_id_criteria(message_id: str) -> str:
+        escaped = message_id.replace('"', '\\"')
+        return f'(UNDELETED HEADER Message-ID "{escaped}")'
+
+    def _search_has_results(search_resp) -> bool:
+        if not search_resp:
+            return False
+        first = search_resp[0]
+        if isinstance(first, bytes):
+            text = first.decode("ascii", "ignore")
+        else:
+            text = str(first)
+        return bool(text.strip())
+
+    def _uid_search_mailbox(
+        mailbox: str,
+        message_id: str,
+        *,
+        target: str | None,
+        uid: str,
+    ) -> tuple[bool, str, Iterable | None]:
+        assert client is not None
+        criteria = _message_id_criteria(message_id)
+        search_typ, search_resp = client.uid("SEARCH", None, criteria)
+        log_imap_call(
+            "imap_uid_search",
+            op_label="UID SEARCH",
+            status=search_typ,
+            response=search_resp,
+            folder=mailbox,
+            target=target,
+            uid=uid,
+        )
+        if search_typ != "OK":
+            return False, search_typ, search_resp
+        return _search_has_results(search_resp), search_typ, search_resp
+
+    def _verify_destination_mailbox(
+        folder: str,
+        target: str,
+        message_id: str,
+        *,
+        uid: str,
+    ) -> tuple[bool, str]:
+        assert client is not None
+        quoted_target = f'"{target}"'
+        dest_selected = False
+        sel_typ, sel_resp = client.select(quoted_target, readonly=True)
+        log_imap_call(
+            "imap_select",
+            op_label=f'SELECT "{target}"',
+            status=sel_typ,
+            response=sel_resp,
+            folder=target,
+            target=target,
+            uid=uid,
+        )
+        if sel_typ != "OK":
+            rese_typ, rese_resp = client.select(f'"{folder}"')
+            log_imap_call(
+                "imap_select",
+                op_label=f'SELECT "{folder}"',
+                status=rese_typ,
+                response=rese_resp,
+                folder=folder,
+                target=target,
+                uid=uid,
+            )
+            if rese_typ != "OK":
+                raise imaplib.IMAP4.error(f"Cannot re-open folder {folder}")
+            return False, sel_typ
+        dest_selected = True
+        try:
+            found, search_status, _ = _uid_search_mailbox(
+                target, message_id, target=target, uid=uid
+            )
+        finally:
+            if dest_selected:
+                try:
+                    client.close()
+                except imaplib.IMAP4.error:
+                    pass
+            rese_typ, rese_resp = client.select(f'"{folder}"')
+            log_imap_call(
+                "imap_select",
+                op_label=f'SELECT "{folder}"',
+                status=rese_typ,
+                response=rese_resp,
+                folder=folder,
+                target=target,
+                uid=uid,
+            )
+            if rese_typ != "OK":
+                raise imaplib.IMAP4.error(f"Cannot re-open folder {folder}")
+        if search_status != "OK":
+            return False, search_status
+        return found, search_status
+
     select_cur = db.cursor()
     select_cur.execute(
         dedup_cte
@@ -325,6 +463,100 @@ def execute_actions(
                     raise imaplib.IMAP4.error(f"Cannot open folder {folder}")
 
                 target_ready = target is None
+
+                def _finalize_success(action_id: int, uid_value: str) -> None:
+                    if verify_moves and target and not dry_run:
+                        message_id = _cached_message_id(folder, uid_value)
+                        if message_id:
+                            verify_errors: list[str] = []
+                            source_found = False
+                            source_status = "OK"
+                            try:
+                                source_found, source_status, _ = _uid_search_mailbox(
+                                    folder,
+                                    message_id,
+                                    target=target,
+                                    uid=uid_value,
+                                )
+                            except Exception as search_exc:
+                                source_found = True
+                                source_status = "ERROR"
+                                verify_errors.append(str(search_exc))
+                            dest_found = True
+                            dest_status = "OK"
+                            try:
+                                dest_found, dest_status = _verify_destination_mailbox(
+                                    folder,
+                                    target,
+                                    message_id,
+                                    uid=uid_value,
+                                )
+                            except Exception as dest_exc:
+                                dest_found = False
+                                dest_status = "ERROR"
+                                verify_errors.append(str(dest_exc))
+                            issues: list[str] = []
+                            if source_status != "OK":
+                                issues.append("source_search_failed")
+                            if source_found:
+                                issues.append("source_present")
+                            if dest_status != "OK":
+                                issues.append("destination_search_failed")
+                            if not dest_found:
+                                issues.append("destination_missing")
+                            if issues:
+                                db.execute(
+                                    "UPDATE actions SET status=?, executed_at=? WHERE id=?",
+                                    ("failed", now_iso(), action_id),
+                                )
+                                stats["failed"] += 1
+                                context = {
+                                    "folder": folder,
+                                    "target": target,
+                                    "uid": uid_value,
+                                    "message_id": message_id,
+                                    "issues": issues,
+                                }
+                                if verify_errors:
+                                    context["errors"] = verify_errors
+                                console_warn = None
+                                if verbose:
+                                    console_warn = (
+                                        f"   ⚠️ Verification failed for {folder}/{uid_value} → {display_target}"
+                                    )
+                                logger.log(
+                                    "WARN",
+                                    "execute_verify_failed",
+                                    context,
+                                    console=console_warn,
+                                )
+                                return
+                        else:
+                            if verbose:
+                                logger.log(
+                                    "DEBUG",
+                                    "execute_verify_missing_message_id",
+                                    {
+                                        "folder": folder,
+                                        "target": target,
+                                        "uid": uid_value,
+                                    },
+                                )
+                    db.execute(
+                        "UPDATE actions SET status='done', executed_at=? WHERE id=?",
+                        (now_iso(), action_id),
+                    )
+                    stats["done"] += 1
+                    console_msg: str | None = None
+                    if verbose:
+                        console_msg = f"   ✅ Moved {folder}/{uid_value} → {display_target}"
+                    logger.log(
+                        "INFO",
+                        "execute_uid_done",
+                        {"folder": folder, "target": target, "uid": uid_value},
+                        console=console_msg,
+                    )
+
                 for a_id, uid in current_items:
                     deleted_flagged = False
                     try:
@@ -358,22 +590,7 @@ def execute_actions(
                                 if move_typ == "OK":
                                     if target and not target_ready:
                                         target_ready = True
-                                    db.execute(
-                                        "UPDATE actions SET status='done', executed_at=? WHERE id=?",
-                                        (now_iso(), a_id),
-                                    )
-                                    stats["done"] += 1
-                                    console_msg: str | None = None
-                                    if verbose:
-                                        console_msg = (
-                                            f"   ✅ Moved {folder}/{uid} → {display_target}"
-                                        )
-                                    logger.log(
-                                        "INFO",
-                                        "execute_uid_done",
-                                        {"folder": folder, "target": target, "uid": uid},
-                                        console=console_msg,
-                                    )
+                                    _finalize_success(a_id, uid)
                                     continue
 
                         typ1, copy_resp = client.uid("COPY", uid, f'"{target}"')
@@ -461,20 +678,7 @@ def execute_actions(
                             raise imaplib.IMAP4.error("UID STORE +FLAGS \\Deleted failed")
                         deleted_flagged = True
 
-                        db.execute(
-                            "UPDATE actions SET status='done', executed_at=? WHERE id=?",
-                            (now_iso(), a_id),
-                        )
-                        stats["done"] += 1
-                        console_msg: str | None = None
-                        if verbose:
-                            console_msg = f"   ✅ Moved {folder}/{uid} → {display_target}"
-                        logger.log(
-                            "INFO",
-                            "execute_uid_done",
-                            {"folder": folder, "target": target, "uid": uid},
-                            console=console_msg,
-                        )
+                        _finalize_success(a_id, uid)
 
                     except imaplib.IMAP4.error as exc:
                         if deleted_flagged:
