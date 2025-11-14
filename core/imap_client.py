@@ -10,8 +10,20 @@ from typing import Iterable, List
 from core.logging_utils import JsonLogger
 
 
+_IMAP_MAXLINE = 10_000_000
+
+
+def _ensure_large_imap_buffer() -> None:
+    """Increase imaplib's internal line buffer if the default is too small."""
+
+    current = getattr(imaplib, "_MAXLINE", 0)
+    if current < _IMAP_MAXLINE:
+        imaplib._MAXLINE = _IMAP_MAXLINE
+
+
 def imap_login(secrets_path: Path, logger: JsonLogger) -> imaplib.IMAP4_SSL:
     """Establish an authenticated IMAP session using the provided secrets file."""
+    _ensure_large_imap_buffer()
     secrets_path = Path(secrets_path)
     if not secrets_path.exists():
         sys.exit(f"❌ Secrets file not found: {secrets_path}")
