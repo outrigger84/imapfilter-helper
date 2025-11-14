@@ -464,7 +464,7 @@ def execute_actions(
 
                 target_ready = target is None
 
-                def _finalize_success(action_id: int, uid_value: str) -> None:
+                def _finalize_success(action_id: int, uid_value: str) -> bool:
                     if verify_moves and target and not dry_run:
                         message_id = _cached_message_id(folder, uid_value)
                         if message_id:
@@ -530,7 +530,7 @@ def execute_actions(
                                     context,
                                     console=console_warn,
                                 )
-                                return
+                                return False
                         else:
                             if verbose:
                                 logger.log(
@@ -556,6 +556,7 @@ def execute_actions(
                         {"folder": folder, "target": target, "uid": uid_value},
                         console=console_msg,
                     )
+                    return True
 
                 for a_id, uid in current_items:
                     deleted_flagged = False
@@ -678,7 +679,25 @@ def execute_actions(
                             raise imaplib.IMAP4.error("UID STORE +FLAGS \\Deleted failed")
                         deleted_flagged = True
 
-                        _finalize_success(a_id, uid)
+                        if not _finalize_success(a_id, uid):
+                            if deleted_flagged:
+                                try:
+                                    cleanup_typ, cleanup_resp = client.uid(
+                                        "STORE", uid, "-FLAGS", "(\\Deleted)"
+                                    )
+                                    log_imap_call(
+                                        "imap_uid_store_cleanup",
+                                        op_label="UID STORE -FLAGS",
+                                        status=cleanup_typ,
+                                        response=cleanup_resp,
+                                        folder=folder,
+                                        target=target,
+                                        uid=uid,
+                                    )
+                                except Exception:  # pragma: no cover - best effort cleanup
+                                    pass
+                                deleted_flagged = False
+                            continue
 
                     except imaplib.IMAP4.error as exc:
                         if deleted_flagged:
