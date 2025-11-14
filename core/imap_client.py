@@ -44,7 +44,13 @@ def list_all_folders(client: imaplib.IMAP4) -> List[str]:
 
 
 def safe_search_all(client: imaplib.IMAP4) -> Iterable[bytes]:
-    typ, data = client.search(None, "ALL")
-    if typ != "OK" or not data or not data[0]:
+    typ, data = client.uid("SEARCH", None, "ALL")
+    if typ != "OK" or not data:
         return []
-    return data[0].split()
+
+    results: list[bytes] = []
+    for chunk in data:
+        if not chunk or not isinstance(chunk, (bytes, bytearray)):
+            continue
+        results.extend(bytes(chunk).split())
+    return results

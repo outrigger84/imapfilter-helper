@@ -102,9 +102,14 @@ def test_build_cache_stores_headers_per_folder(tmp_path: Path, monkeypatch: pyte
             self.current_folder = folder.strip('"')
             return "OK", []
 
-        def fetch(self, uid: bytes, _query: str):
-            header = f"Subject: {self.current_folder} {uid.decode()}\r\n"
-            return "OK", [(None, header.encode())]
+        def uid(self, command: str, uid, query: str):
+            if command != "FETCH":
+                raise AssertionError(f"Unexpected UID command {command}")
+            uid_value = uid.decode() if isinstance(uid, (bytes, bytearray)) else str(uid)
+            header = f"Subject: {self.current_folder} {uid_value}\r\n"
+            if query == "(BODY.PEEK[HEADER])":
+                return "OK", [(b"1 (BODY[HEADER])", header.encode())]
+            raise AssertionError(f"Unexpected fetch query {query}")
 
     fake_client = FakeClient()
 
@@ -159,9 +164,14 @@ def test_build_cache_respects_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPa
             self.current_folder = folder.strip('"')
             return "OK", []
 
-        def fetch(self, uid: bytes, _query: str):
-            header = f"Subject: {self.current_folder} {uid.decode()}\r\n"
-            return "OK", [(None, header.encode())]
+        def uid(self, command: str, uid, query: str):
+            if command != "FETCH":
+                raise AssertionError(f"Unexpected UID command {command}")
+            uid_value = uid.decode() if isinstance(uid, (bytes, bytearray)) else str(uid)
+            header = f"Subject: {self.current_folder} {uid_value}\r\n"
+            if query == "(BODY.PEEK[HEADER])":
+                return "OK", [(b"1 (BODY[HEADER])", header.encode())]
+            raise AssertionError(f"Unexpected fetch query {query}")
 
     fake_client = FakeClient()
 
