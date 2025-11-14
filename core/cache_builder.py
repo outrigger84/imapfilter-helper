@@ -36,6 +36,20 @@ def _select_uids(
     return items[-limit:], normalized
 
 
+def _coalesce_fetch_payload(msg_data) -> bytes:
+    if not msg_data:
+        return b""
+    parts: list[bytes] = []
+    for item in msg_data:
+        if isinstance(item, tuple) and len(item) >= 2:
+            payload = item[1]
+            if isinstance(payload, (bytes, bytearray)):
+                parts.append(bytes(payload))
+        elif isinstance(item, (bytes, bytearray)):
+            continue
+    return b"".join(parts)
+
+
 def build_cache(
     client,
     db,
@@ -115,17 +129,25 @@ def build_cache(
             )
 
             for uid in msgs_bar:
-                typ, msg_data = client.fetch(uid, "(BODY.PEEK[HEADER])")
-                if typ != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
+                uid_value = (
+                    uid.decode("ascii", "ignore") if isinstance(uid, (bytes, bytearray)) else str(uid)
+                )
+                if not uid_value:
                     continue
-                raw_hdr = msg_data[0][1]
+
+                typ, msg_data = client.uid("FETCH", uid_value, "(BODY.PEEK[HEADER])")
+                if typ != "OK":
+                    continue
+                raw_hdr = _coalesce_fetch_payload(msg_data)
+                if not raw_hdr:
+                    continue
                 hdr_str = raw_hdr.decode(errors="ignore")
                 db.execute(
                     "INSERT OR REPLACE INTO headers (folder, uid, data, updated_at) "
                     "VALUES(?,?,?,?)",
                     (
                         folder,
-                        uid.decode(),
+                        uid_value,
                         json.dumps({"header": hdr_str}),
                         now_iso(),
                     ),
@@ -155,10 +177,20 @@ def build_cache(
                 )
 
                 for uid in backup_bar:
-                    typ, msg_data = client.fetch(uid, "(BODY.PEEK[])")
-                    if typ != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
+                    uid_value = (
+                        uid.decode("ascii", "ignore")
+                        if isinstance(uid, (bytes, bytearray))
+                        else str(uid)
+                    )
+                    if not uid_value:
                         continue
-                    raw_msg = msg_data[0][1]
+
+                    typ, msg_data = client.uid("FETCH", uid_value, "(BODY.PEEK[])")
+                    if typ != "OK":
+                        continue
+                    raw_msg = _coalesce_fetch_payload(msg_data)
+                    if not raw_msg:
+                        continue
                     try:
                         backup_mbox.add(mailbox.mboxMessage(message_from_bytes(raw_msg)))
                     except Exception:  # pragma: no cover - defensive

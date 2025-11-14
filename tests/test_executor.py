@@ -50,7 +50,12 @@ class FakeClient:
         return "OK", [b"1"]
 
     def uid(self, command: str, uid: str, *args):
-        self.commands.append((command, uid))
+        uid_value: str | None
+        if isinstance(uid, (bytes, bytearray)):
+            uid_value = uid.decode()
+        else:
+            uid_value = uid
+        self.commands.append((command, uid_value if uid_value is not None else ""))
         return "OK", [b""]
 
     def expunge(self):
@@ -66,9 +71,10 @@ class MoveCapableClient(FakeClient):
         super().__init__()
         self.capabilities = (b"MOVE",)
 
-    def uid(self, command: str, uid: str, *args):  # type: ignore[override]
+    def uid(self, command: str, uid, *args):  # type: ignore[override]
         if command == "MOVE":
-            self.commands.append((command, uid))
+            uid_value = uid.decode() if isinstance(uid, (bytes, bytearray)) else uid
+            self.commands.append((command, uid_value))
             return "OK", [b""]
         return super().uid(command, uid, *args)
 
@@ -134,11 +140,12 @@ class MissingFolderClient(FakeClient):
         self.created: list[str] = []
         self.copy_attempts: dict[str, int] = {}
 
-    def uid(self, command: str, uid: str, *args):  # type: ignore[override]
+    def uid(self, command: str, uid, *args):  # type: ignore[override]
         if command == "COPY":
-            attempts = self.copy_attempts.get(uid, 0)
-            self.copy_attempts[uid] = attempts + 1
-            self.commands.append((command, uid))
+            uid_value = uid.decode() if isinstance(uid, (bytes, bytearray)) else uid
+            attempts = self.copy_attempts.get(uid_value, 0)
+            self.copy_attempts[uid_value] = attempts + 1
+            self.commands.append((command, uid_value))
             if attempts == 0:
                 return "NO", [b"[TRYCREATE] Mailbox does not exist"]
             return "OK", [b""]
@@ -150,9 +157,10 @@ class MissingFolderClient(FakeClient):
 
 
 class MissingMessageClient(FakeClient):
-    def uid(self, command: str, uid: str, *args):  # type: ignore[override]
+    def uid(self, command: str, uid, *args):  # type: ignore[override]
         if command == "COPY":
-            self.commands.append((command, uid))
+            uid_value = uid.decode() if isinstance(uid, (bytes, bytearray)) else uid
+            self.commands.append((command, uid_value))
             return "NO", [b"NO such message"]
         return super().uid(command, uid, *args)
 
