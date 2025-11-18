@@ -190,13 +190,24 @@ def execute_actions(
             console=("📂 Execution plan:" + (f"\n{lines}" if lines else "")),
         )
 
+    actions_total = sum(group_totals.values())
+    actions_bar = tqdm(
+        total=actions_total if actions_total > 0 else None,
+        desc="⚙️ Executing actions",
+        unit="action",
+        dynamic_ncols=True,
+        leave=True,
+        position=0,
+        disable=not show_progress,
+    )
+
     folders_bar = tqdm(
         total=len(group_totals) if group_totals else None,
         desc="📦 Executing folders",
         unit="folder",
         dynamic_ncols=True,
         leave=True,
-        position=0,
+        position=1,
         disable=not show_progress,
     )
 
@@ -420,7 +431,7 @@ def execute_actions(
                     unit="msg",
                     dynamic_ncols=True,
                     leave=False,
-                    position=1,
+                    position=2,
                     disable=not show_progress,
                 )
                 msgs_bar.update(len(uids))
@@ -431,8 +442,9 @@ def execute_actions(
                 {"folder": folder, "target": target, "count": len(uids)},
                 console=f"🧪 Dry run: {folder} → {display_target} ({len(uids)})",
             )
-            if verbose:
-                for uid in uids:
+            for uid in uids:
+                actions_bar.update(1)
+                if verbose:
                     logger.log(
                         "INFO",
                         "dry_action_preview",
@@ -447,7 +459,7 @@ def execute_actions(
                 unit="msg",
                 dynamic_ncols=True,
                 leave=False,
-                position=1,
+                position=2,
                 disable=not show_progress,
             )
             try:
@@ -786,6 +798,7 @@ def execute_actions(
                         raise
                     finally:
                         msgs_bar.update(1)
+                        actions_bar.update(1)
 
                 try:
                     exp_typ, exp_resp = client.expunge()
@@ -838,6 +851,7 @@ def execute_actions(
 
     flush_group()
     folders_bar.close()
+    actions_bar.close()
 
     timer.stop()
     timer.count = stats["done"]
