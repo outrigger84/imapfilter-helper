@@ -63,6 +63,18 @@ def build_cache(
     backup_dir: Path,
 ) -> tuple[PhaseTimer, int, int]:
     timer = PhaseTimer("cache")
+
+    if client is None:
+        logger.log(
+            "INFO",
+            "cache_skipped",
+            {"folders": len(folders), "reason": "dry-run"},
+            console="ℹ️ Skipping cache build in dry-run mode",
+        )
+        timer.stop()
+        timer.count = 0
+        return timer, len(folders), 0
+
     folders_bar = tqdm(
         folders,
         desc="📂 Caching folders",
