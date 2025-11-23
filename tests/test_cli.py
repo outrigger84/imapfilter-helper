@@ -560,3 +560,22 @@ def test_handle_clear_cache(cli_context):
     assert cur.fetchone()[0] == 0
     cur.execute("SELECT COUNT(*) FROM folders")
     assert cur.fetchone()[0] == 0
+
+
+def test_handle_compact_cache(monkeypatch, cli_context):
+    cfg, db, logger = cli_context
+    args = argparse.Namespace(cmd="compact-cache")
+    seen = {}
+
+    def fake_compact_cache(database, **kwargs):
+        seen["db"] = database
+        seen["logger"] = kwargs.get("logger")
+        return None, 2, 2
+
+    monkeypatch.setattr(cli, "compact_cache", fake_compact_cache)
+
+    result = cli.handle_compact_cache(args, cfg, db, logger)
+
+    assert result == 0
+    assert seen["db"] is db
+    assert seen["logger"] is logger
