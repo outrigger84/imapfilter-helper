@@ -35,10 +35,13 @@ python -m core.cli <command> [flags]
 | `run-all` | Convenience command that runs `build-cache`, `evaluate`, and `execute` sequentially. | `--dry-run` – perform a full simulation without IMAP writes.<br>`--all-folders` – include every folder when building the cache.<br>`--folder NAME` – restrict all three phases to the specified folder(s).<br>`--strict` – stop on missing/failed IMAP operations during execute.<br>`--verbose` – surface detailed progress and IMAP replies during the evaluate/execute phases.<br>`--limit` – cap how many pending actions are executed during the final phase. |
 | `clear-pending` | Removes all pending actions from the queue without contacting the IMAP server. | *(no flags)* |
 | `clear-cache` | Deletes cached message headers, folder metadata, and any queued actions. | *(no flags)* |
+| `compact-cache` | Removes cached headers for messages whose actions have already been executed so future evaluations skip them. | *(no flags)* |
 
 When no folder flags are supplied the `evaluate` and `execute` commands operate on every cached message by default. This makes it easy to build the cache for several folders (either in one run with repeated `--folder` flags or by invoking `build-cache` multiple times) and then apply the rules to the aggregated cache in a later step.
 
 Use `clear-cache` whenever you need to discard the existing cache database and start again.
+
+The `compact-cache` helper is a lighter-weight alternative for day-to-day use: run it after finishing an `execute` pass (or as a follow-up when re-running `evaluate` with new rules) to prune header rows tied to completed or skipped actions. This keeps the cache aligned with the mailbox contents and prevents stale matches from reappearing without forcing a full rebuild.
 
 ### Rule management console
 
