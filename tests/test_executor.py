@@ -37,6 +37,7 @@ if "tqdm" not in sys.modules:
 from core.database import init_db
 from core.executor import execute_actions
 from core.logging_utils import JsonLogger
+from core.rule_engine import evaluate_rules
 
 
 class FakeClient:
@@ -425,5 +426,86 @@ def test_execute_actions_verifies_moves_failure(tmp_path: Path):
     assert failure_entries
     issues = failure_entries[0]["context"].get("issues", [])
     assert "destination_missing" in issues
+
+    db.close()
+
+
+def test_execute_prunes_headers_and_blocks_re_evaluation(tmp_path: Path):
+    db_path = tmp_path / "db.sqlite3"
+    log_path = tmp_path / "log.jsonl"
+    logger = JsonLogger(log_path)
+    db = init_db(db_path, logger=logger)
+
+    rule = {
+        "name": "Archive",
+        "conditions": {"header": "subject", "contains": "Archive Me"},
+        "action": {"type": "move", "target": "Archive"},
+    }
+
+    with db:
+        db.execute(
+            "INSERT INTO headers (folder, uid, data, updated_at) VALUES (?,?,?,?)",
+            (
+                "INBOX",
+                "100",
+                json.dumps({"header": "Subject: Archive Me\n\n"}),
+                "2024-03-01T00:00:00Z",
+            ),
+        )
+
+    _eval_timer, rule_count, matches = evaluate_rules(
+        db,
+        [rule],
+        scope="all",
+        dry_run=False,
+        show_progress=False,
+        logger=logger,
+        verbose=False,
+        debug_headers=False,
+        folders=None,
+    )
+
+    assert rule_count == 1
+    assert matches == 1
+
+    client = FakeClient()
+    _exec_timer, stats = execute_actions(
+        client,
+        db,
+        show_progress=False,
+        dry_run=False,
+        strict=False,
+        logger=logger,
+        verbose=False,
+    )
+
+    assert stats["done"] == 1
+    remaining_headers = db.execute("SELECT COUNT(*) FROM headers").fetchone()[0]
+    assert remaining_headers == 0
+
+    _reeval_timer, rerun_rules, rerun_matches = evaluate_rules(
+        db,
+        [rule],
+        scope="all",
+        dry_run=False,
+        show_progress=False,
+        logger=logger,
+        verbose=False,
+        debug_headers=False,
+        folders=None,
+    )
+
+    assert rerun_rules == 1
+    assert rerun_matches == 0
+    statuses = db.execute("SELECT status FROM actions ORDER BY id").fetchall()
+    assert [status for (status,) in statuses] == ["done"]
+
+    log_entries = []
+    with logger.log_file.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                log_entries.append(json.loads(line))
+
+    assert any(entry.get("message") == "execute_header_removed" for entry in log_entries)
 
     db.close()

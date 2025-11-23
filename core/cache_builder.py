@@ -254,3 +254,41 @@ def build_cache(
         ),
     )
     return timer, len(folders), total_msgs
+
+
+def compact_cache(db, *, logger: JsonLogger) -> tuple[PhaseTimer, int, int]:
+    """Remove cached headers for messages that have already been handled."""
+
+    timer = PhaseTimer("compact-cache")
+    cursor = db.cursor()
+    cursor.execute(
+        """
+        SELECT DISTINCT h.folder, h.uid
+        FROM headers h
+        JOIN actions a ON a.folder=h.folder AND a.uid=h.uid
+        WHERE a.status NOT IN ('pending', 'simulated')
+        ORDER BY h.folder, h.uid
+        """
+    )
+    stale_rows = cursor.fetchall()
+
+    removed = 0
+    with db:
+        for folder, uid in stale_rows:
+            removed += db.execute(
+                "DELETE FROM headers WHERE folder=? AND uid=?",
+                (folder, uid),
+            ).rowcount
+
+    timer.stop()
+    timer.count = removed
+    logger.log(
+        "INFO",
+        "cache_compacted",
+        {"checked": len(stale_rows), "removed": removed},
+        console=(
+            "🧹 Compacted cache"
+            f" — removed {removed} cached header{'s' if removed != 1 else ''}"
+        ),
+    )
+    return timer, removed, len(stale_rows)

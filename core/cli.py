@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 from typing import Callable, Sequence
 
-from core.cache_builder import build_cache
+from core.cache_builder import build_cache, compact_cache
 from core.config import AppConfig, build_default_config
 from core.database import init_db
 from core.executor import execute_actions
@@ -153,6 +153,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_clear_cache = sub.add_parser(
         "clear-cache",
         help="Remove cached message headers and pending actions",
+    )
+
+    p_compact_cache = sub.add_parser(
+        "compact-cache",
+        help="Prune cached headers for messages that have already been handled",
     )
 
     return parser
@@ -445,6 +450,16 @@ def handle_clear_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
     return 0
 
 
+def handle_compact_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
+    """Handle the ``compact-cache`` command."""
+
+    del args, cfg  # Unused – kept for consistent handler signature
+
+    compact_cache(db, logger=logger)
+
+    return 0
+
+
 COMMAND_HANDLERS: dict[str, Handler] = {
     "build-cache": handle_build_cache,
     "evaluate": handle_evaluate,
@@ -452,6 +467,7 @@ COMMAND_HANDLERS: dict[str, Handler] = {
     "run-all": handle_run_all,
     "clear-pending": handle_clear_pending,
     "clear-cache": handle_clear_cache,
+    "compact-cache": handle_compact_cache,
 }
 
 
@@ -486,4 +502,5 @@ __all__ = [
     "handle_run_all",
     "handle_clear_pending",
     "handle_clear_cache",
+    "handle_compact_cache",
 ]
