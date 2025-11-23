@@ -558,6 +558,10 @@ def execute_actions(
                         "UPDATE actions SET status='done', executed_at=? WHERE id=?",
                         (now_iso(), action_id),
                     )
+                    removed = db.execute(
+                        "DELETE FROM headers WHERE folder=? AND uid=?",
+                        (folder, uid_value),
+                    ).rowcount
                     stats["done"] += 1
                     console_msg: str | None = None
                     if verbose:
@@ -568,6 +572,17 @@ def execute_actions(
                         {"folder": folder, "target": target, "uid": uid_value},
                         console=console_msg,
                     )
+                    if removed:
+                        logger.log(
+                            "INFO",
+                            "execute_header_removed",
+                            {"folder": folder, "uid": uid_value},
+                            console=(
+                                f"      🧹 Removed cached header for {folder}/{uid_value}"
+                                if verbose
+                                else None
+                            ),
+                        )
 
                 for a_id, uid in current_items:
                     deleted_flagged = False

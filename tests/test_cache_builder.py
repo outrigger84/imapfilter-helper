@@ -43,7 +43,7 @@ if "tqdm" not in sys.modules:  # pragma: no cover - test support
     tqdm_stub.write = _write
     sys.modules["tqdm"] = tqdm_stub
 
-from core.cache_builder import build_cache
+from core.cache_builder import build_cache, compact_cache
 from core.config import build_default_config
 from core.database import init_db
 from core.logging_utils import JsonLogger
@@ -243,3 +243,33 @@ def test_build_cache_stores_matching_uids(cache_context):
                     found = True
                     break
         assert found, f"UID {uid_value} not found in search response {search_resp!r}"
+
+
+def test_compact_cache_removes_handled_headers(cache_context):
+    _cfg, db, logger = cache_context
+
+    with db:
+        db.executemany(
+            "INSERT INTO headers (folder, uid, data, updated_at) VALUES (?,?,?,?)",
+            [
+                ("INBOX", "1", json.dumps({"header": "Subject: One\n\n"}), "2024-01-01T00:00:00Z"),
+                ("INBOX", "2", json.dumps({"header": "Subject: Two\n\n"}), "2024-01-02T00:00:00Z"),
+                ("INBOX", "3", json.dumps({"header": "Subject: Three\n\n"}), "2024-01-03T00:00:00Z"),
+            ],
+        )
+        db.executemany(
+            "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at, executed_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            [
+                ("1", "INBOX", "rule", "Archive", 100, "done", "2024-02-01T00:00:00Z", "2024-02-02T00:00:00Z"),
+                ("2", "INBOX", "rule", "Archive", 100, "pending", "2024-02-01T00:00:00Z", None),
+                ("3", "INBOX", "rule", "Archive", 100, "simulated", "2024-02-01T00:00:00Z", None),
+            ],
+        )
+
+    timer, removed, checked = compact_cache(db, logger=logger)
+
+    assert timer.count == removed == 1
+    assert checked == 1
+    remaining = db.execute("SELECT uid FROM headers ORDER BY uid").fetchall()
+    assert [uid for (uid,) in remaining] == ["2", "3"]
