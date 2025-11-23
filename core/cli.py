@@ -128,17 +128,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Log message headers while evaluating rules",
     )
     p_run.add_argument(
-        "--limit",
+        "--action-limit",
+        "--execute-limit",
+        dest="action_limit",
         type=int,
         help="Process at most this many pending actions during the execute phase",
     )
     p_run.add_argument(
+        "--limit",
         "--cache-limit",
+        dest="cache_limit",
         type=int,
         help="Cache at most this many messages per folder during the cache phase",
     )
     p_run.add_argument(
+        "--order",
         "--cache-order",
+        dest="cache_order",
         choices=["newest", "oldest", "random"],
         help="When limiting cache, choose which messages to keep (default: newest)",
     )
@@ -298,7 +304,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     """Handle the ``run-all`` command."""
     cfg.executor.dry_run = args.dry_run
     cfg.executor.strict = args.strict
-    cfg.executor.limit = args.limit
+    cfg.executor.limit = args.action_limit
     cfg.executor.verify_moves = getattr(args, "verify_moves", False)
     cfg.logging.verbose = args.verbose
     cfg.cache.limit = args.cache_limit
