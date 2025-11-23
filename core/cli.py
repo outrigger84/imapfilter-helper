@@ -312,10 +312,10 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
         cfg.cache.order = args.cache_order
     cfg.cache.backup_enabled = bool(args.backup)
     run_timer = PhaseTimer("run-all")
-    client = imap_login(cfg.paths.secrets_file, logger)
+    client = None if args.dry_run else imap_login(cfg.paths.secrets_file, logger)
     try:
         selected = _normalize_folder_list(args.folder)
-        if args.all_folders:
+        if args.all_folders and client is not None:
             folders = list_all_folders(client)
         else:
             folders = selected if selected else [DEFAULT_INBOX]
@@ -386,7 +386,8 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             ),
         )
     finally:
-        client.logout()
+        if client is not None:
+            client.logout()
     return 0
 
 
