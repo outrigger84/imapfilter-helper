@@ -16,7 +16,8 @@ A helper CLI that orchestrates cache building, rule evaluation, and action execu
 │   ├── backup.py               # Message backup utilities
 │   ├── config.py               # Configuration management
 │   ├── logging_utils.py        # JSON logging and performance tracking
-│   └── tools/                  # Diagnostic utilities
+│   └── tools/                  # Utilities and helpers
+│       ├── rule_wizard_core.py # Rule wizard core logic
 │       ├── sample_messages.py  # Copy test messages for inspection
 │       └── move_diagnostics.py # Test IMAP move operations
 ├── data/                       # Generated artifacts (auto-created)
@@ -27,6 +28,7 @@ A helper CLI that orchestrates cache building, rule evaluation, and action execu
 ├── rules/                      # JSON rule files (user-managed)
 ├── imapfilter_helper.py        # Main entry point script
 ├── rule_manager.py             # Interactive rule editor console
+├── rule_wizard.py              # Cache-assisted guided rule creator
 └── tests/                      # Test suite
 ```
 
@@ -204,6 +206,74 @@ The console automatically discovers files under `rules/` and offers keyboard sho
 
 Backups are written automatically when deleting a rule, making it easy to undo an accidental removal.
 
+### Cache-Assisted Rule Wizard
+
+A new interactive guided tool for creating rules using intelligent suggestions from your cached emails:
+
+```bash
+python rule_wizard.py
+```
+
+**Key features:**
+
+* **Cache-powered suggestions** – Shows actual senders, recipients, and subjects from your mailbox with message counts
+* **Real-time search/filter** – Type to search through long lists of senders or subjects
+* **Smart pattern extraction** – Automatically suggests patterns:
+  - Email patterns: exact match, wildcard TLD (`user@amazon.*`), domain only (`@amazon.com`), or domain base (`amazon`)
+  - Subject patterns: exact match, without numbers (removes order IDs), first N words, or keywords
+* **Message count preview** – Each pattern shows how many messages it would match
+* **Multiple conditions** – Add multiple conditions with AND (all) or OR (any) logic
+* **Dry-run preview** – See how many cached messages would match before saving
+* **Auto-generated filenames** – Rules are saved with sequential IDs and descriptive names
+
+**Workflow:**
+
+1. Cache validation – Confirms `data/cache.db` exists and has messages
+2. Add conditions – Interactively build conditions using cache-assisted selection
+3. Configure action – Set target folder for matched messages
+4. Set metadata – Name and priority for the rule
+5. Preview & save – Review generated JSON and dry-run match count, then save
+
+**Example session:**
+
+```
+Rule name: Newsletters - Reddit
+[Filterable list of top senders appears]
+Filter: redd
+    1. Reddit <noreply@redditmail.com> (610 messages)
+    2. Reddit <community@reddit.com> (124 messages)
+
+Selected: noreply@redditmail.com
+
+Suggested patterns:
+    1. noreply@redditmail.com (exact - 610 messages)
+    2. noreply@reddit.* (all TLDs - 610 messages) [RECOMMENDED]
+    3. @reddit.com (all from domain - 1,203 messages)
+    4. reddit (all reddit domains - 1,203 messages)
+
+Select pattern or Enter to use exact: 2
+Match type: Contains (1) or Regex (2)? 1
+
+Add another condition? (yes/no): no
+
+Target folder: Newsletters/Reddit
+Priority [100]:
+Rule name (auto-suggested): Newsletters - Reddit
+
+Preview: Would match 610 of 12,186 cached messages
+Save? (yes/no/edit): yes
+✓ Saved to rules/99013_newsletters_reddit.json
+```
+
+**When to use:**
+
+- **New to rule creation** – Guided experience with intelligent suggestions
+- **Want to avoid JSON editing** – Complete interactive interface
+- **Need pattern help** – See actual email addresses/subjects to create better rules
+- **Want confidence** – Preview match counts before committing
+
+See `RULE_WIZARD_USAGE.md` for comprehensive documentation, real-world examples, and troubleshooting.
+
 ### Configuration and data locations
 
 The helper stores its cache database, log file, and secrets JSON under `data/` by default. Rules continue to be loaded from the `rules/` directory. These locations can be customised by constructing an `AppConfig` via `core.config.build_default_config()` with a different base directory.
@@ -336,9 +406,15 @@ pytest
 
 ### Diagnostic helpers
 
-Two standalone scripts live under `core/tools/` to assist with troubleshooting:
+Several standalone scripts and test suites assist with troubleshooting and development:
 
+**Diagnostic tools:**
 * `python -m core.tools.sample_messages` – interactively copies random messages from `INBOX` into the `Test` folder for manual inspection.
 * `python -m core.tools.move_diagnostics [--destination MAILBOX] [--ensure-destination]` – appends fresh test messages to `INBOX` and exercises the `UID MOVE` and fallback copy/delete flows, logging the IMAP server responses and verifying that each message arrives in the destination folder.
 
 Both tools reuse the credentials and logging configuration from `data/secrets.json` and `data/log.json` respectively.
+
+**Rule wizard tests:**
+* `python test_integration_wizard.py` – Comprehensive integration test suite (39 tests) verifying all rule wizard components work together
+* `python test_wizard_smoke.py` – Smoke test suite (23 tests) verifying entry point initialization and error handling
+* `RULE_WIZARD_USAGE.md` – Complete user guide with step-by-step examples and troubleshooting
