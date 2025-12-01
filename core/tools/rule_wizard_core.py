@@ -9,11 +9,20 @@ from __future__ import annotations
 
 import curses
 import email
+import imaplib
 import json
 import sqlite3
 from collections import Counter
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
+
+from core.imap_client import imap_login, list_all_folders
+from core.logging_utils import JsonLogger
+from core.tools.coverage_analyzer import (
+    RuleCoverageAnalyzer,
+    DomainCluster,
+    BatchTarget,
+)
 
 
 def format_count(count: int) -> str:
@@ -719,6 +728,66 @@ class SubjectPatternExtractor:
         return patterns
 
 
+def compute_domain_counts(addresses: List[Tuple[str, int]]) -> List[Tuple[str, int]]:
+    """Aggregate message counts grouped by domain.
+
+    Args:
+        addresses: List of (email_address, count) tuples from cache
+
+    Returns:
+        List of (domain, total_count) sorted by count descending
+
+    Example:
+        >>> addresses = [
+        ...     ('noreply@amazon.com', 234),
+        ...     ('orders@amazon.com', 45),
+        ...     ('support@bank.com', 156),
+        ... ]
+        >>> compute_domain_counts(addresses)
+        [('amazon.com', 279), ('bank.com', 156)]
+    """
+    from collections import defaultdict
+
+    domain_counts = defaultdict(int)
+    for addr, count in addresses:
+        if '@' in addr:
+            domain = addr.rsplit('@', 1)[1].strip().lower()
+            domain_counts[domain] += count
+
+    return sorted(domain_counts.items(), key=lambda x: x[1], reverse=True)
+
+
+def get_emails_for_domain(
+    addresses: List[Tuple[str, int]], domain: str
+) -> List[Tuple[str, int]]:
+    """Get all email addresses from a specific domain.
+
+    Args:
+        addresses: List of (email_address, count) tuples
+        domain: Domain to filter by (e.g., 'amazon.com')
+
+    Returns:
+        List of (email_address, count) for that domain, sorted by count descending
+
+    Example:
+        >>> addresses = [
+        ...     ('noreply@amazon.com', 234),
+        ...     ('support@bank.com', 156),
+        ...     ('orders@amazon.com', 45),
+        ... ]
+        >>> get_emails_for_domain(addresses, 'amazon.com')
+        [('noreply@amazon.com', 234), ('orders@amazon.com', 45)]
+    """
+    domain_lower = domain.lower().strip()
+    filtered = [
+        (addr, count)
+        for addr, count in addresses
+        if '@' in addr and addr.rsplit('@', 1)[1].lower() == domain_lower
+    ]
+    # Sort by count descending
+    return sorted(filtered, key=lambda x: x[1], reverse=True)
+
+
 class RuleBuilder:
     """Build and validate IMAPFilter rules with a fluent interface.
 
@@ -1095,11 +1164,12 @@ class RuleWizard:
         ...     print("Rule created successfully!")
     """
 
-    def __init__(self, config):
+    def __init__(self, config, logger: Optional[JsonLogger] = None):
         """Initialize the rule wizard.
 
         Args:
             config: AppConfig object containing paths and settings
+            logger: Optional JsonLogger for IMAP operations. If not provided, creates one.
 
         Raises:
             ValueError: If cache database doesn't exist
@@ -1110,7 +1180,9 @@ class RuleWizard:
             raise TypeError("config must be an AppConfig instance")
 
         self.config = config
+        self.logger = logger or JsonLogger(config.paths.log_file)
         self.cache_engine: Optional[CacheQueryEngine] = None
+        self.coverage_analyzer: Optional[RuleCoverageAnalyzer] = None
         self.email_extractor = EmailPatternExtractor()
         self.subject_extractor = SubjectPatternExtractor()
         self.rule_builder = RuleBuilder()
@@ -1136,50 +1208,346 @@ class RuleWizard:
             if not self._validate_cache():
                 return 1
 
-            self._display_welcome()
+            # Analyze coverage and offer batch mode
+            print("\n🔍 Analyzing rule coverage...")
+            self.coverage_analyzer = RuleCoverageAnalyzer(
+                db_path=self.config.paths.db_file,
+                rules_dir=self.config.paths.rules_dir,
+                logger=self.logger,
+            )
+            stats = self.coverage_analyzer.analyze_coverage()
 
-            # Main workflow loop
-            while True:
-                # Step 1: Add conditions
-                conditions_added = self._add_conditions_loop()
-                if conditions_added is None:  # User cancelled
-                    print("\nWizard cancelled.")
-                    return 130
+            # Display coverage statistics
+            self._display_coverage_stats(stats)
 
-                if not conditions_added:
-                    print("\nAt least one condition is required. Please try again.\n")
-                    continue
+            # Decide on mode based on coverage
+            if stats.uncovered_messages == 0:
+                print("\n✅ All cached emails have rules!")
+                choice = input("\nCreate a new rule anyway? (y/n): ").strip().lower()
+                if choice != "y":
+                    return 0
+                # Fall through to normal wizard
+                self._display_welcome()
+            elif stats.uncovered_messages > 0:
+                print(f"\n📋 Found {format_count(stats.uncovered_messages)} emails without rules")
+                choice = input("\nEnter batch mode to create rules? (Y/n): ").strip().lower()
+                if choice != "n":
+                    return self.run_batch_mode()
+                else:
+                    self._display_welcome()
 
-                # Step 2: Configure logic (if multiple conditions)
-                if len(self.rule_builder.conditions) > 1:
-                    if not self._configure_logic():
-                        continue  # Restart if cancelled
-
-                # Step 3: Configure action
-                if not self._configure_action():
-                    continue  # Restart if cancelled
-
-                # Step 4: Set metadata
-                if not self._configure_metadata():
-                    continue  # Restart if cancelled
-
-                # Step 5: Preview and save
-                result = self._preview_and_save()
-                if result == 0:
-                    return 0  # Success
-                elif result == 130:
-                    return 130  # Cancelled
-                # Otherwise loop back to edit
+            # Normal wizard flow
+            return self._run_normal_wizard()
 
         except KeyboardInterrupt:
             print("\n\nWizard interrupted.")
             return 130
         except Exception as e:
             print(f"\nError: {e}")
+            import traceback
+            traceback.print_exc()
             return 1
         finally:
             if self.cache_engine:
                 self.cache_engine.close()
+            if self.coverage_analyzer:
+                self.coverage_analyzer.close()
+
+    def _run_normal_wizard(self) -> int:
+        """Run the normal (non-batch) wizard workflow.
+
+        Returns:
+            Exit code: 0 on success, 1 on error, 130 on user cancellation
+        """
+        self._display_welcome()
+
+        # Main workflow loop
+        while True:
+            # Step 1: Add conditions
+            conditions_added = self._add_conditions_loop()
+            if conditions_added is None:  # User cancelled
+                print("\nWizard cancelled.")
+                return 130
+
+            if not conditions_added:
+                print("\nAt least one condition is required. Please try again.\n")
+                continue
+
+            # Step 2: Configure logic (if multiple conditions)
+            if len(self.rule_builder.conditions) > 1:
+                if not self._configure_logic():
+                    continue  # Restart if cancelled
+
+            # Step 3: Configure action
+            if not self._configure_action():
+                continue  # Restart if cancelled
+
+            # Step 4: Set metadata
+            if not self._configure_metadata():
+                continue  # Restart if cancelled
+
+            # Step 5: Preview and save
+            result = self._preview_and_save()
+            if result == 0:
+                return 0  # Success
+            elif result == 130:
+                return 130  # Cancelled
+            # Otherwise loop back to edit
+
+    def run_batch_mode(self) -> int:
+        """Run wizard in batch mode for creating rules for uncovered emails.
+
+        Returns:
+            Exit code: 0 on success, 1 on error, 130 on user cancellation
+        """
+        if not self.coverage_analyzer:
+            print("❌ Coverage analyzer not initialized")
+            return 1
+
+        iteration = 1
+        while True:
+            # Get current uncovered emails
+            clusters = self.coverage_analyzer.get_domain_clusters()
+            if not clusters:
+                print("\n✅ All emails now have rules!")
+                return 0
+
+            print(f"\n{'='*60}")
+            print(f"BATCH MODE - Iteration {iteration}")
+            print(f"{'='*60}")
+
+            # Two-step selection (domain → sender)
+            batch_target = self._select_batch_target(clusters)
+            if batch_target is None:
+                # User cancelled - offer to continue or exit
+                choice = input("\nContinue with normal wizard? (y/n): ").strip().lower()
+                if choice == "y":
+                    return self._run_normal_wizard()
+                return 0
+
+            # Pre-populate first condition based on selection
+            self._prepopulate_condition(batch_target)
+            self._display_batch_context(batch_target)
+
+            # Reset rule builder for new rule
+            self.rule_builder = RuleBuilder()
+            self._prepopulate_condition(batch_target)
+
+            # Run normal wizard flow for remaining steps
+            exit_code = self._add_conditions_loop()
+            if exit_code is None:  # Cancelled
+                print("\nContinuing batch mode...")
+                iteration += 1
+                continue
+
+            # Step 2: Configure logic (if multiple conditions)
+            if len(self.rule_builder.conditions) > 1:
+                if not self._configure_logic():
+                    iteration += 1
+                    continue  # Restart if cancelled
+
+            # Step 3: Configure action
+            if not self._configure_action():
+                iteration += 1
+                continue  # Restart if cancelled
+
+            # Step 4: Set metadata
+            if not self._configure_metadata():
+                iteration += 1
+                continue  # Restart if cancelled
+
+            # Save rule (simplified - no preview)
+            exit_code = self._save_batch_rule()
+            if exit_code == 0:
+                print("✅ Rule saved!")
+                # Refresh coverage analysis
+                print("\n🔄 Refreshing coverage...")
+                stats = self.coverage_analyzer.analyze_coverage()
+                self._display_coverage_stats(stats)
+
+                if stats.uncovered_messages == 0:
+                    print("\n✅ All emails now have rules!")
+                    return 0
+
+                # Continue loop
+                iteration += 1
+                continue
+            elif exit_code == 130:
+                # User wants to exit batch mode
+                return 0
+            else:
+                # Error occurred
+                print("⚠️  Error saving rule, continuing...")
+                iteration += 1
+                continue
+
+    def _select_batch_target(self, clusters: List[DomainCluster]) -> Optional[BatchTarget]:
+        """Two-step selection: domain → sender.
+
+        Args:
+            clusters: List of DomainCluster objects
+
+        Returns:
+            BatchTarget if selected, None if cancelled
+        """
+        # Step 1: Select domain cluster
+        domain_items = [
+            (cluster.domain, cluster.total_count)
+            for cluster in sorted(clusters, key=lambda c: c.total_count, reverse=True)
+        ]
+
+        print(f"\nSelect Domain ({len(clusters)} domains with uncovered emails)")
+        print("(Use arrow keys to navigate, type to filter, Enter to select, ESC to cancel)")
+        input("Press Enter to open selector...")
+
+        selector = FilterableListSelector(
+            domain_items, f"Select Domain ({len(clusters)} with uncovered emails)"
+        )
+        selected_domain = curses.wrapper(selector.run)
+        if not selected_domain:
+            return None
+
+        # Find the cluster
+        cluster = self.coverage_analyzer.find_cluster(selected_domain)
+        if not cluster:
+            print(f"❌ Cluster for {selected_domain} not found")
+            return None
+
+        # Step 2: Select specific sender or all from domain
+        sender_items = [(f"[All from {cluster.domain}]", cluster.total_count)]
+        sender_items.extend(
+            [
+                (email, count)
+                for email, count in sorted(
+                    cluster.senders.items(), key=lambda x: x[1], reverse=True
+                )
+            ]
+        )
+
+        print(f"\nSelect Sender from {cluster.domain}")
+        print("(Use arrow keys to navigate, type to filter, Enter to select, ESC to cancel)")
+        input("Press Enter to open selector...")
+
+        selector = FilterableListSelector(sender_items, f"Select Sender from {cluster.domain}")
+        selected = curses.wrapper(selector.run)
+        if not selected:
+            print("\nGoing back to domain selection...")
+            return self._select_batch_target(clusters)
+
+        # Determine if domain-wide or specific email
+        if selected.startswith("[All from "):
+            return BatchTarget(
+                target_type="domain",
+                value=cluster.domain,
+                estimated_count=cluster.total_count,
+                sample_messages=cluster.messages[:5],
+            )
+        else:
+            return BatchTarget(
+                target_type="email",
+                value=selected,
+                estimated_count=cluster.senders.get(selected, 0),
+                sample_messages=[
+                    m for m in cluster.messages if m.from_address == selected
+                ][:5],
+            )
+
+    def _display_coverage_stats(self, stats) -> None:
+        """Display coverage statistics.
+
+        Args:
+            stats: CoverageStats object
+        """
+        print("\n" + "=" * 60)
+        print("📊 COVERAGE ANALYSIS")
+        print("=" * 60)
+        print(f"Total messages:    {format_count(stats.total_messages):>10}")
+        print(f"Covered:           {format_count(stats.covered_messages):>10} ({stats.coverage_percentage:.1f}%)")
+        print(f"Uncovered:         {format_count(stats.uncovered_messages):>10} ({100 - stats.coverage_percentage:.1f}%)")
+        if stats.coverage_by_rule:
+            print("\nCoverage by rule (top 5):")
+            for rule_name, count in sorted(
+                stats.coverage_by_rule.items(), key=lambda x: x[1], reverse=True
+            )[:5]:
+                print(f"  • {rule_name}: {format_count(count)} messages")
+        print("=" * 60)
+
+    def _prepopulate_condition(self, batch_target: BatchTarget) -> None:
+        """Pre-populate first condition based on batch selection.
+
+        Args:
+            batch_target: BatchTarget with selection info
+        """
+        if batch_target.target_type == "domain":
+            # Domain-wide: use @domain.com pattern
+            pattern = f"@{batch_target.value}"
+            self.rule_builder.add_condition(header="from", match_type="contains", pattern=pattern)
+        else:
+            # Specific email: use exact address
+            pattern = batch_target.value
+            self.rule_builder.add_condition(header="from", match_type="contains", pattern=pattern)
+
+        print(f"\n✓ Pre-populated condition: from contains '{pattern}'")
+        print(f"  (Estimated to match {format_count(batch_target.estimated_count)} messages)")
+
+    def _display_batch_context(self, batch_target: BatchTarget) -> None:
+        """Display batch context information.
+
+        Args:
+            batch_target: BatchTarget with selection info
+        """
+        print("\n" + "=" * 60)
+        print("BATCH TARGET")
+        print("=" * 60)
+        if batch_target.target_type == "domain":
+            print(f"Type:        Domain-wide")
+            print(f"Domain:      {batch_target.value}")
+        else:
+            print(f"Type:        Specific sender")
+            print(f"Email:       {batch_target.value}")
+        print(f"Messages:    {format_count(batch_target.estimated_count)}")
+        if batch_target.sample_messages:
+            print("\nSample subjects:")
+            for msg in batch_target.sample_messages[:3]:
+                subject = msg.subject[:50] + "..." if len(msg.subject) > 50 else msg.subject
+                print(f"  • {subject}")
+        print("=" * 60)
+
+    def _save_batch_rule(self) -> int:
+        """Save rule in batch mode (simplified workflow).
+
+        Returns:
+            0 to continue batch, 1 to save and exit, 130 to exit without saving
+        """
+        rule = self.rule_builder.generate_rule()
+
+        # Display rule JSON
+        print("\n" + "=" * 60)
+        print("RULE PREVIEW:")
+        print("=" * 60)
+        print(json.dumps(rule, indent=2))
+        print("=" * 60)
+
+        # Save options
+        print("\nOptions:")
+        print("  1. Save and continue to next email")
+        print("  2. Save and exit batch mode")
+        print("  3. Discard and continue")
+        print("  4. Cancel")
+
+        choice = input("\nChoice (1-4): ").strip()
+
+        if choice == "1" or choice == "2":
+            success, message = save_rule(rule, self.config.paths.rules_dir)
+            if not success:
+                print(f"❌ {message}")
+                return 1
+            print(f"✅ {message}")
+            return 0 if choice == "1" else 130
+        elif choice == "3":
+            return 0  # Continue without saving
+        else:
+            return 130  # Exit
 
     def _validate_cache(self) -> bool:
         """Check if cache exists and has data.
@@ -1324,7 +1692,8 @@ class RuleWizard:
         """
         # Get values from cache
         if field == "from":
-            items = self.cache_engine.extract_unique_from_addresses(limit=2000)
+            # Use two-step selector for better UX with many senders
+            return self._select_from_address_two_step()
         elif field == "to":
             items = self.cache_engine.extract_unique_to_addresses(limit=2000)
         elif field == "subject":
@@ -1350,6 +1719,64 @@ class RuleWizard:
             return None
 
         return selected
+
+    def _select_from_address_two_step(self) -> Optional[str]:
+        """Show two-step from address selector: domain first, then email.
+
+        Returns:
+            Selected email address, or None if cancelled
+        """
+        # Step 1: Load all unique from addresses
+        print("\nLoading from addresses...")
+        all_addresses = self.cache_engine.extract_unique_from_addresses(limit=2000)
+
+        if not all_addresses:
+            print("No senders found in cache.")
+            return None
+
+        # Step 2: Compute domain counts
+        domain_counts = compute_domain_counts(all_addresses)
+
+        if not domain_counts:
+            print("Could not extract domains from addresses.")
+            return None
+
+        # Step 3: First selector - select domain
+        print(f"\nFound {len(domain_counts)} unique domains...")
+        print("(Use arrow keys to navigate, type to filter, Enter to select, ESC to cancel)")
+        input("Press Enter to select domain...")
+
+        selector = FilterableListSelector(domain_counts, "Select Domain")
+        selected_domain = curses.wrapper(selector.run)
+
+        if not selected_domain:
+            print("\nDomain selection cancelled.")
+            return None
+
+        # Step 4: Second selector - select email from domain
+        domain_emails = get_emails_for_domain(all_addresses, selected_domain)
+
+        if not domain_emails:
+            print(f"\nNo emails found for domain {selected_domain}")
+            return None
+
+        if len(domain_emails) == 1:
+            # Auto-select if only one email
+            print(f"\nOnly one sender from {selected_domain}: {domain_emails[0][0]}")
+            return domain_emails[0][0]
+
+        print(f"\nFound {len(domain_emails)} senders from {selected_domain}...")
+        print("(Use arrow keys to navigate, type to filter, Enter to select, ESC to cancel)")
+        input("Press Enter to select email...")
+
+        selector = FilterableListSelector(domain_emails, f"Select Email from {selected_domain}")
+        selected_email = curses.wrapper(selector.run)
+
+        if not selected_email:
+            print("\nEmail selection cancelled.")
+            return None
+
+        return selected_email
 
     def _suggest_patterns(self, field: str, value: str) -> Optional[str]:
         """Show pattern suggestions and let user pick one.
@@ -1441,6 +1868,126 @@ class RuleWizard:
 
         return True
 
+    def _get_imap_folders(self) -> List[str]:
+        """
+        Fetch folder list directly from IMAP server.
+
+        Returns:
+            List of folder names (e.g., ['INBOX', 'Archive', 'Banking/NatWest'])
+            Empty list if connection fails
+
+        Note:
+            This queries the live IMAP server, not the cache, ensuring
+            the complete folder list is available regardless of cache state.
+        """
+        client = None
+        try:
+            print("Connecting to mail server to fetch folder list...")
+            client = imap_login(self.config.paths.secrets_file, self.logger)
+            folders = list_all_folders(client)
+            return folders
+        except FileNotFoundError:
+            print("⚠️ Error: Credentials file not found at", self.config.paths.secrets_file)
+            return []
+        except imaplib.IMAP4.error as e:
+            print(f"⚠️ Error connecting to mail server: {e}")
+            return []
+        except Exception as e:
+            print(f"⚠️ Error fetching folders: {e}")
+            return []
+        finally:
+            if client is not None:
+                try:
+                    client.logout()
+                except:
+                    pass  # Ignore logout errors
+
+    def _edit_folder_path(self, folder_path: str) -> Optional[str]:
+        """Allow user to edit a folder path after selection.
+
+        This enables using a selected folder as a template to create similar paths.
+        For example: select "Banking/NatWest" and edit to "Banking/Barclays".
+
+        Args:
+            folder_path: The initially selected folder path
+
+        Returns:
+            The edited folder path, or None if cancelled
+        """
+        print(f"\nSelected folder: {folder_path}")
+        print("\nOptions:")
+        print("  1. Use this folder (press Enter)")
+        print("  2. Edit this folder path")
+        print("  3. Enter a different path")
+        print("  4. Cancel (go back)")
+
+        choice = input("\n  > ").strip()
+
+        if choice == "2":
+            # Edit the selected folder
+            print("\nEdit folder path (or press Enter to keep as-is):")
+            print(f"  Current: {folder_path}")
+            edited = input("  New: ").strip()
+            return edited if edited else folder_path
+
+        elif choice == "3":
+            # Enter a completely different path
+            print("\nEnter a different folder path:")
+            new_path = input("  > ").strip()
+            return new_path if new_path else None
+
+        elif choice == "4" or choice == "":
+            # If empty choice, treat as "use this folder"
+            return folder_path if not choice else None
+
+        else:
+            print("Invalid choice, using selected folder.")
+            return folder_path
+
+    def _select_target_folder(self) -> Optional[str]:
+        """Show filterable list of folders from IMAP server and let user pick target.
+
+        Returns:
+            Selected folder path, or None if cancelled
+        """
+        # Get folders from live IMAP server
+        folders = self._get_imap_folders()
+
+        if not folders:
+            # Connection failed or no folders returned - fall back to manual entry
+            print("\nCouldn't fetch folders from server.")
+            print("You can enter a folder path manually:")
+            manual = input("Enter target folder path (e.g., 'Banking/NatWest'): ").strip()
+            return manual if manual else None
+
+        # Convert to format for FilterableListSelector: (folder_name, count)
+        # Count is 0 since we don't have message counts from IMAP LIST
+        items = [(folder, 0) for folder in folders]
+
+        # Show filterable list
+        print(f"\nFound {len(folders)} folders on your mail server...")
+        print("You can:")
+        print("  - Browse and select an existing folder")
+        print("  - Type to filter folders in real-time")
+        print("  - Press ESC to enter a custom folder manually")
+        print()
+        print("(Use arrow keys to navigate, type to filter, Enter to select, ESC for manual entry)")
+        input("Press Enter to open folder selector...")
+
+        selector = FilterableListSelector(items, "Select Target Folder")
+        selected = curses.wrapper(selector.run)
+
+        if selected is None:
+            # User cancelled (ESC) - offer manual entry
+            print("\nSelection cancelled.")
+            print("Would you like to enter a folder path manually?")
+            print("(Press Enter to skip, or type the folder path)")
+            manual = input("  > ").strip()
+            return manual if manual else None
+
+        # User selected a folder - offer option to edit it
+        return self._edit_folder_path(selected)
+
     def _configure_action(self) -> bool:
         """Configure the action (currently only 'move' is supported).
 
@@ -1455,7 +2002,7 @@ class RuleWizard:
         if choice != "1":
             print("Only 'move' action is currently supported.")
 
-        target = input("\nTarget folder path (e.g., 'Banking/NatWest'): ").strip()
+        target = self._select_target_folder()
         if not target:
             print("Target folder is required.")
             return False
@@ -1535,14 +2082,15 @@ class RuleWizard:
         # Ask to save
         print("\n" + "=" * 60)
         print("Options:")
-        print("  1. Save rule")
+        print("  1. Save rule and exit")
         print("  2. Cancel (discard rule)")
         print("  3. Edit (start over)")
+        print("  4. Save rule and create another (default)")
 
         choice = input("  > ").strip()
 
         if choice == "1":
-            # Save rule
+            # Save rule and exit
             success, message = save_rule(rule, self.config.paths.rules_dir)
             if success:
                 print(f"\nSuccess! {message}")
@@ -1553,11 +2101,23 @@ class RuleWizard:
         elif choice == "2":
             print("\nRule discarded.")
             return 130
-        else:
+        elif choice == "3":
             print("\nStarting over...")
             # Reset builder
             self.rule_builder = RuleBuilder()
             return 1
+        else:
+            # Default: save and create new rule (choice == "4" or empty)
+            success, message = save_rule(rule, self.config.paths.rules_dir)
+            if success:
+                print(f"\nSuccess! {message}")
+                print("\nStarting new rule...\n")
+                # Reset builder for new rule
+                self.rule_builder = RuleBuilder()
+                return 1  # Loop back to create another rule
+            else:
+                print(f"\nError saving rule: {message}")
+                return 1
 
     def _preview_rule(self, rule: dict) -> int:
         """Run dry-run preview and count matching messages.

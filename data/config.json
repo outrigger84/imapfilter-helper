@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "keywords": {
+    "predefined": [
+      {"name": "newsletter", "type": "custom", "description": "Marketing emails"},
+      {"name": "work", "type": "custom", "description": "Work-related emails"},
+      {"name": "receipts", "type": "custom", "description": "Purchase receipts"},
+      {"name": "\\Seen", "type": "system", "description": "Message has been read"},
+      {"name": "\\Flagged", "type": "system", "description": "Message is flagged"},
+      {"name": "\\Answered", "type": "system", "description": "Message has been answered"},
+      {"name": "\\Deleted", "type": "system", "description": "Marked for deletion"},
+      {"name": "\\Draft", "type": "system", "description": "Draft message"}
+    ]
+  },
+  "age_presets": [
+    {"label": "7 days", "days": 7},
+    {"label": "30 days", "days": 30},
+    {"label": "90 days", "days": 90},
+    {"label": "365 days (1 year)", "days": 365}
+  ]
+}

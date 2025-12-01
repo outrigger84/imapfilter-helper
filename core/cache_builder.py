@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import json
+import re
 import random
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
-from email import message_from_bytes
-import mailbox
 from tqdm import tqdm
 
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
@@ -50,6 +49,82 @@ def _coalesce_fetch_payload(msg_data) -> bytes:
     return b"".join(parts)
 
 
+def _parse_fetch_response(msg_data) -> tuple[bytes, list[str], str | None]:
+    """
+    Parse IMAP FETCH response to extract BODY[HEADER], FLAGS, and INTERNALDATE.
+
+    Args:
+        msg_data: Response from IMAP FETCH command
+
+    Returns:
+        Tuple of (header_bytes, flags_list, internaldate_string)
+        - header_bytes: Raw email headers as bytes
+        - flags_list: List of flag strings (e.g., ["\\Seen", "custom"])
+        - internaldate_string: Date string or None if not found
+
+    Example:
+        >>> msg_data = [(b'1 (FLAGS (\\Seen) INTERNALDATE "28-Oct-2025 07:30:19 +0000"', b'headers...')]
+        >>> headers, flags, date = _parse_fetch_response(msg_data)
+        >>> flags
+        ['\\Seen']
+        >>> date
+        '28-Oct-2025 07:30:19 +0000'
+    """
+    if not msg_data:
+        return b"", [], None
+
+    header_bytes = b""
+    flags = []
+    internaldate = None
+
+    try:
+        # IMAP FETCH response structure: list of tuples
+        # First element: metadata (FLAGS, INTERNALDATE, etc.)
+        # Second element: actual BODY[HEADER] data
+        for item in msg_data:
+            if isinstance(item, tuple) and len(item) >= 2:
+                metadata = item[0] if isinstance(item[0], bytes) else b""
+                payload = item[1] if isinstance(item[1], (bytes, bytearray)) else b""
+
+                # Extract FLAGS from metadata
+                flags_match = re.search(rb'FLAGS \(([^)]*)\)', metadata)
+                if flags_match:
+                    flags_str = flags_match.group(1).decode('ascii', 'ignore').strip()
+                    if flags_str:
+                        # Split by whitespace and filter empty strings
+                        flags = [f for f in flags_str.split() if f]
+
+                # Extract INTERNALDATE from metadata
+                date_match = re.search(rb'INTERNALDATE "([^"]*)"', metadata)
+                if date_match:
+                    internaldate = date_match.group(1).decode('ascii', 'ignore')
+
+                # Extract header payload
+                if payload:
+                    header_bytes = bytes(payload)
+
+            elif isinstance(item, (bytes, bytearray)):
+                # Sometimes metadata is a separate item
+                metadata = bytes(item)
+
+                flags_match = re.search(rb'FLAGS \(([^)]*)\)', metadata)
+                if flags_match:
+                    flags_str = flags_match.group(1).decode('ascii', 'ignore').strip()
+                    if flags_str:
+                        flags = [f for f in flags_str.split() if f]
+
+                date_match = re.search(rb'INTERNALDATE "([^"]*)"', metadata)
+                if date_match:
+                    internaldate = date_match.group(1).decode('ascii', 'ignore')
+
+    except Exception:
+        # If parsing fails, return what we have (at minimum, header_bytes)
+        # Don't raise - graceful degradation
+        pass
+
+    return header_bytes, flags, internaldate
+
+
 def build_cache(
     client,
     db,
@@ -59,8 +134,6 @@ def build_cache(
     logger: JsonLogger,
     limit: int | None,
     order: str,
-    backup_enabled: bool,
-    backup_dir: Path,
 ) -> tuple[PhaseTimer, int, int]:
     timer = PhaseTimer("cache")
 
@@ -89,15 +162,13 @@ def build_cache(
     for folder in folders_bar:
         folders_bar.set_postfix_str(folder)
         logger.log("INFO", "cache_folder_start", {"folder": folder})
-        backup_path: Path | None = None
-        backup_mbox: mailbox.mbox | None = None
         try:
             sel_typ, _ = client.select(f'"{folder}"', readonly=True)
             if sel_typ != "OK":
                 logger.log("INFO", "cache_folder_skipped", {"folder": folder}, console=f"⚠️ Skipped {folder}")
                 continue
 
-            uids = safe_search_all(client)
+            uids = safe_search_all(client, undeleted_only=True)
             if not uids:
                 logger.log(
                     "INFO",
@@ -147,72 +218,44 @@ def build_cache(
                 if not uid_value:
                     continue
 
-                typ, msg_data = client.uid("FETCH", uid_value, "(BODY.PEEK[HEADER])")
+                # Fetch BODY[HEADER], FLAGS, and INTERNALDATE
+                typ, msg_data = client.uid("FETCH", uid_value, "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)")
                 if typ != "OK":
+                    logger.log(
+                        "WARNING",
+                        "cache_fetch_failed",
+                        {"folder": folder, "uid": uid_value},
+                    )
                     continue
-                raw_hdr = _coalesce_fetch_payload(msg_data)
+
+                # Parse the FETCH response
+                raw_hdr, flags, internaldate = _parse_fetch_response(msg_data)
                 if not raw_hdr:
+                    logger.log(
+                        "WARNING",
+                        "cache_parse_failed",
+                        {"folder": folder, "uid": uid_value},
+                    )
                     continue
+
                 hdr_str = raw_hdr.decode(errors="ignore")
+
+                # Build cache entry with FLAGS and INTERNALDATE
+                cache_entry = {"header": hdr_str}
+                if flags:
+                    cache_entry["flags"] = flags
+                if internaldate:
+                    cache_entry["internaldate"] = internaldate
+
                 db.execute(
                     "INSERT OR REPLACE INTO headers (folder, uid, data, updated_at) "
                     "VALUES(?,?,?,?)",
                     (
                         folder,
                         uid_value,
-                        json.dumps({"header": hdr_str}),
+                        json.dumps(cache_entry),
                         now_iso(),
                     ),
-                )
-
-            if backup_enabled and limited_uids:
-                backup_dir.mkdir(parents=True, exist_ok=True)
-                safe_name = folder.replace("/", "_").replace(" ", "_") or "folder"
-                timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                backup_path = backup_dir / f"{safe_name}_{timestamp}.mbox"
-                logger.log(
-                    "INFO",
-                    "cache_backup_start",
-                    {"folder": folder, "path": str(backup_path)},
-                    console=f"💾 {folder}: starting backup",
-                )
-                backup_mbox = mailbox.mbox(str(backup_path))
-
-                backup_bar = tqdm(
-                    limited_uids,
-                    desc=f"   📦 Backing up {folder}",
-                    unit="msg",
-                    dynamic_ncols=True,
-                    leave=False,
-                    position=2,
-                    disable=not show_progress,
-                )
-
-                for uid in backup_bar:
-                    uid_value = (
-                        uid.decode("ascii", "ignore")
-                        if isinstance(uid, (bytes, bytearray))
-                        else str(uid)
-                    )
-                    if not uid_value:
-                        continue
-
-                    typ, msg_data = client.uid("FETCH", uid_value, "(BODY.PEEK[])")
-                    if typ != "OK":
-                        continue
-                    raw_msg = _coalesce_fetch_payload(msg_data)
-                    if not raw_msg:
-                        continue
-                    try:
-                        backup_mbox.add(mailbox.mboxMessage(message_from_bytes(raw_msg)))
-                    except Exception:  # pragma: no cover - defensive
-                        continue
-                backup_mbox.flush()
-                logger.log(
-                    "INFO",
-                    "cache_backup_done",
-                    {"folder": folder, "path": str(backup_path), "messages": len(limited_uids)},
-                    console=f"✅ {folder}: backup saved to {backup_path.name}",
                 )
 
             db.execute(
@@ -235,16 +278,6 @@ def build_cache(
                 {"folder": folder, "error": str(exc)},
                 console=f"❌ {folder}: {exc}",
             )
-        finally:
-            if backup_mbox is not None:
-                try:
-                    backup_mbox.flush()
-                except Exception:  # pragma: no cover - defensive
-                    pass
-                try:
-                    backup_mbox.close()
-                except Exception:  # pragma: no cover - defensive
-                    pass
 
     timer.stop()
     timer.count = total_msgs

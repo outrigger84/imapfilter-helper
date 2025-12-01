@@ -4,8 +4,9 @@ from __future__ import annotations
 import email
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Optional, Sequence, Tuple
 
 from tqdm import tqdm
 
@@ -60,6 +61,164 @@ def _parse_header_map(raw_header: str) -> dict[str, str]:
     return {key.lower(): value for key, value in message.items()}
 
 
+def _parse_internaldate(date_str: Optional[str]) -> Optional[datetime]:
+    """
+    Parse IMAP INTERNALDATE format into a datetime object.
+
+    Handles formats like:
+    - "28-Oct-2025 07:30:19 +0000"
+    - "28-Oct-2025 07:30:19" (without timezone)
+
+    Returns:
+        datetime object (timezone-aware if timezone present) or None if parsing fails
+    """
+    if not date_str:
+        return None
+
+    # Try with timezone first
+    formats_to_try = [
+        "%d-%b-%Y %H:%M:%S %z",  # With timezone: "28-Oct-2025 07:30:19 +0000"
+        "%d-%b-%Y %H:%M:%S",     # Without timezone: "28-Oct-2025 07:30:19"
+    ]
+
+    for fmt in formats_to_try:
+        try:
+            dt = datetime.strptime(date_str.strip(), fmt)
+            # If no timezone, assume UTC
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except (ValueError, AttributeError):
+            continue
+
+    return None
+
+
+def _extract_message_metadata(data: str) -> Tuple[dict, List[str], Optional[datetime]]:
+    """
+    Extract message metadata from cached data string.
+
+    Args:
+        data: JSON string containing message data
+
+    Returns:
+        Tuple of (header_dict, flags_list, date_object)
+        - header_dict: Parsed email headers with lowercase keys
+        - flags_list: IMAP flags (empty list if not present)
+        - date_object: Message date as datetime (None if not present)
+    """
+    # Default empty values
+    header_dict: dict = {}
+    flags_list: list = []
+    date_object: Optional[datetime] = None
+
+    # Parse JSON safely
+    try:
+        payload = json.loads(data)
+    except (json.JSONDecodeError, TypeError):
+        # Old format: just raw header string
+        header_dict = _parse_header_map(data)
+        return (header_dict, flags_list, date_object)
+
+    # Extract header
+    if isinstance(payload, dict):
+        raw_header = payload.get("header", "")
+        if isinstance(raw_header, str):
+            header_dict = _parse_header_map(raw_header)
+
+        # Extract flags
+        flags = payload.get("flags")
+        if isinstance(flags, list):
+            flags_list = flags
+
+        # Extract and parse date
+        date_str = payload.get("internaldate")
+        if isinstance(date_str, str):
+            date_object = _parse_internaldate(date_str)
+    else:
+        # Fallback: treat entire payload as header
+        header_dict = _parse_header_map(str(payload))
+
+    return (header_dict, flags_list, date_object)
+
+
+def _evaluate_flag_condition(flags: List[str], condition: dict) -> bool:
+    """
+    Evaluate flag-based conditions against message flags.
+
+    Supports:
+    - has_keyword/has_flag: True if keyword exists in flags
+    - lacks_keyword/lacks_flag: True if keyword does NOT exist in flags
+
+    Args:
+        flags: List of IMAP flags/keywords for the message
+        condition: Condition dict with flag-related keys
+
+    Returns:
+        True if condition matches, False otherwise
+    """
+    # Check for has_keyword or has_flag
+    has_keyword = condition.get("has_keyword") or condition.get("has_flag")
+    if has_keyword:
+        return has_keyword in flags
+
+    # Check for lacks_keyword or lacks_flag
+    lacks_keyword = condition.get("lacks_keyword") or condition.get("lacks_flag")
+    if lacks_keyword:
+        return lacks_keyword not in flags
+
+    return False
+
+
+def _evaluate_age_condition(date: Optional[datetime], condition: dict) -> bool:
+    """
+    Evaluate age-based conditions against message date.
+
+    Supports:
+    - age_days_gt: True if message is older than N days
+    - age_days_lt: True if message is younger than N days
+    - age_days_eq: True if message is exactly N days old
+
+    Args:
+        date: Message date as datetime object (timezone-aware)
+        condition: Condition dict with age-related keys
+
+    Returns:
+        True if condition matches, False if date is None or condition doesn't match
+    """
+    if date is None:
+        return False
+
+    # Ensure we're working with timezone-aware datetimes
+    now = datetime.now(timezone.utc)
+    msg_date = date
+    if msg_date.tzinfo is None:
+        msg_date = msg_date.replace(tzinfo=timezone.utc)
+
+    # Calculate age in days
+    age_days = (now - msg_date).days
+
+    # Check age_days_gt
+    if "age_days_gt" in condition:
+        threshold = condition["age_days_gt"]
+        if isinstance(threshold, (int, float)):
+            return age_days > threshold
+
+    # Check age_days_lt
+    if "age_days_lt" in condition:
+        threshold = condition["age_days_lt"]
+        if isinstance(threshold, (int, float)):
+            return age_days < threshold
+
+    # Check age_days_eq
+    if "age_days_eq" in condition:
+        threshold = condition["age_days_eq"]
+        if isinstance(threshold, (int, float)):
+            return age_days == threshold
+
+    return False
+
+
 def rule_match(header: dict, cond: dict) -> bool:
     value = header.get(cond.get("header", "").lower(), "") or ""
     pattern = cond.get("contains") or cond.get("regex")
@@ -70,22 +229,54 @@ def rule_match(header: dict, cond: dict) -> bool:
     return pattern.lower() in value.lower()
 
 
-def _evaluate_condition_node(header: dict, node: Any) -> bool:
-    """Evaluate a condition or logical group against the header map."""
+def _evaluate_condition_node(
+    header: dict,
+    node: Any,
+    flags: Optional[List[str]] = None,
+    date: Optional[datetime] = None,
+) -> bool:
+    """
+    Evaluate a condition or logical group against the header map.
+
+    Args:
+        header: Parsed email headers with lowercase keys
+        node: Condition node (dict, list, or other)
+        flags: Optional list of IMAP flags/keywords
+        date: Optional message date as datetime
+
+    Returns:
+        True if condition matches, False otherwise
+    """
 
     if isinstance(node, list):
         # Implicit AND for backward compatibility with legacy rule format.
-        return all(_evaluate_condition_node(header, item) for item in node)
+        return all(_evaluate_condition_node(header, item, flags, date) for item in node)
 
     if isinstance(node, dict):
         matched = False
+
+        # Check for flag conditions
+        if flags is not None and any(
+            key in node for key in ["has_keyword", "has_flag", "lacks_keyword", "lacks_flag"]
+        ):
+            matched = True
+            if not _evaluate_flag_condition(flags, node):
+                return False
+
+        # Check for age conditions
+        if date is not None and any(
+            key in node for key in ["age_days_gt", "age_days_lt", "age_days_eq"]
+        ):
+            matched = True
+            if not _evaluate_age_condition(date, node):
+                return False
 
         if "all" in node:
             matched = True
             candidates = node.get("all")
             if not isinstance(candidates, list):
                 candidates = [candidates]
-            if not all(_evaluate_condition_node(header, item) for item in candidates):
+            if not all(_evaluate_condition_node(header, item, flags, date) for item in candidates):
                 return False
 
         if "any" in node:
@@ -96,7 +287,7 @@ def _evaluate_condition_node(header: dict, node: Any) -> bool:
             # Empty OR group should never match.
             if not candidates:
                 return False
-            if not any(_evaluate_condition_node(header, item) for item in candidates):
+            if not any(_evaluate_condition_node(header, item, flags, date) for item in candidates):
                 return False
 
         if matched:
@@ -107,12 +298,49 @@ def _evaluate_condition_node(header: dict, node: Any) -> bool:
     return False
 
 
-def conditions_match(header: dict, conditions: Any) -> bool:
-    """Return True if the header satisfies the supplied condition tree."""
+def conditions_match(
+    header: dict,
+    conditions: Any,
+    flags: Optional[List[str]] = None,
+    date: Optional[datetime] = None,
+) -> bool:
+    """
+    Return True if the header satisfies the supplied condition tree.
+
+    Args:
+        header: Parsed email headers with lowercase keys
+        conditions: Condition tree to evaluate
+        flags: Optional list of IMAP flags/keywords
+        date: Optional message date as datetime
+
+    Returns:
+        True if conditions match, False otherwise
+    """
 
     if not conditions:
         return False
-    return _evaluate_condition_node(header, conditions)
+    return _evaluate_condition_node(header, conditions, flags, date)
+
+
+def find_matching_rule(header: dict, rules: Sequence[dict]) -> dict | None:
+    """
+    Find the first matching rule for a message header.
+
+    Rules are evaluated in order (should be sorted by priority first).
+    Returns the first matching rule or None if no rules match.
+
+    Args:
+        header: Parsed header dictionary with lowercase keys
+        rules: List of rule dictionaries, ordered by priority (highest first)
+
+    Returns:
+        The first matching rule dict, or None if no match
+    """
+    for rule in rules:
+        conditions = rule.get("conditions")
+        if conditions_match(header, conditions):
+            return rule
+    return None
 
 
 def evaluate_rules(
@@ -258,8 +486,7 @@ def evaluate_rules(
             if current_folder is None:
                 continue
 
-            raw_header = _extract_raw_header(data)
-            header = _parse_header_map(raw_header)
+            header, flags, date = _extract_message_metadata(data)
             current_folder_count += 1
             if msgs_bar is not None:
                 msgs_bar.update(1)
@@ -273,16 +500,27 @@ def evaluate_rules(
                         "folder": folder,
                         "subject": header.get("subject"),
                         "from": header.get("from"),
+                        "flags": flags,
+                        "date": date.isoformat() if date else None,
                     },
                 )
 
             for rule in rule_list:
                 conds = rule.get("conditions")
-                if conditions_match(header, conds):
+                if conditions_match(header, conds, flags=flags, date=date):
                     action = rule.get("action", {})
+                    action_type = action.get("type", "move")
+
+                    # Serialize action data (keywords, etc.) as JSON if present
+                    action_data = None
+                    if action_type in ("set_keywords", "remove_keywords"):
+                        keywords = action.get("keywords", [])
+                        if keywords:
+                            action_data = json.dumps({"keywords": keywords})
+
                     db.execute(
-                        "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at) "
-                        "VALUES (?,?,?,?,?,?,?)",
+                        "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at, action_type, action_data) "
+                        "VALUES (?,?,?,?,?,?,?,?,?)",
                         (
                             uid,
                             folder,
@@ -291,6 +529,8 @@ def evaluate_rules(
                             int(rule.get("priority", 100)),
                             "pending" if not dry_run else "simulated",
                             now_iso(),
+                            action_type,
+                            action_data,
                         ),
                     )
                     total_matches += 1
@@ -299,8 +539,14 @@ def evaluate_rules(
                     rule_match_counts[rule_name] = rule_match_counts.get(rule_name, 0) + 1
                     console_msg: str | None = None
                     if verbose:
-                        target = action.get("target") or "(no target)"
-                        console_msg = f"✅ {rule_name} matched {folder}/{uid} → {target}"
+                        if action_type == "move":
+                            target = action.get("target") or "(no target)"
+                            console_msg = f"✅ {rule_name} matched {folder}/{uid} → {target}"
+                        elif action_type in ("set_keywords", "remove_keywords"):
+                            keywords = action.get("keywords", [])
+                            console_msg = f"✅ {rule_name} matched {folder}/{uid} ({action_type}: {keywords})"
+                        else:
+                            console_msg = f"✅ {rule_name} matched {folder}/{uid} ({action_type})"
                     logger.log(
                         "INFO",
                         "rule_match",
@@ -309,6 +555,7 @@ def evaluate_rules(
                             "priority": int(rule.get("priority", 100)),
                             "folder": folder,
                             "uid": uid,
+                            "action_type": action_type,
                             "target": action.get("target"),
                             "dry_run": dry_run,
                         },

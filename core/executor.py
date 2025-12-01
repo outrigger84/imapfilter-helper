@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import json
+import re
 import imaplib
 from email.parser import HeaderParser
 from email.policy import default
+from pathlib import Path
 from typing import Dict, Iterable, Sequence
 
 from tqdm import tqdm
 
+from core.backup import backup_messages, backup_all_cached_messages, BackupResult
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 
 
@@ -60,11 +63,26 @@ def execute_actions(
     limit: int | None = None,
     folders: Sequence[str] | None = None,
     verify_moves: bool = False,
+    backup_moved: bool = False,
+    backup_all: bool = False,
+    backup_dir: Path | None = None,
 ) -> tuple[PhaseTimer, Dict[str, int]]:
     if not dry_run and client is None:
         raise ValueError("An IMAP client is required when not running in dry-run mode")
 
     timer = PhaseTimer("execute")
+
+    # Validate backup parameters
+    if (backup_moved or backup_all) and backup_dir is None:
+        raise ValueError("backup_dir must be specified when backup is enabled")
+
+    if backup_moved and backup_all:
+        logger.log(
+            "WARN",
+            "backup_both_enabled",
+            console="⚠️  Both --backup-moved and --backup-all specified. Using --backup-all.",
+        )
+        backup_moved = False  # backup_all takes precedence
 
     logger.log(
         "INFO",
@@ -108,6 +126,8 @@ def execute_actions(
                 rule_name,
                 priority,
                 created_at,
+                action_type,
+                action_data,
                 ROW_NUMBER() OVER (
                     PARTITION BY uid
                     ORDER BY priority DESC, created_at ASC, id ASC
@@ -126,7 +146,7 @@ def execute_actions(
     if limit is not None:
         dedup_cte += (
             "    , limited AS (\n"
-            "        SELECT id, uid, folder, target, rule_name, priority, created_at\n"
+            "        SELECT id, uid, folder, target, rule_name, priority, created_at, action_type, action_data\n"
             "        FROM ranked\n"
             "        WHERE rn=1\n"
             f"        {order_clause}\n"
@@ -245,12 +265,19 @@ def execute_actions(
                 if isinstance(header_text, str):
                     try:
                         parsed = HEADER_PARSER.parsestr(header_text)
+                        if parsed is not None:
+                            value = parsed.get("Message-ID") or parsed.get("Message-Id")
+                            if isinstance(value, str) and value.strip():
+                                message_id = value.strip()
                     except Exception:
-                        parsed = None
-                    if parsed is not None:
-                        value = parsed.get("Message-ID") or parsed.get("Message-Id")
-                        if isinstance(value, str) and value.strip():
-                            message_id = value.strip()
+                        # Fallback: extract Message-ID with regex for malformed headers
+                        match = re.search(
+                            r'Message-I[Dd]:\s*<?(\[?[^\]>\s]+\]?)>?',
+                            header_text,
+                            re.IGNORECASE | re.MULTILINE
+                        )
+                        if match:
+                            message_id = match.group(1).strip()
         message_id_cache[key] = message_id
         return message_id
 
@@ -355,7 +382,7 @@ def execute_actions(
     select_cur = db.cursor()
     select_cur.execute(
         dedup_cte
-        + "SELECT id, uid, folder, target, rule_name, priority, created_at "
+        + "SELECT id, uid, folder, target, rule_name, priority, created_at, action_type, action_data "
         f"FROM {selection_source} "
         f"{order_clause}",
         dedup_params,
@@ -363,7 +390,9 @@ def execute_actions(
 
     chunk_size = 512
     current_key: tuple[str, str | None] | None = None
-    current_items: list[tuple[int, str]] = []
+    # Store: (action_id, uid, rule_name, action_type, action_data)
+    current_items: list[tuple[int, str, str | None, str, str | None]] = []
+    current_rule_name: str | None = None
 
     def _has_capability(name: str) -> bool:
         if dry_run or client is None:
@@ -412,8 +441,160 @@ def execute_actions(
             console=f"      ↪ {op_label} {status}{details}{suffix}",
         )
 
+    def _execute_set_keywords(
+        folder: str,
+        uid: str,
+        keywords: list[str],
+    ) -> tuple[str, Any]:
+        """
+        Set (add) IMAP keywords/flags on a message.
+
+        Args:
+            folder: Source folder containing the message
+            uid: Message UID
+            keywords: List of keywords/flags to set
+
+        Returns:
+            Tuple of (status, response) from IMAP STORE command
+        """
+        assert client is not None
+        try:
+            # Select the folder
+            sel_typ, sel_resp = client.select(f'"{folder}"')
+            log_imap_call(
+                "imap_select",
+                op_label=f'SELECT "{folder}"',
+                status=sel_typ,
+                response=sel_resp,
+                folder=folder,
+                uid=uid,
+            )
+            if sel_typ != "OK":
+                raise imaplib.IMAP4.error(f"Cannot open folder {folder}")
+
+            # Build flags string - ensure proper formatting
+            flags_str = " ".join(keywords)
+
+            # Execute STORE command to add keywords
+            typ, resp = client.uid("STORE", uid, "+FLAGS", f"({flags_str})")
+            log_imap_call(
+                "imap_uid_store_set_keywords",
+                op_label="UID STORE +FLAGS",
+                status=typ,
+                response=resp,
+                folder=folder,
+                uid=uid,
+            )
+
+            if typ == "OK":
+                console_msg = f"   🏷️  Set keywords on {folder}/{uid}: {keywords}" if verbose else None
+                logger.log(
+                    "INFO",
+                    "execute_set_keywords_done",
+                    {"folder": folder, "uid": uid, "keywords": keywords},
+                    console=console_msg,
+                )
+            else:
+                logger.log(
+                    "ERROR",
+                    "execute_set_keywords_failed",
+                    {
+                        "folder": folder,
+                        "uid": uid,
+                        "keywords": keywords,
+                        "status": typ,
+                        "details": _format_imap_details(resp),
+                    },
+                )
+
+            return typ, resp
+
+        except Exception as exc:
+            logger.log(
+                "ERROR",
+                "execute_set_keywords_exception",
+                {"folder": folder, "uid": uid, "keywords": keywords, "error": str(exc)},
+            )
+            raise
+
+    def _execute_remove_keywords(
+        folder: str,
+        uid: str,
+        keywords: list[str],
+    ) -> tuple[str, Any]:
+        """
+        Remove IMAP keywords/flags from a message.
+
+        Args:
+            folder: Source folder containing the message
+            uid: Message UID
+            keywords: List of keywords/flags to remove
+
+        Returns:
+            Tuple of (status, response) from IMAP STORE command
+        """
+        assert client is not None
+        try:
+            # Select the folder
+            sel_typ, sel_resp = client.select(f'"{folder}"')
+            log_imap_call(
+                "imap_select",
+                op_label=f'SELECT "{folder}"',
+                status=sel_typ,
+                response=sel_resp,
+                folder=folder,
+                uid=uid,
+            )
+            if sel_typ != "OK":
+                raise imaplib.IMAP4.error(f"Cannot open folder {folder}")
+
+            # Build flags string - ensure proper formatting
+            flags_str = " ".join(keywords)
+
+            # Execute STORE command to remove keywords
+            typ, resp = client.uid("STORE", uid, "-FLAGS", f"({flags_str})")
+            log_imap_call(
+                "imap_uid_store_remove_keywords",
+                op_label="UID STORE -FLAGS",
+                status=typ,
+                response=resp,
+                folder=folder,
+                uid=uid,
+            )
+
+            if typ == "OK":
+                console_msg = f"   🏷️  Removed keywords from {folder}/{uid}: {keywords}" if verbose else None
+                logger.log(
+                    "INFO",
+                    "execute_remove_keywords_done",
+                    {"folder": folder, "uid": uid, "keywords": keywords},
+                    console=console_msg,
+                )
+            else:
+                logger.log(
+                    "ERROR",
+                    "execute_remove_keywords_failed",
+                    {
+                        "folder": folder,
+                        "uid": uid,
+                        "keywords": keywords,
+                        "status": typ,
+                        "details": _format_imap_details(resp),
+                    },
+                )
+
+            return typ, resp
+
+        except Exception as exc:
+            logger.log(
+                "ERROR",
+                "execute_remove_keywords_exception",
+                {"folder": folder, "uid": uid, "keywords": keywords, "error": str(exc)},
+            )
+            raise
+
     def flush_group() -> None:
-        nonlocal current_key, current_items
+        nonlocal current_key, current_items, current_rule_name
         if current_key is None or not current_items:
             return
 
@@ -421,7 +602,153 @@ def execute_actions(
         display_target = target or "(no target)"
         total_for_group = group_totals.get(current_key, len(current_items))
         folders_bar.set_postfix_str(f"{folder} → {display_target}")
-        uids = [uid for _, uid in current_items]
+
+        # Extract metadata from first item
+        # current_items: (action_id, uid, rule_name, action_type, action_data)
+        action_type = current_items[0][3] if current_items and len(current_items[0]) > 3 else "move"
+        rule_name = current_items[0][2] if current_items else None
+
+        # Handle keyword actions (set_keywords, remove_keywords)
+        if action_type in ("set_keywords", "remove_keywords"):
+            if dry_run:
+                for a_id, uid, _, _, action_data in current_items:
+                    keywords = []
+                    if action_data:
+                        try:
+                            data = json.loads(action_data)
+                            keywords = data.get("keywords", [])
+                        except json.JSONDecodeError:
+                            pass
+
+                    actions_bar.update(1)
+                    if verbose:
+                        logger.log(
+                            "INFO",
+                            "dry_action_preview",
+                            {"folder": folder, "uid": uid, "action_type": action_type, "keywords": keywords},
+                            console=f"   📝 Would {action_type} on {folder}/{uid}: {keywords}",
+                        )
+            else:
+                assert client is not None
+                for a_id, uid, _, _, action_data in current_items:
+                    keywords = []
+                    if action_data:
+                        try:
+                            data = json.loads(action_data)
+                            keywords = data.get("keywords", [])
+                        except json.JSONDecodeError:
+                            logger.log(
+                                "WARN",
+                                "action_data_parse_failed",
+                                {"folder": folder, "uid": uid, "action_id": a_id},
+                            )
+
+                    if not keywords:
+                        logger.log(
+                            "WARN",
+                            f"{action_type}_empty",
+                            {"folder": folder, "uid": uid},
+                        )
+                        db.execute(
+                            "UPDATE actions SET status='skipped', executed_at=? WHERE id=?",
+                            (now_iso(), a_id),
+                        )
+                        stats["skipped"] += 1
+                        actions_bar.update(1)
+                        continue
+
+                    try:
+                        if action_type == "set_keywords":
+                            typ, resp = _execute_set_keywords(folder, uid, keywords)
+                        else:  # remove_keywords
+                            typ, resp = _execute_remove_keywords(folder, uid, keywords)
+
+                        if typ == "OK":
+                            db.execute(
+                                "UPDATE actions SET status='done', executed_at=? WHERE id=?",
+                                (now_iso(), a_id),
+                            )
+                            stats["done"] += 1
+                        else:
+                            db.execute(
+                                "UPDATE actions SET status='failed', executed_at=? WHERE id=?",
+                                (now_iso(), a_id),
+                            )
+                            stats["failed"] += 1
+                    except Exception as exc:
+                        db.execute(
+                            "UPDATE actions SET status='failed', executed_at=? WHERE id=?",
+                            (now_iso(), a_id),
+                        )
+                        stats["failed"] += 1
+                        logger.log(
+                            "ERROR",
+                            f"{action_type}_exception",
+                            {"folder": folder, "uid": uid, "error": str(exc)},
+                            console=f"❌ {folder}/{uid}: {exc}",
+                        )
+                    finally:
+                        actions_bar.update(1)
+
+                db.commit()
+
+            folders_bar.update(1)
+            current_items = []
+            current_key = None
+            return
+
+        # Handle move actions (original logic)
+        uids = [uid for _, uid, _, _, _ in current_items]
+
+        # Backup messages before moving (if requested and not in dry-run)
+        backup_result: BackupResult | None = None
+        if backup_moved and not dry_run and client is not None:
+            assert backup_dir is not None
+            backup_result = backup_messages(
+                client=client,
+                folder=folder,
+                uids=uids,
+                backup_dir=backup_dir,
+                backup_type="pre_move",
+                logger=logger,
+                show_progress=show_progress,
+                rule_name=rule_name,
+                target_folder=target,
+            )
+
+            # Check if backup succeeded - if not, we should not proceed
+            if backup_result.backed_up == 0 and len(uids) > 0:
+                logger.log(
+                    "ERROR",
+                    "backup_failed_abort",
+                    {"folder": folder, "target": target, "uid_count": len(uids)},
+                    console=f"❌ Backup failed for {folder}. Skipping moves for safety.",
+                )
+                # Mark actions as failed
+                for a_id, _, _, _, _ in current_items:
+                    db.execute(
+                        "UPDATE actions SET status='failed', executed_at=? WHERE id=?",
+                        (now_iso(), a_id),
+                    )
+                db.commit()
+                stats["failed"] += len(current_items)
+                return
+
+            if backup_result.failed > 0:
+                logger.log(
+                    "WARN",
+                    "backup_partial",
+                    {
+                        "folder": folder,
+                        "backed_up": backup_result.backed_up,
+                        "failed": backup_result.failed,
+                    },
+                    console=f"⚠️  Partial backup: {backup_result.backed_up}/{len(uids)} succeeded",
+                )
+
+            # Track backup stats
+            stats["backed_up"] = stats.get("backed_up", 0) + backup_result.backed_up
+            stats["backup_failed"] = stats.get("backup_failed", 0) + backup_result.failed
 
         if dry_run:
             if show_progress:
@@ -475,85 +802,10 @@ def execute_actions(
                     raise imaplib.IMAP4.error(f"Cannot open folder {folder}")
 
                 target_ready = target is None
+                successful_moves: list[tuple[int, str]] = []  # Track (action_id, uid) for post-EXPUNGE verification
 
-                def _finalize_success(action_id: int, uid_value: str) -> None:
-                    if verify_moves and target and not dry_run:
-                        message_id = _cached_message_id(folder, uid_value)
-                        if message_id:
-                            verify_errors: list[str] = []
-                            source_found = False
-                            source_status = "OK"
-                            try:
-                                source_found, source_status, _ = _uid_search_mailbox(
-                                    folder,
-                                    message_id,
-                                    target=target,
-                                    uid=uid_value,
-                                )
-                            except Exception as search_exc:
-                                source_found = True
-                                source_status = "ERROR"
-                                verify_errors.append(str(search_exc))
-                            dest_found = True
-                            dest_status = "OK"
-                            try:
-                                dest_found, dest_status = _verify_destination_mailbox(
-                                    folder,
-                                    target,
-                                    message_id,
-                                    uid=uid_value,
-                                )
-                            except Exception as dest_exc:
-                                dest_found = False
-                                dest_status = "ERROR"
-                                verify_errors.append(str(dest_exc))
-                            issues: list[str] = []
-                            if source_status != "OK":
-                                issues.append("source_search_failed")
-                            if source_found:
-                                issues.append("source_present")
-                            if dest_status != "OK":
-                                issues.append("destination_search_failed")
-                            if not dest_found:
-                                issues.append("destination_missing")
-                            if issues:
-                                db.execute(
-                                    "UPDATE actions SET status=?, executed_at=? WHERE id=?",
-                                    ("failed", now_iso(), action_id),
-                                )
-                                stats["failed"] += 1
-                                context = {
-                                    "folder": folder,
-                                    "target": target,
-                                    "uid": uid_value,
-                                    "message_id": message_id,
-                                    "issues": issues,
-                                }
-                                if verify_errors:
-                                    context["errors"] = verify_errors
-                                console_warn = None
-                                if verbose:
-                                    console_warn = (
-                                        f"   ⚠️ Verification failed for {folder}/{uid_value} → {display_target}"
-                                    )
-                                logger.log(
-                                    "WARN",
-                                    "execute_verify_failed",
-                                    context,
-                                    console=console_warn,
-                                )
-                                return
-                        else:
-                            if verbose:
-                                logger.log(
-                                    "DEBUG",
-                                    "execute_verify_missing_message_id",
-                                    {
-                                        "folder": folder,
-                                        "target": target,
-                                        "uid": uid_value,
-                                    },
-                                )
+                def _record_success(action_id: int, uid_value: str) -> None:
+                    """Mark action as successful and track for later verification."""
                     db.execute(
                         "UPDATE actions SET status='done', executed_at=? WHERE id=?",
                         (now_iso(), action_id),
@@ -563,9 +815,11 @@ def execute_actions(
                         (folder, uid_value),
                     ).rowcount
                     stats["done"] += 1
-                    console_msg: str | None = None
-                    if verbose:
-                        console_msg = f"   ✅ Moved {folder}/{uid_value} → {display_target}"
+
+                    if verify_moves and target and not dry_run:
+                        successful_moves.append((action_id, uid_value))
+
+                    console_msg = f"   ✅ Moved {folder}/{uid_value} → {display_target}" if verbose else None
                     logger.log(
                         "INFO",
                         "execute_uid_done",
@@ -584,7 +838,100 @@ def execute_actions(
                             ),
                         )
 
-                for a_id, uid in current_items:
+                def _verify_move(action_id: int, uid_value: str) -> None:
+                    """Verify a successful move after EXPUNGE."""
+                    message_id = _cached_message_id(folder, uid_value)
+                    if not message_id:
+                        logger.log(
+                            "DEBUG",
+                            "execute_verify_missing_message_id",
+                            {
+                                "folder": folder,
+                                "target": target,
+                                "uid": uid_value,
+                            },
+                        )
+                        return
+
+                    verify_errors: list[str] = []
+                    source_found = False
+                    source_status = "OK"
+
+                    try:
+                        # Ensure source folder is selected for verification
+                        sel_typ, sel_resp = client.select(f'"{folder}"')
+                        if sel_typ != "OK":
+                            source_found = True
+                            source_status = "ERROR"
+                            verify_errors.append(f"Cannot select {folder}: {sel_typ}")
+                        else:
+                            source_found, source_status, _ = _uid_search_mailbox(
+                                folder,
+                                message_id,
+                                target=target,
+                                uid=uid_value,
+                            )
+                    except Exception as search_exc:
+                        source_found = True
+                        source_status = "ERROR"
+                        verify_errors.append(str(search_exc))
+
+                    dest_found = True
+                    dest_status = "OK"
+
+                    try:
+                        dest_found, dest_status = _verify_destination_mailbox(
+                            folder,
+                            target,
+                            message_id,
+                            uid=uid_value,
+                        )
+                    except Exception as dest_exc:
+                        dest_found = False
+                        dest_status = "ERROR"
+                        verify_errors.append(str(dest_exc))
+
+                    issues: list[str] = []
+                    if source_status != "OK":
+                        issues.append("source_search_failed")
+                    if source_found:
+                        issues.append("source_present")
+                    if dest_status != "OK":
+                        issues.append("destination_search_failed")
+                    if not dest_found:
+                        issues.append("destination_missing")
+
+                    if issues:
+                        db.execute(
+                            "UPDATE actions SET status=?, executed_at=? WHERE id=?",
+                            ("failed", now_iso(), action_id),
+                        )
+                        stats["failed"] += 1
+                        stats["done"] -= 1
+
+                        context = {
+                            "folder": folder,
+                            "target": target,
+                            "uid": uid_value,
+                            "message_id": message_id,
+                            "issues": issues,
+                        }
+                        if verify_errors:
+                            context["errors"] = verify_errors
+
+                        console_warn = None
+                        if verbose:
+                            console_warn = (
+                                f"   ⚠️ Verification failed for {folder}/{uid_value} → {display_target}"
+                            )
+                        logger.log(
+                            "WARN",
+                            "execute_verify_failed",
+                            context,
+                            console=console_warn,
+                        )
+
+                for a_id, uid, _, _, _ in current_items:
                     deleted_flagged = False
                     try:
                         move_typ = "NO"
@@ -617,7 +964,7 @@ def execute_actions(
                                 if move_typ == "OK":
                                     if target and not target_ready:
                                         target_ready = True
-                                    _finalize_success(a_id, uid)
+                                    _record_success(a_id, uid)
                                     continue
 
                         typ1, copy_resp = client.uid("COPY", uid, f'"{target}"')
@@ -705,7 +1052,7 @@ def execute_actions(
                             raise imaplib.IMAP4.error("UID STORE +FLAGS \\Deleted failed")
                         deleted_flagged = True
 
-                        _finalize_success(a_id, uid)
+                        _record_success(a_id, uid)
 
                     except imaplib.IMAP4.error as exc:
                         if deleted_flagged:
@@ -828,6 +1175,24 @@ def execute_actions(
                 except Exception:  # pragma: no cover - best effort cleanup
                     pass
 
+                # Verify all successful moves after EXPUNGE completes
+                if successful_moves and verify_moves:
+                    for action_id, uid_value in successful_moves:
+                        try:
+                            _verify_move(action_id, uid_value)
+                        except Exception as verify_exc:  # pragma: no cover
+                            logger.log(
+                                "ERROR",
+                                "execute_verify_exception",
+                                {
+                                    "action_id": action_id,
+                                    "uid": uid_value,
+                                    "error": str(verify_exc),
+                                },
+                                console=f"❌ Verification error for {folder}/{uid_value}: {verify_exc}",
+                            )
+                    db.commit()  # Commit any verification failures
+
                 db.commit()
                 logger.log(
                     "INFO",
@@ -856,20 +1221,65 @@ def execute_actions(
         rows = select_cur.fetchmany(chunk_size)
         if not rows:
             break
-        for a_id, uid, folder, target, _rule_name, _priority, _created_at in rows:
+        for a_id, uid, folder, target, rule_name, _priority, _created_at, action_type, action_data in rows:
             key = (folder, target)
             if current_key is not None and key != current_key:
                 flush_group()
             if key != current_key:
                 current_key = key
-            current_items.append((a_id, uid))
+                current_rule_name = rule_name
+            current_items.append((a_id, uid, rule_name, action_type, action_data))
 
     flush_group()
     folders_bar.close()
     actions_bar.close()
 
+    # Backup all cached messages if requested (after moves complete)
+    if backup_all and not dry_run and client is not None:
+        assert backup_dir is not None
+        logger.log(
+            "INFO",
+            "backup_all_start",
+            console="\n💾 Backing up all cached messages...",
+        )
+
+        backup_results = backup_all_cached_messages(
+            client=client,
+            db=db,
+            backup_dir=backup_dir,
+            folders=list(folders) if folders else None,
+            logger=logger,
+            show_progress=show_progress,
+        )
+
+        total_backed_up = sum(r.backed_up for r in backup_results.values())
+        total_failed = sum(r.failed for r in backup_results.values())
+        stats["backed_up"] = stats.get("backed_up", 0) + total_backed_up
+        stats["backup_failed"] = stats.get("backup_failed", 0) + total_failed
+
     timer.stop()
     timer.count = stats["done"]
+
+    # Build summary message
+    summary_parts = [
+        "\n📊 Summary — Execute Actions\n",
+        f"   📦  Actions executed: {stats['done']}\n",
+        f"   ⚠️  Skipped (missing): {stats['skipped']}\n",
+        f"   🚫  Suppressed (duplicates): {stats['suppressed']}\n",
+        f"   💥  Failed: {stats['failed']}\n",
+    ]
+
+    # Add backup stats if applicable
+    if "backed_up" in stats:
+        summary_parts.append(f"   💾  Messages backed up: {stats['backed_up']}\n")
+    if stats.get("backup_failed", 0) > 0:
+        summary_parts.append(f"   ⚠️  Backup failures: {stats['backup_failed']}\n")
+
+    summary_parts.extend([
+        f"   ⏱️  Duration: {timer.fmt()} ({timer.rate():.1f} msg/s)\n",
+        f"   {'🔒 STRICT' if strict else '✅ Completed'} {'(dry-run)' if dry_run else ''}\n",
+    ])
+
     logger.log(
         "INFO",
         "phase_summary",
@@ -879,14 +1289,6 @@ def execute_actions(
             "elapsed_sec": timer.elapsed,
             "rate": timer.rate(),
         },
-        console=(
-            "\n📊 Summary — Execute Actions\n"
-            f"   📦  Actions executed: {stats['done']}\n"
-            f"   ⚠️  Skipped (missing): {stats['skipped']}\n"
-            f"   🚫  Suppressed (duplicates): {stats['suppressed']}\n"
-            f"   💥  Failed: {stats['failed']}\n"
-            f"   ⏱️  Duration: {timer.fmt()} ({timer.rate():.1f} msg/s)\n"
-            f"   {'🔒 STRICT' if strict else '✅ Completed'} {'(dry-run)' if dry_run else ''}\n"
-        ),
+        console="".join(summary_parts),
     )
     return timer, stats
