@@ -1,15 +1,19 @@
 """Cache building helpers."""
 from __future__ import annotations
 
+import concurrent.futures
 import json
-import re
 import random
+import re
+import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
 from tqdm import tqdm
 
+from core.connection_pool import IMAPConnectionPool
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 from core.imap_client import safe_search_all
 
@@ -134,6 +138,7 @@ def build_cache(
     logger: JsonLogger,
     limit: int | None,
     order: str,
+    folder_sizes: dict[str, int] | None = None,
 ) -> tuple[PhaseTimer, int, int]:
     timer = PhaseTimer("cache")
 
@@ -160,7 +165,13 @@ def build_cache(
     total_msgs = 0
 
     for folder in folders_bar:
-        folders_bar.set_postfix_str(folder)
+        # Display folder size in progress bar if available
+        postfix = folder
+        if folder_sizes and folder in folder_sizes:
+            size = folder_sizes[folder]
+            if size >= 0:
+                postfix = f"{folder} ({size} msgs)"
+        folders_bar.set_postfix_str(postfix)
         logger.log("INFO", "cache_folder_start", {"folder": folder})
         try:
             sel_typ, _ = client.select(f'"{folder}"', readonly=True)
@@ -337,3 +348,245 @@ def compact_cache(db, *, logger: JsonLogger) -> tuple[PhaseTimer, int, int]:
         ),
     )
     return timer, removed, len(stale_rows)
+
+
+def build_cache_parallel(
+    secrets_path: Path,
+    db_path: Path,
+    folders: Sequence[str],
+    *,
+    show_progress: bool,
+    logger: JsonLogger,
+    limit: int | None,
+    order: str,
+    max_workers: int,
+    folder_sizes: dict[str, int] | None = None,
+) -> tuple[PhaseTimer, int, int]:
+    """
+    Build cache with parallel folder processing.
+
+    Uses ThreadPoolExecutor with IMAP connection pool for concurrent folder processing.
+    Each thread gets its own SQLite connection (SQLite requirement).
+    Thread-safe progress tracking with locks.
+    Soft error handling: continues on folder failures.
+
+    Args:
+        secrets_path: Path to IMAP secrets file
+        db_path: Path to cache database
+        folders: List of folders to process (should be sorted by size)
+        show_progress: Whether to show progress bars
+        logger: JsonLogger for logging
+        limit: Limit messages per folder
+        order: Message order (newest/oldest/random)
+        max_workers: Number of parallel IMAP connections
+        folder_sizes: Optional dict of folder sizes for progress display
+
+    Returns:
+        Tuple of (timer, folder_count, message_count)
+    """
+    timer = PhaseTimer("cache")
+
+    # Create connection pool with specified max workers
+    pool = IMAPConnectionPool(secrets_path, max_workers, logger)
+
+    # Thread-safe counters
+    total_msgs_lock = threading.Lock()
+    total_msgs_count = 0
+
+    # Thread-safe progress bar (tqdm is thread-safe for updates)
+    folders_bar = tqdm(
+        total=len(folders),
+        desc="📂 Caching folders",
+        unit="folder",
+        dynamic_ncols=True,
+        leave=True,
+        position=0,
+        disable=not show_progress,
+    )
+
+    def process_single_folder(folder: str) -> tuple[str, int, Exception | None]:
+        """
+        Process a single folder (runs in worker thread).
+
+        Returns tuple of (folder_name, message_count, error_or_none)
+        """
+        client = None
+        try:
+            # Acquire connection from pool
+            client = pool.acquire()
+
+            # Each thread needs its own DB connection (SQLite requirement)
+            db = sqlite3.connect(db_path)
+
+            # Select folder in read-only mode
+            sel_typ, _ = client.select(f'"{folder}"', readonly=True)
+            if sel_typ != "OK":
+                logger.log("INFO", "cache_folder_skipped", {"folder": folder}, console=f"⚠️ Skipped {folder}")
+                folders_bar.update(1)
+                return folder, 0, None
+
+            # Get undeleted messages
+            uids = safe_search_all(client, undeleted_only=True)
+            if not uids:
+                logger.log(
+                    "INFO",
+                    "cache_folder_empty",
+                    {"folder": folder},
+                    console=f"📂 {folder}: empty",
+                )
+                db.execute(
+                    "INSERT OR REPLACE INTO folders VALUES(NULL,?,?,?)",
+                    (folder, "/".join(folder.split("/")[:-1]), now_iso()),
+                )
+                db.commit()
+                db.close()
+                folders_bar.update(1)
+                return folder, 0, None
+
+            # Apply limit and order
+            limited_uids, applied_order = _select_uids(uids, limit, order)
+            if limit is not None and limit > 0 and len(limited_uids) < len(uids):
+                logger.log(
+                    "INFO",
+                    "cache_folder_limited",
+                    {
+                        "folder": folder,
+                        "requested_limit": limit,
+                        "order": applied_order,
+                        "total": len(uids),
+                        "cached": len(limited_uids),
+                    },
+                    console=(
+                        f"⚖️ {folder}: limited to {len(limited_uids)}"
+                        f" of {len(uids)} messages"
+                    ),
+                )
+
+            # Fetch and cache headers for each message
+            for uid in limited_uids:
+                uid_value = (
+                    uid.decode("ascii", "ignore") if isinstance(uid, (bytes, bytearray)) else str(uid)
+                )
+                if not uid_value:
+                    continue
+
+                # Fetch BODY[HEADER], FLAGS, and INTERNALDATE
+                typ, msg_data = client.uid("FETCH", uid_value, "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)")
+                if typ != "OK":
+                    logger.log(
+                        "WARNING",
+                        "cache_fetch_failed",
+                        {"folder": folder, "uid": uid_value},
+                    )
+                    continue
+
+                # Parse the FETCH response
+                raw_hdr, flags, internaldate = _parse_fetch_response(msg_data)
+                if not raw_hdr:
+                    logger.log(
+                        "WARNING",
+                        "cache_parse_failed",
+                        {"folder": folder, "uid": uid_value},
+                    )
+                    continue
+
+                hdr_str = raw_hdr.decode(errors="ignore")
+
+                # Build cache entry with FLAGS and INTERNALDATE
+                cache_entry = {"header": hdr_str}
+                if flags:
+                    cache_entry["flags"] = flags
+                if internaldate:
+                    cache_entry["internaldate"] = internaldate
+
+                db.execute(
+                    "INSERT OR REPLACE INTO headers (folder, uid, data, updated_at) "
+                    "VALUES(?,?,?,?)",
+                    (
+                        folder,
+                        uid_value,
+                        json.dumps(cache_entry),
+                        now_iso(),
+                    ),
+                )
+
+            # Commit folder's cached messages
+            db.execute(
+                "INSERT OR REPLACE INTO folders VALUES(NULL,?,?,?)",
+                (folder, "/".join(folder.split("/")[:-1]), now_iso()),
+            )
+            db.commit()
+            db.close()
+
+            # Update progress bar (thread-safe)
+            postfix = folder
+            if folder_sizes and folder in folder_sizes:
+                size = folder_sizes[folder]
+                if size >= 0:
+                    postfix = f"{folder} ({size} msgs)"
+            folders_bar.set_postfix_str(postfix)
+            folders_bar.update(1)
+
+            logger.log(
+                "INFO",
+                "cache_folder_done",
+                {"folder": folder, "messages": len(limited_uids)},
+                console=f"✅ {folder}: {len(limited_uids)} messages cached",
+            )
+
+            return folder, len(limited_uids), None
+
+        except Exception as exc:
+            logger.log(
+                "ERROR",
+                "cache_folder_failed",
+                {"folder": folder, "error": str(exc)},
+                console=f"❌ {folder}: {exc}",
+            )
+            folders_bar.update(1)
+            return folder, 0, exc
+
+        finally:
+            if client:
+                pool.release(client)
+
+    # Execute parallel processing with ThreadPoolExecutor
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all folder processing tasks
+        futures = [executor.submit(process_single_folder, folder) for folder in folders]
+
+        # Process results as they complete
+        for future in concurrent.futures.as_completed(futures):
+            folder, msg_count, error = future.result()
+            with total_msgs_lock:
+                total_msgs_count += msg_count
+
+    # Clean up connection pool
+    pool.shutdown()
+    folders_bar.close()
+
+    # Log summary
+    timer.stop()
+    timer.count = total_msgs_count
+    logger.log(
+        "INFO",
+        "phase_summary",
+        {
+            "phase": "cache",
+            "folders": len(folders),
+            "messages": total_msgs_count,
+            "elapsed_sec": timer.elapsed,
+            "rate": timer.rate(),
+            "workers": max_workers,
+            "mode": "parallel",
+        },
+        console=(
+            "\n📊 Summary — Build Cache (Parallel)\n"
+            f"   🗂️  Folders processed: {len(folders)}\n"
+            f"   ✉️  Messages cached: {total_msgs_count}\n"
+            f"   🚀 Workers used: {max_workers}\n"
+            f"   ⏱️  Duration: {timer.fmt()} ({timer.rate():.1f} msg/s)\n"
+        ),
+    )
+
+    return timer, len(folders), total_msgs_count

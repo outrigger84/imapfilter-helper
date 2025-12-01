@@ -6,13 +6,16 @@ import sqlite3
 from pathlib import Path
 from typing import Callable, Sequence
 
-from core.cache_builder import build_cache, compact_cache
+from core.cache_builder import build_cache, build_cache_parallel, compact_cache
 from core.config import AppConfig, build_default_config
 from core.database import init_db
 from core.executor import execute_actions
-from core.imap_client import imap_login, list_all_folders
+from core.imap_client import imap_login, list_all_folders, get_folder_sizes
 from core.logging_utils import JsonLogger, PhaseTimer
 from core.rule_engine import evaluate_rules, load_rules
+from core.stream_processor import stream_messages
+from core.stream_executor import stream_execute
+from core.stream_resume import create_resume_log
 
 
 Handler = Callable[[argparse.Namespace, AppConfig, sqlite3.Connection, JsonLogger], int]
@@ -43,11 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="When limiting, choose which messages to keep (default: newest)",
     )
     p_build.add_argument(
-        "--backup",
-        action="store_true",
-        help="Also export cached messages as mbox backups",
+        "--parallel-workers",
+        type=int,
+        default=None,
+        help="Number of parallel IMAP connections (default: auto-detect based on folder count, use 1 to force sequential)",
     )
-
     p_eval = sub.add_parser("evaluate", help="Evaluate rules against cache")
     p_eval.add_argument("--dry-run", action="store_true", help="Simulate rule matches only")
     p_eval.add_argument(
@@ -101,6 +104,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Execute only the pending actions for the specified folder(s)",
     )
+    p_exec.add_argument(
+        "--backup-moved",
+        action="store_true",
+        help="Backup messages before moving them (recommended for safety)",
+    )
+    p_exec.add_argument(
+        "--backup-all",
+        action="store_true",
+        help="Backup all cached messages after execution completes (creates full archive)",
+    )
 
     p_run = sub.add_parser("run-all", help="Build cache, evaluate, and execute")
     p_run.add_argument("--dry-run", action="store_true", help="Simulate everything (no IMAP writes)")
@@ -149,9 +162,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="When limiting cache, choose which messages to keep (default: newest)",
     )
     p_run.add_argument(
-        "--backup",
+        "--backup-moved",
         action="store_true",
-        help="Export cached messages as mbox backups during the cache phase",
+        help="Backup messages before moving them during the execute phase (recommended)",
+    )
+    p_run.add_argument(
+        "--backup-all",
+        action="store_true",
+        help="Backup all cached messages after execution completes (creates full archive)",
+    )
+
+    p_stream = sub.add_parser(
+        "stream",
+        help="Stream-process: read message → evaluate rules → execute action (no cache needed)"
+    )
+    p_stream.add_argument("--dry-run", action="store_true", help="Simulate everything (no IMAP writes)")
+    stream_scope = p_stream.add_mutually_exclusive_group()
+    stream_scope.add_argument("--all-folders", action="store_true", help="Process all folders, not just INBOX")
+    stream_scope.add_argument(
+        "--folder",
+        action="append",
+        help="Process only the specified folder(s)",
+    )
+    p_stream.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed progress and log message matches",
+    )
+    p_stream.add_argument(
+        "--limit",
+        type=int,
+        help="Process at most this many messages per folder",
+    )
+    p_stream.add_argument(
+        "--backup-moved",
+        action="store_true",
+        help="Backup messages before moving them (recommended for safety)",
     )
 
     p_clear = sub.add_parser("clear-pending", help="Remove all pending actions without executing them")
@@ -220,23 +266,68 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
         cfg.cache.limit = args.limit
         if args.order:
             cfg.cache.order = args.order
-        cfg.cache.backup_enabled = bool(args.backup)
+
+        # Get folders and sizes
+        folder_sizes = None
         if args.all_folders:
             folders = list_all_folders(client)
+            # Get folder sizes for sorting and progress display
+            folder_sizes = get_folder_sizes(client, folders)
+            # Sort folders by message count (smallest to largest)
+            folders = sorted(folders, key=lambda f: folder_sizes.get(f, -1))
+            logger.log(
+                "INFO",
+                "folders_sorted_by_size",
+                {"total": len(folders), "method": "IMAP STATUS"},
+                console=f"📂 Sorted {len(folders)} folders by size (smallest to largest)"
+            )
         else:
             selected = _normalize_folder_list(args.folder)
             folders = selected if selected else [DEFAULT_INBOX]
-        build_cache(
-            client,
-            db,
-            folders,
-            show_progress=cfg.logging.show_progress,
-            logger=logger,
-            limit=cfg.cache.limit,
-            order=cfg.cache.order,
-            backup_enabled=cfg.cache.backup_enabled,
-            backup_dir=cfg.paths.backup_dir,
-        )
+
+        # Smart auto-detection: parallelize if 5+ folders
+        # User can override with --parallel-workers
+        parallel_workers = args.parallel_workers
+        if parallel_workers is None:
+            # Auto-detect: use parallelization for 5+ folders
+            parallel_workers = 5 if len(folders) >= 5 else 1
+
+        # Choose implementation based on worker count
+        if parallel_workers > 1:
+            logger.log(
+                "INFO",
+                "cache_parallel_enabled",
+                {"workers": parallel_workers, "folders": len(folders)},
+                console=f"🚀 Parallel cache building: {parallel_workers} workers for {len(folders)} folders",
+            )
+            build_cache_parallel(
+                cfg.paths.secrets_file,
+                cfg.paths.cache_db,
+                folders,
+                show_progress=cfg.logging.show_progress,
+                logger=logger,
+                limit=cfg.cache.limit,
+                order=cfg.cache.order,
+                max_workers=parallel_workers,
+                folder_sizes=folder_sizes,
+            )
+        else:
+            logger.log(
+                "INFO",
+                "cache_sequential",
+                {"folders": len(folders)},
+                console=f"📂 Sequential cache building: {len(folders)} folders",
+            )
+            build_cache(
+                client,
+                db,
+                folders,
+                show_progress=cfg.logging.show_progress,
+                logger=logger,
+                limit=cfg.cache.limit,
+                order=cfg.cache.order,
+                folder_sizes=folder_sizes,
+            )
     finally:
         client.logout()
     return 0
@@ -293,6 +384,9 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             limit=cfg.executor.limit,
             folders=exec_folders,
             verify_moves=cfg.executor.verify_moves,
+            backup_moved=getattr(args, "backup_moved", False),
+            backup_all=getattr(args, "backup_all", False),
+            backup_dir=cfg.paths.backup_dir,
         )
     finally:
         if client is not None:
@@ -310,7 +404,6 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     cfg.cache.limit = args.cache_limit
     if args.cache_order:
         cfg.cache.order = args.cache_order
-    cfg.cache.backup_enabled = bool(args.backup)
     run_timer = PhaseTimer("run-all")
     client = None if args.dry_run else imap_login(cfg.paths.secrets_file, logger)
     try:
@@ -332,8 +425,6 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             logger=logger,
             limit=cfg.cache.limit,
             order=cfg.cache.order,
-            backup_enabled=cfg.cache.backup_enabled,
-            backup_dir=cfg.paths.backup_dir,
         )
         rules = load_rules(cfg.paths.rules_dir, logger)
         _eval_timer, rules_count, matches = evaluate_rules(
@@ -358,6 +449,9 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             limit=cfg.executor.limit,
             folders=eval_folders,
             verify_moves=cfg.executor.verify_moves,
+            backup_moved=getattr(args, "backup_moved", False),
+            backup_all=getattr(args, "backup_all", False),
+            backup_dir=cfg.paths.backup_dir,
         )
         run_timer.stop()
         summary_context: dict[str, object] = {
@@ -383,6 +477,93 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                 f"   🎯  Matches: {matches}\n"
                 f"   📦  Executed: {stats.get('done', 0)}  |  ⚠️ Skipped: {stats.get('skipped', 0)}  |  🚫 Suppressed: {stats.get('suppressed', 0)}  |  💥 Failed: {stats.get('failed', 0)}\n"
                 f"   {'🔒 STRICT' if cfg.executor.strict else '✅ Completed'} {'(dry-run)' if cfg.executor.dry_run else ''}\n"
+            ),
+        )
+    finally:
+        if client is not None:
+            client.logout()
+    return 0
+
+
+def handle_stream(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
+    """Handle the ``stream`` command."""
+    cfg.executor.dry_run = args.dry_run
+    cfg.logging.verbose = args.verbose
+
+    stream_timer = PhaseTimer("stream")
+
+    # Determine which folders to process
+    selected = _normalize_folder_list(args.folder)
+    if args.all_folders:
+        client_init = imap_login(cfg.paths.secrets_file, logger)
+        try:
+            folders = list_all_folders(client_init)
+        finally:
+            client_init.logout()
+    elif selected:
+        folders = selected
+    else:
+        folders = [DEFAULT_INBOX]
+
+    client = imap_login(cfg.paths.secrets_file, logger)
+    try:
+        # Load rules
+        rules = load_rules(cfg.paths.rules_dir, logger)
+
+        # Create resume log for tracking progress
+        resume_log = create_resume_log(cfg.paths.log_file, logger=logger, session_id="default")
+
+        # Stream messages and execute
+        messages = stream_messages(
+            client,
+            folders,
+            logger=logger,
+            limit=args.limit if hasattr(args, 'limit') else None,
+            resume_log=resume_log,
+        )
+
+        _exec_timer, stats = stream_execute(
+            client,
+            rules,
+            messages,
+            show_progress=cfg.logging.show_progress,
+            dry_run=cfg.executor.dry_run,
+            verbose=cfg.logging.verbose,
+            backup_moved=getattr(args, "backup_moved", False),
+            backup_dir=cfg.paths.backup_dir,
+            resume_log=resume_log,
+            logger=logger,
+        )
+
+        stream_timer.stop()
+        summary_context: dict[str, object] = {
+            "duration_sec": stream_timer.elapsed,
+            "folders": len(folders),
+            "total_messages": stats.get("matched", 0) + stats.get("skipped", 0),
+            "rules": len(rules),
+            "matched": stats.get("matched", 0),
+            **{f"stream_{key}": value for key, value in stats.items()},
+            "dry_run": cfg.executor.dry_run,
+        }
+        status_text = (
+            "✅ Completed"
+            if stats.get("failed", 0) == 0
+            else f"⚠️ {stats.get('failed', 0)} failed"
+        )
+        dry_run_text = "(dry-run)" if cfg.executor.dry_run else ""
+        logger.log(
+            "INFO",
+            "stream_summary",
+            summary_context,
+            console=(
+                "\n🏁 Stream Summary\n"
+                f"   🕒  Total runtime: {stream_timer.fmt()}\n"
+                f"   🗂️  Folders: {len(folders)}\n"
+                f"   ✉️  Total messages: {stats.get('matched', 0) + stats.get('skipped', 0)}\n"
+                f"   🧩  Rules: {len(rules)}\n"
+                f"   🎯  Matched: {stats.get('matched', 0)}\n"
+                f"   ✅ Moved: {stats.get('done', 0)}  |  ⊘ Skipped: {stats.get('skipped', 0)}  |  ❌ Failed: {stats.get('failed', 0)}\n"
+                f"   {status_text} {dry_run_text}\n"
             ),
         )
     finally:
@@ -472,6 +653,7 @@ COMMAND_HANDLERS: dict[str, Handler] = {
     "evaluate": handle_evaluate,
     "execute": handle_execute,
     "run-all": handle_run_all,
+    "stream": handle_stream,
     "clear-pending": handle_clear_pending,
     "clear-cache": handle_clear_cache,
     "compact-cache": handle_compact_cache,
@@ -507,6 +689,7 @@ __all__ = [
     "handle_evaluate",
     "handle_execute",
     "handle_run_all",
+    "handle_stream",
     "handle_clear_pending",
     "handle_clear_cache",
     "handle_compact_cache",

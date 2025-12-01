@@ -206,6 +206,11 @@ class PathsConfig:
         self.backup_dir = self.data_dir / "backups"
         self.config_file = base / DEFAULT_CONFIG_PATH
 
+    @property
+    def cache_db(self) -> Path:
+        """Alias for db_file for convenience."""
+        return self.db_file
+
 
 @dataclass
 class LoggingConfig:
@@ -217,6 +222,7 @@ class LoggingConfig:
 class CacheConfig:
     limit: Optional[int] = None
     order: str = "newest"
+    parallel_workers: int = 5  # Default worker count for auto-detection
 
 
 @dataclass

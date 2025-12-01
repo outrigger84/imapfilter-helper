@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import imaplib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Iterable, List
@@ -55,8 +56,55 @@ def list_all_folders(client: imaplib.IMAP4) -> List[str]:
     return folders
 
 
-def safe_search_all(client: imaplib.IMAP4) -> Iterable[bytes]:
-    typ, data = client.uid("SEARCH", None, "ALL")
+def get_folder_sizes(client: imaplib.IMAP4, folders: List[str]) -> dict[str, int]:
+    """
+    Get message counts for multiple folders using IMAP STATUS command.
+
+    Fast operation (~100ms per folder, typically <1s total for 10 folders).
+    Folders that fail STATUS will have count = -1 (sorted to end).
+
+    Args:
+        client: IMAP connection
+        folders: List of folder names
+
+    Returns:
+        Dictionary mapping folder_name -> message_count
+        Failed folders return count of -1
+    """
+    sizes: dict[str, int] = {}
+    for folder in folders:
+        try:
+            typ, data = client.status(f'"{folder}"', "(MESSAGES)")
+            if typ == "OK" and data and data[0]:
+                # Parse response like: b'INBOX (MESSAGES 1234)'
+                response = data[0].decode('utf-8', 'ignore')
+                # Extract number from response
+                match = re.search(r'MESSAGES\s+(\d+)', response)
+                if match:
+                    sizes[folder] = int(match.group(1))
+                else:
+                    sizes[folder] = -1
+            else:
+                sizes[folder] = -1
+        except Exception:
+            # If STATUS fails, mark as -1 (sort to end)
+            sizes[folder] = -1
+    return sizes
+
+
+def safe_search_all(client: imaplib.IMAP4, undeleted_only: bool = False) -> Iterable[bytes]:
+    """
+    Search for all messages in the current folder.
+
+    Args:
+        client: IMAP connection
+        undeleted_only: If True, only return messages NOT marked as \\Deleted
+
+    Returns:
+        List of message UIDs
+    """
+    criteria = "UNDELETED" if undeleted_only else "ALL"
+    typ, data = client.uid("SEARCH", None, criteria)
     if typ != "OK" or not data:
         return []
 

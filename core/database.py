@@ -11,6 +11,20 @@ from core.logging_utils import JsonLogger
 def init_db(path: Path, *, logger: Optional[JsonLogger] = None) -> sqlite3.Connection:
     """Initialise the sqlite database and apply lightweight migrations."""
     db = sqlite3.connect(path)
+
+    # Enable WAL mode for better concurrency (production-standard SQLite configuration)
+    current_mode = db.execute("PRAGMA journal_mode").fetchone()[0]
+    if current_mode.lower() != "wal":
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA synchronous=NORMAL")  # Faster than FULL, still safe for modern filesystems
+        if logger:
+            logger.log(
+                "INFO",
+                "database_wal_enabled",
+                {"from": current_mode, "to": "wal"},
+                console="📊 Enabled WAL mode for concurrent database access"
+            )
+
     db.execute(
         "CREATE TABLE IF NOT EXISTS folders "
         "(id INTEGER PRIMARY KEY, name TEXT, parent TEXT, updated_at TEXT)"

@@ -1,0 +1,79 @@
+"""Thread-safe IMAP connection pool for parallel cache operations."""
+from __future__ import annotations
+
+import imaplib
+import queue
+import threading
+from pathlib import Path
+
+from core.imap_client import imap_login
+from core.logging_utils import JsonLogger
+
+
+class IMAPConnectionPool:
+    """
+    Thread-safe connection pool for IMAP operations.
+
+    Manages a pool of IMAP connections for parallel folder processing.
+    Uses lazy connection creation up to a maximum limit.
+    """
+
+    def __init__(self, secrets_path: Path, max_connections: int, logger: JsonLogger):
+        """
+        Initialize the connection pool.
+
+        Args:
+            secrets_path: Path to IMAP secrets file
+            max_connections: Maximum number of concurrent connections
+            logger: JsonLogger for logging
+        """
+        self.secrets_path = secrets_path
+        self.max_connections = max_connections
+        self.logger = logger
+        self._pool: queue.Queue[imaplib.IMAP4_SSL] = queue.Queue()
+        self._created = 0
+        self._lock = threading.Lock()
+
+    def acquire(self) -> imaplib.IMAP4_SSL:
+        """
+        Acquire a connection from the pool.
+
+        Returns a connection from the pool if available, or creates a new one
+        if below the max_connections limit. Blocks if at max capacity.
+
+        Returns:
+            An authenticated IMAP4_SSL connection
+        """
+        # Try to get a connection from the pool without blocking
+        try:
+            return self._pool.get_nowait()
+        except queue.Empty:
+            pass
+
+        # Try to create a new connection if under the limit
+        with self._lock:
+            if self._created < self.max_connections:
+                self._created += 1
+                return imap_login(self.secrets_path, self.logger)
+
+        # Wait for a connection to be returned to the pool
+        return self._pool.get()
+
+    def release(self, conn: imaplib.IMAP4_SSL) -> None:
+        """
+        Release a connection back to the pool.
+
+        Args:
+            conn: The IMAP connection to return to the pool
+        """
+        self._pool.put(conn)
+
+    def shutdown(self) -> None:
+        """Close all connections in the pool."""
+        while not self._pool.empty():
+            try:
+                conn = self._pool.get_nowait()
+                conn.logout()
+            except (queue.Empty, Exception):
+                # Ignore errors during shutdown
+                pass
