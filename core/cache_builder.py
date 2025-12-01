@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import os
 import random
 import re
 import sqlite3
+import tempfile
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -366,9 +369,10 @@ def build_cache_parallel(
     Build cache with parallel folder processing.
 
     Uses ThreadPoolExecutor with IMAP connection pool for concurrent folder processing.
-    Each thread gets its own SQLite connection (SQLite requirement).
+    Each worker writes to its own temporary database to eliminate contention.
+    Databases are merged at the end.
     Thread-safe progress tracking with locks.
-    Soft error handling: continues on folder failures.
+    Soft error handling: continues on folder failures, with automatic retry.
 
     Args:
         secrets_path: Path to IMAP secrets file
@@ -386,12 +390,25 @@ def build_cache_parallel(
     """
     timer = PhaseTimer("cache")
 
+    # Create temporary directory for worker databases
+    temp_dir = Path(tempfile.gettempdir()) / f"imapfilter_cache_{os.getpid()}"
+    temp_dir.mkdir(exist_ok=True)
+
+    # Map worker_id → temp_db_path for per-worker isolation (no contention)
+    worker_db_paths = {}
+    for worker_id in range(max_workers):
+        worker_db_paths[worker_id] = temp_dir / f"worker_{worker_id}.db"
+
     # Create connection pool with specified max workers
     pool = IMAPConnectionPool(secrets_path, max_workers, logger)
 
     # Thread-safe counters
     total_msgs_lock = threading.Lock()
     total_msgs_count = 0
+
+    # Track failed folders for retry logic
+    failed_folders: list[tuple[str, Exception]] = []
+    failed_folders_lock = threading.Lock()
 
     # Thread-safe progress bar (tqdm is thread-safe for updates)
     folders_bar = tqdm(
@@ -423,9 +440,11 @@ def build_cache_parallel(
                 )
             return worker_bars[worker_id]
 
-    def process_single_folder(folder: str, worker_id: int) -> tuple[str, int, Exception | None]:
+    def process_single_folder(folder: str, worker_id: int, temp_db_path: Path) -> tuple[str, int, Exception | None]:
         """
         Process a single folder (runs in worker thread).
+
+        Writes to worker's isolated temporary database (no contention).
 
         Returns tuple of (folder_name, message_count, error_or_none)
         """
@@ -434,15 +453,15 @@ def build_cache_parallel(
             # Acquire connection from pool
             client = pool.acquire()
 
-            # Each thread needs its own DB connection (SQLite requirement)
-            # Use timeout to handle concurrent access gracefully
+            # Each worker writes to its own temporary database (no contention)
             db = sqlite3.connect(
-                db_path,
-                timeout=30.0,           # Wait up to 30s for database locks
+                str(temp_db_path),
+                timeout=5.0,            # Short timeout OK - no contention
                 check_same_thread=False # Allow thread-safe usage
             )
-            db.execute("PRAGMA journal_mode=WAL")      # Ensure WAL on this connection
-            db.execute("PRAGMA busy_timeout=30000")    # 30s in milliseconds
+            # Initialize schema if needed
+            db.execute("CREATE TABLE IF NOT EXISTS headers (folder TEXT, uid TEXT, data TEXT, updated_at TEXT)")
+            db.execute("CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, folder TEXT, parent TEXT, updated_at TEXT)")
 
             # Select folder in read-only mode
             sel_typ, _ = client.select(f'"{folder}"', readonly=True)
@@ -598,7 +617,8 @@ def build_cache_parallel(
         futures = {}
         for idx, folder in enumerate(folders):
             worker_id = idx % max_workers  # Round-robin assignment
-            future = executor.submit(process_single_folder, folder, worker_id)
+            temp_db_path = worker_db_paths[worker_id]
+            future = executor.submit(process_single_folder, folder, worker_id, temp_db_path)
             futures[future] = folder
 
         # Process results as they complete
@@ -606,12 +626,208 @@ def build_cache_parallel(
             folder, msg_count, error = future.result()
             with total_msgs_lock:
                 total_msgs_count += msg_count
+            # Track failures for retry logic
+            if error is not None:
+                with failed_folders_lock:
+                    failed_folders.append((folder, error))
 
     # Clean up connection pool and worker progress bars
     pool.shutdown()
     for bar in worker_bars.values():
         bar.close()
     folders_bar.close()
+
+    # Merge temp databases into main database
+    logger.log("INFO", "merge_start", {}, console="🔄 Merging worker databases...")
+
+    merge_bar = tqdm(
+        total=max_workers,
+        desc="🔄 Merging databases",
+        position=0,
+        unit="db",
+        disable=not show_progress,
+    )
+
+    # Open main database for merge
+    main_db = sqlite3.connect(str(db_path), timeout=5.0)
+    main_db.execute("PRAGMA journal_mode=WAL")
+
+    for worker_id, temp_db_path in worker_db_paths.items():
+        if not temp_db_path.exists():
+            merge_bar.update(1)
+            continue
+
+        try:
+            # Attach temp database and copy data
+            main_db.execute(f"ATTACH DATABASE '{temp_db_path}' AS worker_{worker_id}")
+
+            # Copy headers
+            main_db.execute(f"""
+                INSERT OR REPLACE INTO headers (folder, uid, data, updated_at)
+                SELECT folder, uid, data, updated_at FROM worker_{worker_id}.headers
+            """)
+
+            # Copy folders
+            main_db.execute(f"""
+                INSERT OR REPLACE INTO folders (folder, parent, updated_at)
+                SELECT folder, parent, updated_at FROM worker_{worker_id}.folders
+            """)
+
+            main_db.execute(f"DETACH DATABASE worker_{worker_id}")
+        except Exception as merge_error:
+            logger.log(
+                "ERROR",
+                "merge_failed",
+                {"worker_id": worker_id, "error": str(merge_error)},
+                console=f"⚠️  Merge error for worker {worker_id}: {merge_error}",
+            )
+
+        merge_bar.update(1)
+
+    main_db.commit()
+    main_db.close()
+    merge_bar.close()
+
+    # Cleanup temp files and directory
+    for temp_db_path in worker_db_paths.values():
+        if temp_db_path.exists():
+            try:
+                temp_db_path.unlink()
+            except Exception as cleanup_error:
+                logger.log(
+                    "WARNING",
+                    "cleanup_failed",
+                    {"path": str(temp_db_path), "error": str(cleanup_error)},
+                )
+
+    try:
+        temp_dir.rmdir()
+    except Exception:
+        pass  # Directory may not be empty if other processes use temp dir
+
+    logger.log("INFO", "merge_complete", {}, console="✅ Merge complete")
+
+    # Retry logic for failed folders
+    MAX_RETRIES = 2
+    retry_delay = 5.0  # Start with 5 second delay
+
+    for retry_attempt in range(MAX_RETRIES):
+        if not failed_folders:
+            break
+
+        logger.log(
+            "INFO",
+            "retry_attempt",
+            {"attempt": retry_attempt + 1, "folders": len(failed_folders)},
+            console=f"🔄 Retry attempt {retry_attempt + 1}/{MAX_RETRIES} for {len(failed_folders)} failed folders",
+        )
+
+        # Wait before retrying (exponential backoff)
+        if retry_attempt > 0:
+            time.sleep(retry_delay)
+            retry_delay *= 2  # Double delay for next attempt
+
+        # Copy and clear failed list
+        to_retry = failed_folders.copy()
+        failed_folders.clear()
+
+        # Create new progress bar for retries
+        retry_bar = tqdm(
+            total=len(to_retry),
+            desc=f"🔄 Retry attempt {retry_attempt + 1}",
+            position=0,
+            unit="folder",
+            disable=not show_progress,
+        )
+
+        # Reuse connection pool (may be closed, so create new one)
+        retry_pool = IMAPConnectionPool(secrets_path, max_workers, logger)
+
+        # Submit retry tasks
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as retry_executor:
+            retry_futures = {}
+            for idx, (folder, _) in enumerate(to_retry):
+                worker_id = idx % max_workers
+                temp_db_path = worker_db_paths[worker_id]
+                retry_future = retry_executor.submit(process_single_folder, folder, worker_id, temp_db_path)
+                retry_futures[retry_future] = folder
+
+            # Process retry results
+            for future in concurrent.futures.as_completed(retry_futures):
+                folder, msg_count, error = future.result()
+                with total_msgs_lock:
+                    total_msgs_count += msg_count
+                if error is not None:
+                    with failed_folders_lock:
+                        failed_folders.append((folder, error))
+                retry_bar.update(1)
+
+        # Merge retry results
+        logger.log("INFO", "retry_merge_start", {}, console="🔄 Merging retry results...")
+
+        retry_merge_bar = tqdm(
+            total=max_workers,
+            desc="🔄 Merging retry databases",
+            position=0,
+            unit="db",
+            disable=not show_progress,
+        )
+
+        main_db = sqlite3.connect(str(db_path), timeout=5.0)
+        for worker_id, temp_db_path in worker_db_paths.items():
+            if not temp_db_path.exists():
+                retry_merge_bar.update(1)
+                continue
+
+            try:
+                main_db.execute(f"ATTACH DATABASE '{temp_db_path}' AS worker_{worker_id}")
+
+                main_db.execute(f"""
+                    INSERT OR REPLACE INTO headers (folder, uid, data, updated_at)
+                    SELECT folder, uid, data, updated_at FROM worker_{worker_id}.headers
+                """)
+
+                main_db.execute(f"""
+                    INSERT OR REPLACE INTO folders (folder, parent, updated_at)
+                    SELECT folder, parent, updated_at FROM worker_{worker_id}.folders
+                """)
+
+                main_db.execute(f"DETACH DATABASE worker_{worker_id}")
+            except Exception:
+                pass
+
+            retry_merge_bar.update(1)
+
+        main_db.commit()
+        main_db.close()
+        retry_merge_bar.close()
+        retry_bar.close()
+
+        # Cleanup temp DBs for this retry
+        for temp_db_path in worker_db_paths.values():
+            if temp_db_path.exists():
+                try:
+                    temp_db_path.unlink()
+                except Exception:
+                    pass
+
+        retry_pool.shutdown()
+
+    # Report permanently failed folders
+    if failed_folders:
+        logger.log(
+            "WARNING",
+            "permanent_failures",
+            {"count": len(failed_folders), "folders": [f for f, _ in failed_folders]},
+            console=f"\n⚠️  {len(failed_folders)} folders failed after {MAX_RETRIES} retry attempts:",
+        )
+        for folder, error in failed_folders:
+            logger.log(
+                "WARNING",
+                "failed_folder",
+                {"folder": folder, "error": str(error)},
+                console=f"   ❌ {folder}: {error}",
+            )
 
     # Log summary
     timer.stop()
