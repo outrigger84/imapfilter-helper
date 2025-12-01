@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Iterable, List
 
+from tqdm import tqdm
 from core.logging_utils import JsonLogger
 
 
@@ -56,7 +57,7 @@ def list_all_folders(client: imaplib.IMAP4) -> List[str]:
     return folders
 
 
-def get_folder_sizes(client: imaplib.IMAP4, folders: List[str]) -> dict[str, int]:
+def get_folder_sizes(client: imaplib.IMAP4, folders: List[str], show_progress: bool = True) -> dict[str, int]:
     """
     Get message counts for multiple folders using IMAP STATUS command.
 
@@ -66,13 +67,15 @@ def get_folder_sizes(client: imaplib.IMAP4, folders: List[str]) -> dict[str, int
     Args:
         client: IMAP connection
         folders: List of folder names
+        show_progress: If True, display progress bar
 
     Returns:
         Dictionary mapping folder_name -> message_count
         Failed folders return count of -1
     """
     sizes: dict[str, int] = {}
-    for folder in folders:
+    iterator = tqdm(folders, desc="📊 Counting folder sizes", unit="folder") if show_progress else folders
+    for folder in iterator:
         try:
             typ, data = client.status(f'"{folder}"', "(MESSAGES)")
             if typ == "OK" and data and data[0]:

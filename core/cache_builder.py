@@ -404,7 +404,26 @@ def build_cache_parallel(
         disable=not show_progress,
     )
 
-    def process_single_folder(folder: str) -> tuple[str, int, Exception | None]:
+    # Per-worker progress bars for message-level visibility
+    worker_bars = {}
+    bars_lock = threading.Lock()
+
+    def get_worker_bar(worker_id: int) -> tqdm:
+        """Get or create a progress bar for a specific worker thread."""
+        with bars_lock:
+            if worker_id not in worker_bars:
+                worker_bars[worker_id] = tqdm(
+                    total=0,
+                    desc=f"   Worker {worker_id}: Idle",
+                    position=worker_id + 1,
+                    leave=False,
+                    unit="msg",
+                    dynamic_ncols=True,
+                    disable=not show_progress,
+                )
+            return worker_bars[worker_id]
+
+    def process_single_folder(folder: str, worker_id: int) -> tuple[str, int, Exception | None]:
         """
         Process a single folder (runs in worker thread).
 
@@ -416,7 +435,14 @@ def build_cache_parallel(
             client = pool.acquire()
 
             # Each thread needs its own DB connection (SQLite requirement)
-            db = sqlite3.connect(db_path)
+            # Use timeout to handle concurrent access gracefully
+            db = sqlite3.connect(
+                db_path,
+                timeout=30.0,           # Wait up to 30s for database locks
+                check_same_thread=False # Allow thread-safe usage
+            )
+            db.execute("PRAGMA journal_mode=WAL")      # Ensure WAL on this connection
+            db.execute("PRAGMA busy_timeout=30000")    # 30s in milliseconds
 
             # Select folder in read-only mode
             sel_typ, _ = client.select(f'"{folder}"', readonly=True)
@@ -462,8 +488,15 @@ def build_cache_parallel(
                     ),
                 )
 
+            # Set up worker progress bar for this folder
+            worker_bar = get_worker_bar(worker_id)
+            worker_bar.reset(total=len(limited_uids))
+            worker_bar.set_description(f"   Worker {worker_id}: {folder[:40]}")
+
             # Fetch and cache headers for each message
-            for uid in limited_uids:
+            # Batch commits every 50 messages to reduce transaction scope and lock contention
+            batch_size = 50
+            for idx, uid in enumerate(limited_uids):
                 uid_value = (
                     uid.decode("ascii", "ignore") if isinstance(uid, (bytes, bytearray)) else str(uid)
                 )
@@ -509,6 +542,11 @@ def build_cache_parallel(
                         now_iso(),
                     ),
                 )
+                worker_bar.update(1)
+
+                # Commit in batches to reduce transaction scope and lock contention
+                if (idx + 1) % batch_size == 0:
+                    db.commit()
 
             # Commit folder's cached messages
             db.execute(
@@ -517,6 +555,10 @@ def build_cache_parallel(
             )
             db.commit()
             db.close()
+
+            # Mark worker as idle
+            worker_bar.reset(0)
+            worker_bar.set_description(f"   Worker {worker_id}: Idle")
 
             # Update progress bar (thread-safe)
             postfix = folder
@@ -552,8 +594,12 @@ def build_cache_parallel(
 
     # Execute parallel processing with ThreadPoolExecutor
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all folder processing tasks
-        futures = [executor.submit(process_single_folder, folder) for folder in folders]
+        # Submit all folder processing tasks with round-robin worker assignment
+        futures = {}
+        for idx, folder in enumerate(folders):
+            worker_id = idx % max_workers  # Round-robin assignment
+            future = executor.submit(process_single_folder, folder, worker_id)
+            futures[future] = folder
 
         # Process results as they complete
         for future in concurrent.futures.as_completed(futures):
@@ -561,8 +607,10 @@ def build_cache_parallel(
             with total_msgs_lock:
                 total_msgs_count += msg_count
 
-    # Clean up connection pool
+    # Clean up connection pool and worker progress bars
     pool.shutdown()
+    for bar in worker_bars.values():
+        bar.close()
     folders_bar.close()
 
     # Log summary
