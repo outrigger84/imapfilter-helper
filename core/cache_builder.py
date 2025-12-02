@@ -391,14 +391,10 @@ def build_cache_parallel(
     """
     timer = PhaseTimer("cache")
 
-    # Create temporary directory for worker databases
+    # Create temporary directory for thread-based databases
+    # Each thread gets its own database file to avoid SQLite locking issues
     temp_dir = Path(tempfile.gettempdir()) / f"imapfilter_cache_{os.getpid()}"
     temp_dir.mkdir(exist_ok=True)
-
-    # Map worker_id → temp_db_path for per-worker isolation (no contention)
-    worker_db_paths = {}
-    for worker_id in range(max_workers):
-        worker_db_paths[worker_id] = temp_dir / f"worker_{worker_id}.db"
 
     # Create connection pool with specified max workers
     pool = IMAPConnectionPool(secrets_path, max_workers, logger)
@@ -441,20 +437,27 @@ def build_cache_parallel(
                 )
             return worker_bars[worker_id]
 
-    def process_single_folder(folder: str, worker_id: int, temp_db_path: Path) -> tuple[str, int, Exception | None]:
+    def process_single_folder(folder: str, worker_id: int) -> tuple[str, int, Exception | None]:
         """
         Process a single folder (runs in worker thread).
 
-        Writes to worker's isolated temporary database (no contention).
+        Each actual thread gets its own temporary database file (true isolation, no contention).
+        worker_id is only used for progress bar display.
 
         Returns tuple of (folder_name, message_count, error_or_none)
         """
         client = None
+        db = None
         try:
             # Acquire connection from pool
             client = pool.acquire()
 
-            # Each worker writes to its own temporary database (no contention)
+            # Generate temp database path based on actual thread ID (not worker_id)
+            # This ensures true per-thread isolation regardless of task scheduling
+            thread_id = threading.current_thread().ident
+            temp_db_path = temp_dir / f"thread_{thread_id}.db"
+
+            # Each thread writes to its own temporary database (true isolation)
             db = sqlite3.connect(
                 str(temp_db_path),
                 timeout=5.0,            # Short timeout OK - no contention
@@ -492,7 +495,7 @@ def build_cache_parallel(
                     (folder, "/".join(folder.split("/")[:-1]), now_iso()),
                 )
                 db.commit()
-                db.close()
+                # db.close() will be called in finally block
                 folders_bar.update(1)
                 return folder, 0, None
 
@@ -581,7 +584,7 @@ def build_cache_parallel(
                 (folder, "/".join(folder.split("/")[:-1]), now_iso()),
             )
             db.commit()
-            db.close()
+            # db.close() will be called in finally block
 
             # Mark worker as idle
             worker_bar.reset(0)
@@ -616,17 +619,23 @@ def build_cache_parallel(
             return folder, 0, exc
 
         finally:
+            # Always close database connection to prevent locks during merge
+            if db:
+                try:
+                    db.close()
+                except Exception:
+                    pass
             if client:
                 pool.release(client)
 
     # Execute parallel processing with ThreadPoolExecutor
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all folder processing tasks with round-robin worker assignment
+        # Submit all folder processing tasks with round-robin worker_id assignment (for display only)
+        # Each thread will generate its own temp database path based on thread ID
         futures = {}
         for idx, folder in enumerate(folders):
-            worker_id = idx % max_workers  # Round-robin assignment
-            temp_db_path = worker_db_paths[worker_id]
-            future = executor.submit(process_single_folder, folder, worker_id, temp_db_path)
+            worker_id = idx % max_workers  # Round-robin assignment for progress bar display only
+            future = executor.submit(process_single_folder, folder, worker_id)
             futures[future] = folder
 
         # Process results as they complete
@@ -645,6 +654,13 @@ def build_cache_parallel(
         bar.close()
     folders_bar.close()
 
+    # Force garbage collection to clean up closed database connections
+    import gc
+    gc.collect()
+
+    # Delay to ensure all OS file locks are released by worker threads
+    time.sleep(1.0)
+
     # Ensure main database is initialized with correct schema
     init_conn = init_db(db_path, logger=logger)
     init_conn.close()  # Close the initialization connection to release locks
@@ -652,8 +668,11 @@ def build_cache_parallel(
     # Merge temp databases into main database
     logger.log("INFO", "merge_start", {}, console="🔄 Merging worker databases...")
 
+    # Discover all thread-based temp databases
+    thread_temp_dbs = sorted(temp_dir.glob("thread_*.db"))
+
     merge_bar = tqdm(
-        total=max_workers,
+        total=len(thread_temp_dbs),
         desc="🔄 Merging databases",
         position=0,
         unit="db",
@@ -664,17 +683,13 @@ def build_cache_parallel(
     main_db = sqlite3.connect(str(db_path), timeout=5.0)
     main_db.execute("PRAGMA journal_mode=WAL")
 
-    for worker_id, temp_db_path in worker_db_paths.items():
-        if not temp_db_path.exists():
-            merge_bar.update(1)
-            continue
-
+    for temp_idx, temp_db_path in enumerate(thread_temp_dbs):
         try:
             # Attach temp database with retry for lock issues
             max_attach_retries = 3
             for attach_attempt in range(max_attach_retries):
                 try:
-                    main_db.execute(f"ATTACH DATABASE '{temp_db_path}' AS worker_{worker_id}")
+                    main_db.execute(f"ATTACH DATABASE '{temp_db_path}' AS temp_{temp_idx}")
                     break
                 except sqlite3.OperationalError as lock_error:
                     if "database is locked" in str(lock_error) and attach_attempt < max_attach_retries - 1:
@@ -682,25 +697,42 @@ def build_cache_parallel(
                         continue
                     raise
 
-            # Copy headers
-            main_db.execute(f"""
-                INSERT OR REPLACE INTO headers (folder, uid, data, updated_at)
-                SELECT folder, uid, data, updated_at FROM worker_{worker_id}.headers
-            """)
+            # Copy headers with retry for lock issues
+            max_insert_retries = 3
+            for insert_attempt in range(max_insert_retries):
+                try:
+                    main_db.execute(f"""
+                        INSERT OR REPLACE INTO headers (folder, uid, data, updated_at)
+                        SELECT folder, uid, data, updated_at FROM temp_{temp_idx}.headers
+                    """)
+                    break
+                except sqlite3.OperationalError as lock_error:
+                    if "database is locked" in str(lock_error) and insert_attempt < max_insert_retries - 1:
+                        time.sleep(0.5)
+                        continue
+                    raise
 
-            # Copy folders
-            main_db.execute(f"""
-                INSERT OR REPLACE INTO folders (name, parent, updated_at)
-                SELECT name, parent, updated_at FROM worker_{worker_id}.folders
-            """)
+            # Copy folders with retry for lock issues
+            for insert_attempt in range(max_insert_retries):
+                try:
+                    main_db.execute(f"""
+                        INSERT OR REPLACE INTO folders (name, parent, updated_at)
+                        SELECT name, parent, updated_at FROM temp_{temp_idx}.folders
+                    """)
+                    break
+                except sqlite3.OperationalError as lock_error:
+                    if "database is locked" in str(lock_error) and insert_attempt < max_insert_retries - 1:
+                        time.sleep(0.5)
+                        continue
+                    raise
 
-            main_db.execute(f"DETACH DATABASE worker_{worker_id}")
+            main_db.execute(f"DETACH DATABASE temp_{temp_idx}")
         except Exception as merge_error:
             logger.log(
                 "ERROR",
                 "merge_failed",
-                {"worker_id": worker_id, "error": str(merge_error)},
-                console=f"⚠️  Merge error for worker {worker_id}: {merge_error}",
+                {"thread_db": str(temp_db_path), "error": str(merge_error)},
+                console=f"⚠️  Merge error for {temp_db_path.name}: {merge_error}",
             )
 
         merge_bar.update(1)
@@ -710,7 +742,7 @@ def build_cache_parallel(
     merge_bar.close()
 
     # Cleanup temp files and directory
-    for temp_db_path in worker_db_paths.values():
+    for temp_db_path in thread_temp_dbs:
         if temp_db_path.exists():
             try:
                 temp_db_path.unlink()
@@ -768,9 +800,8 @@ def build_cache_parallel(
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as retry_executor:
             retry_futures = {}
             for idx, (folder, _) in enumerate(to_retry):
-                worker_id = idx % max_workers
-                temp_db_path = worker_db_paths[worker_id]
-                retry_future = retry_executor.submit(process_single_folder, folder, worker_id, temp_db_path)
+                worker_id = idx % max_workers  # For progress bar display only
+                retry_future = retry_executor.submit(process_single_folder, folder, worker_id)
                 retry_futures[retry_future] = folder
 
             # Process retry results
@@ -786,8 +817,11 @@ def build_cache_parallel(
         # Merge retry results
         logger.log("INFO", "retry_merge_start", {}, console="🔄 Merging retry results...")
 
+        # Discover all thread-based temp databases from retry phase
+        retry_thread_temp_dbs = sorted(temp_dir.glob("thread_*.db"))
+
         retry_merge_bar = tqdm(
-            total=max_workers,
+            total=len(retry_thread_temp_dbs),
             desc="🔄 Merging retry databases",
             position=0,
             unit="db",
@@ -795,7 +829,7 @@ def build_cache_parallel(
         )
 
         main_db = sqlite3.connect(str(db_path), timeout=5.0)
-        for worker_id, temp_db_path in worker_db_paths.items():
+        for temp_idx, temp_db_path in enumerate(retry_thread_temp_dbs):
             if not temp_db_path.exists():
                 retry_merge_bar.update(1)
                 continue
@@ -805,7 +839,7 @@ def build_cache_parallel(
                 max_attach_retries = 3
                 for attach_attempt in range(max_attach_retries):
                     try:
-                        main_db.execute(f"ATTACH DATABASE '{temp_db_path}' AS worker_{worker_id}")
+                        main_db.execute(f"ATTACH DATABASE '{temp_db_path}' AS temp_{temp_idx}")
                         break
                     except sqlite3.OperationalError as lock_error:
                         if "database is locked" in str(lock_error) and attach_attempt < max_attach_retries - 1:
@@ -813,19 +847,43 @@ def build_cache_parallel(
                             continue
                         raise
 
-                main_db.execute(f"""
-                    INSERT OR REPLACE INTO headers (folder, uid, data, updated_at)
-                    SELECT folder, uid, data, updated_at FROM worker_{worker_id}.headers
-                """)
+                # Copy headers with retry for lock issues
+                max_insert_retries = 3
+                for insert_attempt in range(max_insert_retries):
+                    try:
+                        main_db.execute(f"""
+                            INSERT OR REPLACE INTO headers (folder, uid, data, updated_at)
+                            SELECT folder, uid, data, updated_at FROM temp_{temp_idx}.headers
+                        """)
+                        break
+                    except sqlite3.OperationalError as lock_error:
+                        if "database is locked" in str(lock_error) and insert_attempt < max_insert_retries - 1:
+                            time.sleep(0.5)
+                            continue
+                        raise
 
-                main_db.execute(f"""
-                    INSERT OR REPLACE INTO folders (name, parent, updated_at)
-                    SELECT name, parent, updated_at FROM worker_{worker_id}.folders
-                """)
+                # Copy folders with retry for lock issues
+                for insert_attempt in range(max_insert_retries):
+                    try:
+                        main_db.execute(f"""
+                            INSERT OR REPLACE INTO folders (name, parent, updated_at)
+                            SELECT name, parent, updated_at FROM temp_{temp_idx}.folders
+                        """)
+                        break
+                    except sqlite3.OperationalError as lock_error:
+                        if "database is locked" in str(lock_error) and insert_attempt < max_insert_retries - 1:
+                            time.sleep(0.5)
+                            continue
+                        raise
 
-                main_db.execute(f"DETACH DATABASE worker_{worker_id}")
-            except Exception:
-                pass
+                main_db.execute(f"DETACH DATABASE temp_{temp_idx}")
+            except Exception as merge_error:
+                logger.log(
+                    "WARNING",
+                    "retry_merge_failed",
+                    {"thread_db": str(temp_db_path), "error": str(merge_error)},
+                    console=f"⚠️  Retry merge error for {temp_db_path.name}: {merge_error}",
+                )
 
             retry_merge_bar.update(1)
 
@@ -834,8 +892,8 @@ def build_cache_parallel(
         retry_merge_bar.close()
         retry_bar.close()
 
-        # Cleanup temp DBs for this retry
-        for temp_db_path in worker_db_paths.values():
+        # Cleanup temp DBs from retry phase
+        for temp_db_path in retry_thread_temp_dbs:
             if temp_db_path.exists():
                 try:
                     temp_db_path.unlink()
