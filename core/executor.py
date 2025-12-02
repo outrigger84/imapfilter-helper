@@ -1,17 +1,27 @@
 """Execute queued actions."""
 from __future__ import annotations
 
+import concurrent.futures
+import datetime
+import gc
 import json
+import os
 import re
+import sqlite3
+import tempfile
+import threading
+import time
 import imaplib
 from email.parser import HeaderParser
 from email.policy import default
 from pathlib import Path
-from typing import Dict, Iterable, Sequence
+from typing import Any, Dict, Iterable, Sequence
 
 from tqdm import tqdm
 
 from core.backup import backup_messages, backup_all_cached_messages, BackupResult
+from core.connection_pool import IMAPConnectionPool
+from core.database import init_db
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 
 
@@ -50,6 +60,904 @@ def _should_try_create_folder(response: Iterable[bytes | str] | None) -> bool:
     )
     return any(keyword in text for keyword in keywords)
 
+
+# ============================================================================
+# Phase 2, Part C: Verification and Backup Helpers
+# ============================================================================
+
+
+def _extract_message_id(
+    client: imaplib.IMAP4,
+    folder: str,
+    uid: str,
+    logger: JsonLogger | None = None,
+) -> str | None:
+    """
+    Extract Message-ID header from a message.
+
+    Args:
+        client: IMAP client connection
+        folder: Source folder containing the message
+        uid: Message UID
+        logger: Optional logger for detailed logging
+
+    Returns:
+        Message-ID string (without angle brackets) or None if not found
+    """
+    try:
+        # Fetch message headers
+        typ, msg_parts = client.uid("FETCH", uid, "(BODY[HEADER.FIELDS (MESSAGE-ID)])")
+        if typ != "OK" or not msg_parts or not msg_parts[0]:
+            if logger:
+                logger.log(
+                    "DEBUG",
+                    "extract_message_id_fetch_failed",
+                    {"folder": folder, "uid": uid, "status": typ},
+                )
+            return None
+
+        # Parse response
+        if isinstance(msg_parts[0], tuple) and len(msg_parts[0]) >= 2:
+            header_bytes = msg_parts[0][1]
+        else:
+            if logger:
+                logger.log(
+                    "DEBUG",
+                    "extract_message_id_invalid_response",
+                    {"folder": folder, "uid": uid},
+                )
+            return None
+
+        if not isinstance(header_bytes, bytes):
+            return None
+
+        # Decode header text
+        header_text = header_bytes.decode("utf-8", "ignore")
+
+        # Extract Message-ID using regex
+        # Pattern matches: Message-ID: <value> or Message-Id: value
+        match = re.search(
+            r"Message-I[Dd]:\s*<?([^\s<>]+)>?",
+            header_text,
+            re.IGNORECASE | re.MULTILINE,
+        )
+        if match:
+            message_id = match.group(1).strip()
+            return message_id
+
+        if logger:
+            logger.log(
+                "DEBUG",
+                "extract_message_id_not_found",
+                {"folder": folder, "uid": uid},
+            )
+        return None
+
+    except Exception as exc:
+        if logger:
+            logger.log(
+                "WARN",
+                "extract_message_id_exception",
+                {"folder": folder, "uid": uid, "error": str(exc)},
+            )
+        return None
+
+
+def _verify_move(
+    client: imaplib.IMAP4,
+    source_folder: str,
+    target_folder: str,
+    message_id: str,
+    uid: str,
+    logger: JsonLogger | None = None,
+) -> tuple[bool, str | None]:
+    """
+    Verify that a message was successfully moved from source to target folder.
+
+    This function searches for the message by Message-ID in both source and
+    target folders to confirm the move was successful.
+
+    Args:
+        client: IMAP client connection
+        source_folder: Source folder (should NOT contain message after move)
+        target_folder: Target folder (should contain message after move)
+        message_id: Message-ID header value for verification
+        uid: Original UID in source folder (for logging)
+        logger: Optional logger for detailed logging
+
+    Returns:
+        Tuple of (verified, error_message) where:
+        - verified is True if move was successful
+        - error_message is None on success, error string on failure
+    """
+    if not message_id:
+        # Can't verify without Message-ID - skip verification
+        if logger:
+            logger.log(
+                "DEBUG",
+                "verify_move_no_message_id",
+                {"source": source_folder, "target": target_folder, "uid": uid},
+            )
+        return (True, None)
+
+    try:
+        # Escape Message-ID for IMAP SEARCH
+        # Remove angle brackets if present and escape quotes
+        message_id_clean = message_id.strip("<>")
+        escaped_id = message_id_clean.replace('"', '\\"')
+
+        # Search in target folder (should be present)
+        try:
+            sel_typ, _ = client.select(f'"{target_folder}"', readonly=True)
+            if sel_typ != "OK":
+                error_msg = f"Cannot select target folder {target_folder}"
+                if logger:
+                    logger.log(
+                        "WARN",
+                        "verify_move_target_select_failed",
+                        {"target": target_folder, "uid": uid},
+                    )
+                return (False, error_msg)
+
+            # SEARCH for Message-ID in target
+            search_typ, search_resp = client.uid("SEARCH", None, "HEADER", "Message-ID", escaped_id)
+
+            if search_typ != "OK":
+                error_msg = f"SEARCH failed in target folder: {search_typ}"
+                if logger:
+                    logger.log(
+                        "WARN",
+                        "verify_move_target_search_failed",
+                        {"target": target_folder, "uid": uid, "status": search_typ},
+                    )
+                return (False, error_msg)
+
+            # Check if message found in target
+            target_found = False
+            if search_resp and search_resp[0]:
+                # Parse response
+                if isinstance(search_resp[0], bytes):
+                    result_text = search_resp[0].decode("ascii", "ignore").strip()
+                else:
+                    result_text = str(search_resp[0]).strip()
+                target_found = bool(result_text)
+
+            if not target_found:
+                error_msg = f"Message-ID {message_id_clean} not found in target folder"
+                if logger:
+                    logger.log(
+                        "WARN",
+                        "verify_move_not_in_target",
+                        {"source": source_folder, "target": target_folder, "uid": uid, "message_id": message_id_clean},
+                        console=f"      ⚠️  Verification failed: {uid} not found in {target_folder}",
+                    )
+                return (False, error_msg)
+
+        finally:
+            # Always try to close the target folder selection
+            try:
+                client.close()
+            except Exception:
+                pass
+
+        # Optionally check source folder (should NOT be present)
+        # This is a secondary check - if it fails, we still consider the move successful
+        # since the message is in the target folder
+        try:
+            sel_typ, _ = client.select(f'"{source_folder}"', readonly=True)
+            if sel_typ == "OK":
+                search_typ, search_resp = client.uid("SEARCH", None, "HEADER", "Message-ID", escaped_id)
+                if search_typ == "OK" and search_resp and search_resp[0]:
+                    if isinstance(search_resp[0], bytes):
+                        result_text = search_resp[0].decode("ascii", "ignore").strip()
+                    else:
+                        result_text = str(search_resp[0]).strip()
+
+                    if result_text:
+                        # Message still in source - this is suspicious but not necessarily wrong
+                        # (could be a copy instead of move, or another message with same Message-ID)
+                        if logger:
+                            logger.log(
+                                "DEBUG",
+                                "verify_move_still_in_source",
+                                {"source": source_folder, "target": target_folder, "uid": uid, "message_id": message_id_clean},
+                            )
+        except Exception:
+            # Ignore errors checking source folder
+            pass
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+        # Verification passed - message found in target
+        if logger:
+            logger.log(
+                "DEBUG",
+                "verify_move_success",
+                {"source": source_folder, "target": target_folder, "uid": uid, "message_id": message_id_clean},
+            )
+        return (True, None)
+
+    except Exception as exc:
+        error_msg = f"Verification exception: {str(exc)}"
+        if logger:
+            logger.log(
+                "WARN",
+                "verify_move_exception",
+                {"source": source_folder, "target": target_folder, "uid": uid, "error": str(exc)},
+            )
+        return (False, error_msg)
+
+
+def _backup_message(
+    client: imaplib.IMAP4,
+    folder: str,
+    uid: str,
+    backup_dir: Path,
+    logger: JsonLogger | None = None,
+) -> tuple[bool, str | None]:
+    """
+    Backup a single message to disk as .eml file.
+
+    Creates a backup directory structure: backup_dir/YYYY-MM-DD/folder_name/uid.eml
+
+    Args:
+        client: IMAP client connection
+        folder: Source folder containing the message
+        uid: Message UID
+        backup_dir: Root backup directory
+        logger: Optional logger for detailed logging
+
+    Returns:
+        Tuple of (success, error_message) where:
+        - success is True if backup succeeded
+        - error_message is None on success, error string on failure
+    """
+    try:
+        # Determine backup path with date-based structure
+        today = datetime.date.today().isoformat()  # YYYY-MM-DD
+        folder_safe = folder.replace("/", "_").replace("\\", "_")  # Handle subfolders
+        backup_path = backup_dir / today / folder_safe / f"{uid}.eml"
+
+        # Create parent directories
+        try:
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as mkdir_exc:
+            error_msg = f"Failed to create backup directory: {str(mkdir_exc)}"
+            if logger:
+                logger.log(
+                    "ERROR",
+                    "backup_mkdir_failed",
+                    {"folder": folder, "uid": uid, "path": str(backup_path.parent), "error": str(mkdir_exc)},
+                )
+            return (False, error_msg)
+
+        # Fetch full message (RFC822)
+        try:
+            typ, msg_parts = client.uid("FETCH", uid, "(RFC822)")
+            if typ != "OK" or not msg_parts or not msg_parts[0]:
+                error_msg = f"Failed to fetch message: {typ}"
+                if logger:
+                    logger.log(
+                        "ERROR",
+                        "backup_fetch_failed",
+                        {"folder": folder, "uid": uid, "status": typ},
+                    )
+                return (False, error_msg)
+
+            # Extract message bytes from response
+            message_bytes = None
+            if isinstance(msg_parts[0], tuple) and len(msg_parts[0]) >= 2:
+                message_bytes = msg_parts[0][1]
+
+            if not message_bytes or not isinstance(message_bytes, bytes):
+                error_msg = "Invalid message data from FETCH"
+                if logger:
+                    logger.log(
+                        "ERROR",
+                        "backup_invalid_data",
+                        {"folder": folder, "uid": uid},
+                    )
+                return (False, error_msg)
+
+        except imaplib.IMAP4.error as fetch_exc:
+            error_msg = f"IMAP error fetching message: {str(fetch_exc)}"
+            if logger:
+                logger.log(
+                    "ERROR",
+                    "backup_fetch_exception",
+                    {"folder": folder, "uid": uid, "error": str(fetch_exc)},
+                )
+            return (False, error_msg)
+
+        # Write to disk
+        try:
+            with open(backup_path, "wb") as f:
+                f.write(message_bytes)
+
+            if logger:
+                logger.log(
+                    "DEBUG",
+                    "backup_message_success",
+                    {"folder": folder, "uid": uid, "path": str(backup_path), "size": len(message_bytes)},
+                )
+            return (True, None)
+
+        except IOError as write_exc:
+            error_msg = f"Failed to write backup file: {str(write_exc)}"
+            if logger:
+                logger.log(
+                    "ERROR",
+                    "backup_write_failed",
+                    {"folder": folder, "uid": uid, "path": str(backup_path), "error": str(write_exc)},
+                )
+            return (False, error_msg)
+
+    except Exception as exc:
+        error_msg = f"Backup exception: {str(exc)}"
+        if logger:
+            logger.log(
+                "ERROR",
+                "backup_message_exception",
+                {"folder": folder, "uid": uid, "error": str(exc)},
+            )
+        return (False, error_msg)
+
+
+# ============================================================================
+# Phase 2: Action Type Support - Helper Functions for Parallel Execution
+# ============================================================================
+
+
+def _perform_move_operation(
+    client: imaplib.IMAP4,
+    temp_db: sqlite3.Connection,
+    action: dict,
+    *,
+    verify_moves: bool = False,
+    backup_moved: bool = False,
+    backup_dir: Path | None = None,
+    dry_run: bool = False,
+    supports_uid_move: bool = False,
+    logger: JsonLogger | None = None,
+    verbose: bool = False,
+) -> tuple[str, str]:
+    """
+    Perform a move operation for a single action.
+
+    Args:
+        client: IMAP client connection
+        temp_db: Per-worker temporary database connection
+        action: Action dict with {id, uid, folder, target, rule_name, ...}
+        verify_moves: Whether to verify moves by Message-ID search
+        backup_moved: Whether to backup before moving
+        backup_dir: Directory for backup files
+        dry_run: If True, only simulate the operation
+        supports_uid_move: Whether server supports UID MOVE extension
+        logger: Optional logger for detailed logging
+        verbose: Enable verbose logging
+
+    Returns:
+        Tuple of (status, error_message) where status is 'done', 'failed', or 'skipped'
+    """
+    action_id = action['id']
+    uid = action['uid']
+    folder = action['folder']
+    target = action.get('target')
+    rule_name = action.get('rule_name')
+
+    if dry_run:
+        # Simulate backup if requested
+        if backup_moved and backup_dir is not None:
+            if logger and verbose:
+                backup_path = backup_dir / datetime.date.today().isoformat() / folder.replace("/", "_") / f"{uid}.eml"
+                logger.log(
+                    "INFO",
+                    "parallel_dry_run_backup",
+                    {"folder": folder, "uid": uid, "backup_path": str(backup_path)},
+                    console=f"      📝 Would backup {folder}/{uid} to {backup_path}",
+                )
+
+        # Simulate move operation - just mark as done
+        temp_db.execute(
+            "UPDATE actions SET status = ?, executed_at = ? WHERE id = ?",
+            ('done', now_iso(), action_id)
+        )
+        temp_db.commit()
+        if logger and verbose:
+            logger.log(
+                "INFO",
+                "parallel_dry_run_move",
+                {"folder": folder, "uid": uid, "target": target},
+                console=f"      📝 Would move {folder}/{uid} → {target}",
+            )
+
+        # Simulate verification if requested
+        if verify_moves:
+            if logger and verbose:
+                logger.log(
+                    "INFO",
+                    "parallel_dry_run_verify",
+                    {"folder": folder, "uid": uid, "target": target},
+                    console=f"      📝 Would verify move of {folder}/{uid} → {target}",
+                )
+
+        return ('done', '')
+
+    try:
+        # Extract Message-ID for verification (if needed)
+        message_id = None
+        if verify_moves and target:
+            message_id = _extract_message_id(client, folder, uid, logger)
+
+        # Backup if requested
+        if backup_moved and backup_dir is not None:
+            backup_success, backup_error = _backup_message(
+                client=client,
+                folder=folder,
+                uid=uid,
+                backup_dir=backup_dir,
+                logger=logger,
+            )
+            if not backup_success:
+                error_msg = f"Backup failed: {backup_error}"
+                temp_db.execute(
+                    "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                    ('failed', now_iso(), error_msg, action_id)
+                )
+                temp_db.commit()
+                if logger:
+                    logger.log(
+                        "ERROR",
+                        "parallel_backup_failed",
+                        {"folder": folder, "uid": uid, "error": backup_error},
+                        console=f"      ❌ Backup failed for {folder}/{uid}: {backup_error}",
+                    )
+                return ('failed', error_msg)
+
+        # Try UID MOVE if supported
+        if supports_uid_move and target:
+            try:
+                move_typ, move_resp = client.uid("MOVE", uid, f'"{target}"')
+                if move_typ == "OK":
+                    # Success - mark as done and track deleted message
+                    temp_db.execute(
+                        "UPDATE actions SET status = ?, executed_at = ? WHERE id = ?",
+                        ('done', now_iso(), action_id)
+                    )
+                    temp_db.execute(
+                        "INSERT OR IGNORE INTO deleted_headers (folder, uid) VALUES (?, ?)",
+                        (folder, uid)
+                    )
+                    temp_db.commit()
+
+                    # Verify move if requested
+                    if verify_moves and target and message_id:
+                        verified, verify_error = _verify_move(
+                            client=client,
+                            source_folder=folder,
+                            target_folder=target,
+                            message_id=message_id,
+                            uid=uid,
+                            logger=logger,
+                        )
+                        if not verified:
+                            # Update action to failed status
+                            temp_db.execute(
+                                "UPDATE actions SET status = ?, error_message = ? WHERE id = ?",
+                                ('failed', verify_error, action_id)
+                            )
+                            temp_db.commit()
+                            if logger:
+                                logger.log(
+                                    "ERROR",
+                                    "parallel_verify_failed",
+                                    {"folder": folder, "uid": uid, "target": target, "error": verify_error},
+                                    console=f"      ⚠️  Verification failed: {folder}/{uid} → {target}",
+                                )
+                            return ('failed', verify_error or 'Verification failed')
+
+                    return ('done', '')
+            except Exception:
+                # Fall back to COPY+STORE
+                pass
+
+        # COPY + STORE method
+        copy_typ, copy_resp = client.uid("COPY", uid, f'"{target}"')
+
+        # Handle folder creation if needed
+        if copy_typ != "OK" and _should_try_create_folder(copy_resp):
+            create_typ, create_resp = client.create(f'"{target}"')
+            if create_typ == "OK":
+                if logger and verbose:
+                    logger.log(
+                        "INFO",
+                        "parallel_create_folder",
+                        {"target": target},
+                        console=f"      📁 Created folder {target}",
+                    )
+                # Retry copy
+                copy_typ, copy_resp = client.uid("COPY", uid, f'"{target}"')
+
+        if copy_typ != "OK":
+            error_msg = f"COPY failed: {_format_imap_details(copy_resp)}"
+            temp_db.execute(
+                "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                ('failed', now_iso(), error_msg, action_id)
+            )
+            temp_db.commit()
+            return ('failed', error_msg)
+
+        # Mark as deleted
+        store_typ, store_resp = client.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
+        if store_typ != "OK":
+            error_msg = f"STORE failed: {_format_imap_details(store_resp)}"
+            temp_db.execute(
+                "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                ('failed', now_iso(), error_msg, action_id)
+            )
+            temp_db.commit()
+            return ('failed', error_msg)
+
+        # Success - mark as done and track deleted message
+        temp_db.execute(
+            "UPDATE actions SET status = ?, executed_at = ? WHERE id = ?",
+            ('done', now_iso(), action_id)
+        )
+        temp_db.execute(
+            "INSERT OR IGNORE INTO deleted_headers (folder, uid) VALUES (?, ?)",
+            (folder, uid)
+        )
+        temp_db.commit()
+
+        if logger and verbose:
+            logger.log(
+                "INFO",
+                "parallel_move_done",
+                {"folder": folder, "uid": uid, "target": target},
+                console=f"      ✅ Moved {folder}/{uid} → {target}",
+            )
+
+        # Verify move if requested
+        if verify_moves and target and message_id:
+            verified, verify_error = _verify_move(
+                client=client,
+                source_folder=folder,
+                target_folder=target,
+                message_id=message_id,
+                uid=uid,
+                logger=logger,
+            )
+            if not verified:
+                # Update action to failed status
+                temp_db.execute(
+                    "UPDATE actions SET status = ?, error_message = ? WHERE id = ?",
+                    ('failed', verify_error, action_id)
+                )
+                temp_db.commit()
+                if logger:
+                    logger.log(
+                        "ERROR",
+                        "parallel_verify_failed",
+                        {"folder": folder, "uid": uid, "target": target, "error": verify_error},
+                        console=f"      ⚠️  Verification failed: {folder}/{uid} → {target}",
+                    )
+                return ('failed', verify_error or 'Verification failed')
+
+        return ('done', '')
+
+    except imaplib.IMAP4.error as exc:
+        message = str(exc).lower()
+        # Check for missing message errors
+        if any(keyword in message for keyword in ["no such message", "uid command error", "failed"]):
+            # Message likely already moved or doesn't exist - skip it
+            temp_db.execute(
+                "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                ('skipped', now_iso(), str(exc), action_id)
+            )
+            temp_db.execute(
+                "INSERT OR IGNORE INTO deleted_headers (folder, uid) VALUES (?, ?)",
+                (folder, uid)
+            )
+            temp_db.commit()
+            if logger:
+                logger.log(
+                    "WARN",
+                    "parallel_message_missing",
+                    {"folder": folder, "uid": uid, "error": str(exc)},
+                )
+            return ('skipped', str(exc))
+        else:
+            # Other IMAP error - mark as failed
+            temp_db.execute(
+                "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                ('failed', now_iso(), str(exc), action_id)
+            )
+            temp_db.commit()
+            return ('failed', str(exc))
+
+    except Exception as exc:
+        # Unexpected error - mark as failed
+        error_msg = str(exc)
+        temp_db.execute(
+            "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+            ('failed', now_iso(), error_msg, action_id)
+        )
+        temp_db.commit()
+        return ('failed', error_msg)
+
+
+def _perform_keyword_operation(
+    client: imaplib.IMAP4,
+    temp_db: sqlite3.Connection,
+    action: dict,
+    *,
+    dry_run: bool = False,
+    strict: bool = False,
+    logger: JsonLogger | None = None,
+    verbose: bool = False,
+) -> tuple[str, str]:
+    """
+    Perform a keyword operation (set or remove) for a single action.
+
+    Args:
+        client: IMAP client connection
+        temp_db: Per-worker temporary database connection
+        action: Action dict with {id, uid, folder, action_type, action_data, ...}
+        dry_run: If True, only simulate the operation
+        strict: If True, raise exceptions on errors instead of returning failed status
+        logger: Optional logger for detailed logging
+        verbose: Enable verbose logging
+
+    Returns:
+        Tuple of (status, error_message) where status is 'done', 'failed', or 'skipped'
+    """
+    action_id = action['id']
+    uid = action['uid']
+    folder = action['folder']
+    action_type = action.get('action_type', 'set_keywords')
+    action_data = action.get('action_data')
+
+    # Parse keywords from action_data
+    keywords = []
+    if action_data:
+        try:
+            data = json.loads(action_data)
+            keywords = data.get('keywords', [])
+        except json.JSONDecodeError:
+            error_msg = "Invalid action_data JSON"
+            temp_db.execute(
+                "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                ('failed', now_iso(), error_msg, action_id)
+            )
+            temp_db.commit()
+            if strict:
+                raise ValueError(error_msg)
+            return ('failed', error_msg)
+
+    if not keywords:
+        # No keywords to process - skip
+        temp_db.execute(
+            "UPDATE actions SET status = ?, executed_at = ? WHERE id = ?",
+            ('skipped', now_iso(), action_id)
+        )
+        temp_db.commit()
+        return ('skipped', 'No keywords specified')
+
+    # Validate keywords
+    for keyword in keywords:
+        if not keyword:
+            error_msg = "Empty keyword provided"
+            temp_db.execute(
+                "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                ('failed', now_iso(), error_msg, action_id)
+            )
+            temp_db.commit()
+            if strict:
+                raise ValueError(error_msg)
+            return ('failed', error_msg)
+        if ' ' in keyword:
+            error_msg = f"Invalid keyword '{keyword}': contains space"
+            temp_db.execute(
+                "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                ('failed', now_iso(), error_msg, action_id)
+            )
+            temp_db.commit()
+            if strict:
+                raise ValueError(error_msg)
+            return ('failed', error_msg)
+        if '"' in keyword:
+            error_msg = f"Invalid keyword '{keyword}': contains quote"
+            temp_db.execute(
+                "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                ('failed', now_iso(), error_msg, action_id)
+            )
+            temp_db.commit()
+            if strict:
+                raise ValueError(error_msg)
+            return ('failed', error_msg)
+
+    # Check IMAP limit for custom flags (32 per message)
+    if len(keywords) > 32:
+        error_msg = f"Too many keywords ({len(keywords)}, max 32 per IMAP spec)"
+        temp_db.execute(
+            "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+            ('failed', now_iso(), error_msg, action_id)
+        )
+        temp_db.commit()
+        if strict:
+            raise ValueError(error_msg)
+        return ('failed', error_msg)
+
+    if dry_run:
+        # Simulate operation - just mark as done
+        temp_db.execute(
+            "UPDATE actions SET status = ?, executed_at = ? WHERE id = ?",
+            ('done', now_iso(), action_id)
+        )
+        temp_db.commit()
+        if logger and verbose:
+            logger.log(
+                "INFO",
+                "parallel_dry_run_keyword",
+                {"folder": folder, "uid": uid, "action_type": action_type, "keywords": keywords},
+                console=f"      📝 Would {action_type} on {folder}/{uid}: {keywords}",
+            )
+        return ('done', '')
+
+    try:
+        # Build flags string
+        flags_str = " ".join(keywords)
+
+        # Execute STORE command
+        if action_type == 'set_keywords':
+            typ, resp = client.uid("STORE", uid, "+FLAGS", f"({flags_str})")
+        else:  # remove_keywords
+            typ, resp = client.uid("STORE", uid, "-FLAGS", f"({flags_str})")
+
+        if typ == "OK":
+            temp_db.execute(
+                "UPDATE actions SET status = ?, executed_at = ? WHERE id = ?",
+                ('done', now_iso(), action_id)
+            )
+            temp_db.commit()
+            if logger and verbose:
+                logger.log(
+                    "INFO",
+                    "parallel_keyword_done",
+                    {"folder": folder, "uid": uid, "action_type": action_type, "keywords": keywords},
+                    console=f"      🏷️  {action_type} on {folder}/{uid}: {keywords}",
+                )
+            return ('done', '')
+        else:
+            error_msg = f"STORE {action_type} failed: {_format_imap_details(resp)}"
+            temp_db.execute(
+                "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                ('failed', now_iso(), error_msg, action_id)
+            )
+            temp_db.commit()
+            if strict:
+                raise imaplib.IMAP4.error(error_msg)
+            return ('failed', error_msg)
+
+    except Exception as exc:
+        error_msg = str(exc)
+        temp_db.execute(
+            "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+            ('failed', now_iso(), error_msg, action_id)
+        )
+        temp_db.commit()
+        if strict:
+            raise
+        return ('failed', error_msg)
+
+
+def _verify_move_operation(
+    client: imaplib.IMAP4,
+    temp_db: sqlite3.Connection,
+    action: dict,
+    message_id: str | None,
+    *,
+    logger: JsonLogger | None = None,
+    verbose: bool = False,
+) -> bool:
+    """
+    Verify a move operation by searching for the message in source and target folders.
+
+    Args:
+        client: IMAP client connection
+        temp_db: Per-worker temporary database connection
+        action: Action dict with {id, uid, folder, target, ...}
+        message_id: Message-ID header value for verification
+        logger: Optional logger for detailed logging
+        verbose: Enable verbose logging
+
+    Returns:
+        True if verification passed, False if failed
+    """
+    if not message_id:
+        # Can't verify without Message-ID
+        return True
+
+    action_id = action['id']
+    uid = action['uid']
+    folder = action['folder']
+    target = action.get('target')
+
+    if not target:
+        return True
+
+    try:
+        # Search criteria for Message-ID
+        escaped = message_id.replace('"', '\\"')
+        criteria = f'(UNDELETED HEADER Message-ID "{escaped}")'
+
+        # Check source folder (should NOT be present)
+        sel_typ, _ = client.select(f'"{folder}"', readonly=True)
+        if sel_typ == "OK":
+            search_typ, search_resp = client.uid("SEARCH", None, criteria)
+            if search_typ == "OK" and search_resp and search_resp[0]:
+                # Message still in source - verification failed
+                temp_db.execute(
+                    "UPDATE actions SET status = ?, error_message = ? WHERE id = ?",
+                    ('failed', 'Verification failed: message still in source', action_id)
+                )
+                temp_db.commit()
+                if logger and verbose:
+                    logger.log(
+                        "WARN",
+                        "parallel_verify_failed_source",
+                        {"folder": folder, "uid": uid, "target": target},
+                        console=f"      ⚠️  Verify failed: {folder}/{uid} still in source",
+                    )
+                return False
+
+        # Check target folder (should be present)
+        sel_typ, _ = client.select(f'"{target}"', readonly=True)
+        if sel_typ == "OK":
+            search_typ, search_resp = client.uid("SEARCH", None, criteria)
+            if search_typ != "OK" or not search_resp or not search_resp[0]:
+                # Message not in target - verification failed
+                temp_db.execute(
+                    "UPDATE actions SET status = ?, error_message = ? WHERE id = ?",
+                    ('failed', 'Verification failed: message not in target', action_id)
+                )
+                temp_db.commit()
+                if logger and verbose:
+                    logger.log(
+                        "WARN",
+                        "parallel_verify_failed_target",
+                        {"folder": folder, "uid": uid, "target": target},
+                        console=f"      ⚠️  Verify failed: {folder}/{uid} not in {target}",
+                    )
+                return False
+
+        # Verification passed
+        if logger and verbose:
+            logger.log(
+                "INFO",
+                "parallel_verify_passed",
+                {"folder": folder, "uid": uid, "target": target},
+                console=f"      ✅ Verified {folder}/{uid} → {target}",
+            )
+        return True
+
+    except Exception as exc:
+        # Verification error - log but don't fail the action
+        if logger:
+            logger.log(
+                "WARN",
+                "parallel_verify_error",
+                {"folder": folder, "uid": uid, "target": target, "error": str(exc)},
+            )
+        return True  # Allow action to succeed despite verification error
+
+
+# ============================================================================
+# End Phase 2 Helper Functions
+# ============================================================================
 
 def execute_actions(
     client: imaplib.IMAP4 | None,
@@ -1292,3 +2200,895 @@ def execute_actions(
         console="".join(summary_parts),
     )
     return timer, stats
+
+
+def _count_unique_source_folders(db_path: Path) -> int:
+    """Count unique source folders in pending actions."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(DISTINCT folder) FROM actions WHERE status = 'pending'")
+        count = cur.fetchone()[0]
+        return count if count else 0
+    finally:
+        conn.close()
+
+
+def _precreate_target_folders(
+    client: imaplib.IMAP4,
+    db_path: Path,
+    strict: bool = False,
+    logger: JsonLogger | None = None,
+) -> None:
+    """
+    Pre-create all target folders before parallel execution.
+
+    This eliminates race conditions where multiple workers try to create
+    the same target folder simultaneously.
+
+    Args:
+        client: Authenticated IMAP client
+        db_path: Path to main SQLite database
+        strict: Abort on any CREATE failure
+        logger: JsonLogger for logging
+    """
+    if logger is None:
+        logger = JsonLogger(Path("imapfilter.log"))
+
+    # Query unique target folders from pending actions
+    db = sqlite3.connect(str(db_path), timeout=10.0)
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT DISTINCT target
+        FROM actions
+        WHERE status='pending' AND target IS NOT NULL
+        ORDER BY target
+    """)
+    targets = [row[0] for row in cursor.fetchall()]
+    db.close()
+
+    if not targets:
+        logger.log("INFO", "precreate_no_targets", console="ℹ️ No target folders to create")
+        return
+
+    logger.log(
+        "INFO",
+        "precreate_start",
+        {"count": len(targets)},
+        console=f"📁 Pre-creating {len(targets)} target folders...",
+    )
+
+    created_count = 0
+    failed_count = 0
+
+    for target in targets:
+        try:
+            # Check if folder exists with LIST
+            list_typ, list_resp = client.list("", f'"{target}"')
+            exists = list_typ == "OK" and list_resp and list_resp[0] is not None
+
+            if not exists:
+                # CREATE folder
+                create_typ, create_resp = client.create(f'"{target}"')
+                if create_typ == "OK":
+                    created_count += 1
+                    logger.log(
+                        "INFO",
+                        "precreate_success",
+                        {"target": target},
+                        console=f"   ✅ Created: {target}",
+                    )
+                else:
+                    failed_count += 1
+                    error_msg = _imap_response_text(create_resp)
+                    logger.log(
+                        "WARN" if not strict else "ERROR",
+                        "precreate_failed",
+                        {"target": target, "error": error_msg},
+                        console=f"   ⚠️ Failed to create {target}: {error_msg}",
+                    )
+                    if strict:
+                        raise imaplib.IMAP4.error(f"CREATE {target} failed: {error_msg}")
+            else:
+                logger.log(
+                    "DEBUG",
+                    "precreate_exists",
+                    {"target": target},
+                )
+
+        except Exception as exc:
+            failed_count += 1
+            logger.log(
+                "ERROR",
+                "precreate_exception",
+                {"target": target, "error": str(exc)},
+                console=f"   ❌ Exception creating {target}: {exc}",
+            )
+            if strict:
+                raise
+
+    logger.log(
+        "INFO",
+        "precreate_complete",
+        {"created": created_count, "failed": failed_count},
+        console=f"📁 Pre-creation complete: {created_count} created, {failed_count} failed",
+    )
+
+
+def _merge_worker_databases(
+    db_path: Path,
+    temp_dir: Path,
+    show_progress: bool = True,
+    logger: JsonLogger | None = None,
+) -> tuple[int, int]:
+    """
+    Merge per-worker temp databases into the main database.
+
+    After all workers complete, this function:
+    1. Discovers all temp databases (thread_*.db)
+    2. For each temp DB:
+       - ATTACH with retry logic
+       - UPDATE main actions table with status/executed_at
+       - DELETE from headers cache for moved messages
+       - DETACH
+    3. Single COMMIT after all merges
+    4. Clean up temp files
+
+    Args:
+        db_path: Path to main SQLite database
+        temp_dir: Directory containing temp databases
+        show_progress: Show progress bar
+        logger: JsonLogger for logging
+
+    Returns:
+        Tuple of (total_done, total_failed)
+    """
+    if logger is None:
+        logger = JsonLogger(Path("imapfilter.log"))
+
+    # Discover all temp databases
+    thread_temp_dbs = sorted(temp_dir.glob("thread_*.db"))
+
+    if not thread_temp_dbs:
+        logger.log("INFO", "merge_no_databases", console="⚠️ No worker databases to merge")
+        return 0, 0
+
+    logger.log(
+        "INFO",
+        "merge_start",
+        {"count": len(thread_temp_dbs)},
+        console=f"🔄 Merging {len(thread_temp_dbs)} worker databases...",
+    )
+
+    merge_bar = tqdm(
+        total=len(thread_temp_dbs),
+        desc="🔄 Merging databases",
+        position=0,
+        unit="db",
+        disable=not show_progress,
+    )
+
+    # Open main database for merge
+    main_db = sqlite3.connect(str(db_path), timeout=30.0)
+    main_db.execute("PRAGMA journal_mode=WAL")
+
+    total_done = 0
+    total_failed = 0
+
+    for temp_idx, temp_db_path in enumerate(thread_temp_dbs):
+        try:
+            # Attach temp database with retry for lock issues
+            max_attach_retries = 3
+            for attach_attempt in range(max_attach_retries):
+                try:
+                    main_db.execute(f"ATTACH DATABASE '{temp_db_path}' AS temp_{temp_idx}")
+                    break
+                except sqlite3.OperationalError as lock_error:
+                    if "database is locked" in str(lock_error) and attach_attempt < max_attach_retries - 1:
+                        time.sleep(0.5)
+                        continue
+                    raise
+
+            # Count done/failed actions
+            cursor = main_db.execute(f"SELECT status, COUNT(*) FROM temp_{temp_idx}.actions GROUP BY status")
+            for status, count in cursor.fetchall():
+                if status == "done":
+                    total_done += count
+                elif status == "failed":
+                    total_failed += count
+
+            # Update actions table: status → done/failed
+            main_db.execute(f"""
+                UPDATE actions
+                SET status = (
+                    SELECT status FROM temp_{temp_idx}.actions WHERE temp_{temp_idx}.actions.id = actions.id
+                ),
+                executed_at = (
+                    SELECT executed_at FROM temp_{temp_idx}.actions WHERE temp_{temp_idx}.actions.id = actions.id
+                )
+                WHERE id IN (SELECT id FROM temp_{temp_idx}.actions)
+            """)
+
+            # DELETE from headers cache (for moved messages)
+            main_db.execute(f"""
+                DELETE FROM headers
+                WHERE (folder, uid) IN (
+                    SELECT folder, uid FROM temp_{temp_idx}.deleted_headers
+                )
+            """)
+
+            # DETACH DATABASE
+            main_db.execute(f"DETACH DATABASE temp_{temp_idx}")
+
+            merge_bar.update(1)
+
+        except Exception as merge_error:
+            logger.log(
+                "ERROR",
+                "merge_failed",
+                {"thread_db": str(temp_db_path), "error": str(merge_error)},
+                console=f"❌ Merge failed for {temp_db_path.name}: {merge_error}",
+            )
+            merge_bar.update(1)
+            # Continue with other databases
+
+    # Single COMMIT after all merges
+    main_db.commit()
+    main_db.close()
+
+    merge_bar.close()
+
+    # Clean up temp files
+    for temp_db_path in thread_temp_dbs:
+        try:
+            temp_db_path.unlink()
+        except Exception:
+            pass
+
+    logger.log(
+        "INFO",
+        "merge_complete",
+        {"done": total_done, "failed": total_failed},
+        console=f"✅ Merge complete: {total_done} done, {total_failed} failed",
+    )
+
+    return total_done, total_failed
+
+
+def _execute_folder_worker(
+    pool: IMAPConnectionPool,
+    db_path: Path,
+    temp_dir: Path,
+    folder: str,
+    actions: list[dict],
+    worker_id: int,
+    dry_run: bool = False,
+    strict: bool = False,
+    verify_moves: bool = False,
+    backup_moved: bool = False,
+    backup_all: bool = False,
+    backup_dir: Path | None = None,
+    logger: JsonLogger | None = None,
+) -> tuple[str, int, int]:
+    """
+    Process all actions for a single source folder (runs in worker thread).
+
+    Each worker:
+    1. Creates its own temp SQLite database
+    2. Acquires an IMAP connection from the pool
+    3. Processes all actions for this folder
+    4. Updates temp database with results
+    5. Returns success/failure counts
+
+    Args:
+        pool: IMAP connection pool
+        db_path: Path to main SQLite database
+        temp_dir: Directory for temp databases
+        folder: Source folder to process
+        actions: List of action dicts for this folder
+        worker_id: Worker ID for logging
+        dry_run: Preview actions without executing
+        strict: Abort on first error
+        verify_moves: Verify moves after EXPUNGE
+        backup_moved: Backup messages before moving
+        backup_all: Backup all cached messages
+        backup_dir: Directory for backups
+        logger: JsonLogger for logging
+
+    Returns:
+        Tuple of (folder_name, actions_done, actions_failed)
+    """
+    if logger is None:
+        logger = JsonLogger(Path("imapfilter.log"))
+
+    # Generate thread-based temp DB path
+    thread_id = threading.current_thread().ident
+    temp_db_path = temp_dir / f"thread_{thread_id}.db"
+
+    # Create temp SQLite DB with schema
+    temp_db = None
+    client = None
+    actions_done = 0
+    actions_failed = 0
+
+    try:
+        temp_db = sqlite3.connect(str(temp_db_path), timeout=5.0)
+        temp_db.execute("""
+            CREATE TABLE IF NOT EXISTS actions (
+                id INTEGER PRIMARY KEY,
+                status TEXT,
+                executed_at TEXT,
+                error_message TEXT
+            )
+        """)
+        temp_db.execute("""
+            CREATE TABLE IF NOT EXISTS deleted_headers (
+                folder TEXT,
+                uid TEXT,
+                PRIMARY KEY (folder, uid)
+            )
+        """)
+        temp_db.commit()
+
+        # Acquire IMAP connection from pool
+        if not dry_run:
+            client = pool.acquire()
+
+        # Group actions by (folder, target) tuple for batch processing
+        action_groups: dict[tuple[str, str | None], list[dict]] = {}
+        for action in actions:
+            key = (action["folder"], action["target"])
+            if key not in action_groups:
+                action_groups[key] = []
+            action_groups[key].append(action)
+
+        # Process each group
+        for (grp_folder, target), group_actions in action_groups.items():
+            # Handle dry-run mode
+            if dry_run:
+                for action in group_actions:
+                    temp_db.execute(
+                        "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
+                        (action["id"], "done", now_iso(), None),
+                    )
+                    actions_done += 1
+                temp_db.commit()
+                continue
+
+            # Real execution
+            try:
+                # SELECT source folder (read-only=False for modifications)
+                sel_typ, sel_resp = client.select(f'"{grp_folder}"', readonly=False)
+                if sel_typ != "OK":
+                    error_msg = f"Cannot open folder: {_imap_response_text(sel_resp)}"
+                    for action in group_actions:
+                        temp_db.execute(
+                            "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
+                            (action["id"], "failed", now_iso(), error_msg),
+                        )
+                        actions_failed += 1
+                    temp_db.commit()
+                    if strict:
+                        raise imaplib.IMAP4.error(error_msg)
+                    continue
+
+                # Check if server supports UID MOVE
+                supports_uid_move = hasattr(client, "capabilities") and b"MOVE" in getattr(client, "capabilities", ())
+
+                # Collect successful move actions for verification
+                successful_moves: list[tuple[dict, str | None]] = []
+
+                # Process each action in the group
+                for action in group_actions:
+                    uid = action["uid"]
+                    action_type = action.get("action_type", "move")
+
+                    try:
+                        # Handle keyword actions
+                        if action_type in ("set_keywords", "remove_keywords"):
+                            status, error_msg = _perform_keyword_operation(
+                                client=client,
+                                temp_db=temp_db,
+                                action=action,
+                                dry_run=False,  # Real execution
+                                strict=strict,
+                                logger=logger,
+                                verbose=False,  # Avoid excessive logging in worker
+                            )
+
+                            # Update action with INSERT OR REPLACE to ensure it's in temp DB
+                            temp_db.execute(
+                                "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
+                                (action["id"], status, now_iso(), error_msg if error_msg else None),
+                            )
+
+                            if status == "done":
+                                actions_done += 1
+                            else:
+                                actions_failed += 1
+
+                        # Handle move actions
+                        else:
+                            status, error_msg = _perform_move_operation(
+                                client=client,
+                                temp_db=temp_db,
+                                action=action,
+                                verify_moves=False,  # Verification done after EXPUNGE
+                                backup_moved=backup_moved,
+                                backup_dir=backup_dir,
+                                dry_run=False,  # Real execution
+                                supports_uid_move=supports_uid_move,
+                                logger=logger,
+                                verbose=False,  # Avoid excessive logging in worker
+                            )
+
+                            # Update action with INSERT OR REPLACE to ensure it's in temp DB
+                            temp_db.execute(
+                                "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
+                                (action["id"], status, now_iso(), error_msg if error_msg else None),
+                            )
+
+                            if status == "done":
+                                actions_done += 1
+                                # Track for verification if needed
+                                if verify_moves and target:
+                                    # Get Message-ID from main database if available
+                                    message_id = None
+                                    try:
+                                        main_db = sqlite3.connect(str(db_path), timeout=5.0)
+                                        row = main_db.execute(
+                                            "SELECT data FROM headers WHERE folder=? AND uid=?",
+                                            (grp_folder, uid)
+                                        ).fetchone()
+                                        main_db.close()
+                                        if row and row[0]:
+                                            data = json.loads(row[0])
+                                            header_text = data.get("header", "")
+                                            # Extract Message-ID with regex
+                                            match = re.search(
+                                                r'Message-I[Dd]:\s*<?(\[?[^\]>\s]+\]?)>?',
+                                                header_text,
+                                                re.IGNORECASE | re.MULTILINE
+                                            )
+                                            if match:
+                                                message_id = match.group(1).strip()
+                                    except Exception:
+                                        pass
+                                    successful_moves.append((action, message_id))
+                            else:
+                                actions_failed += 1
+
+                    except Exception as exc:
+                        error_msg = str(exc)
+                        temp_db.execute(
+                            "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
+                            (action["id"], "failed", now_iso(), error_msg),
+                        )
+                        actions_failed += 1
+                        if strict:
+                            raise
+
+                # EXPUNGE folder (delete flagged messages)
+                if not dry_run:
+                    try:
+                        client.expunge()
+                    except Exception:
+                        pass  # Best effort
+
+                # Verify successful moves (after EXPUNGE)
+                if verify_moves and successful_moves and not dry_run:
+                    for action, message_id in successful_moves:
+                        try:
+                            _verify_move_operation(
+                                client=client,
+                                temp_db=temp_db,
+                                action=action,
+                                message_id=message_id,
+                                logger=logger,
+                                verbose=False,  # Avoid excessive logging in worker
+                            )
+                        except Exception as verify_exc:
+                            # Log verification error but don't fail
+                            if logger:
+                                logger.log(
+                                    "WARN",
+                                    "parallel_verify_exception",
+                                    {
+                                        "folder": action["folder"],
+                                        "uid": action["uid"],
+                                        "error": str(verify_exc),
+                                    },
+                                )
+
+                temp_db.commit()
+
+            except Exception as exc:
+                logger.log(
+                    "ERROR",
+                    "execute_folder_group_failed",
+                    {"folder": grp_folder, "target": target, "error": str(exc)},
+                )
+                if strict:
+                    raise
+
+        temp_db.commit()
+
+    except Exception as exc:
+        logger.log(
+            "ERROR",
+            "execute_folder_worker_exception",
+            {"folder": folder, "worker_id": worker_id, "error": str(exc)},
+        )
+        if strict:
+            raise
+
+    finally:
+        if temp_db:
+            try:
+                temp_db.close()
+            except Exception:
+                pass
+        if client and not dry_run:
+            try:
+                pool.release(client)
+            except Exception:
+                pass
+
+    return folder, actions_done, actions_failed
+
+
+def execute_actions_parallel(
+    secrets_path: Path,
+    db_path: Path,
+    *,
+    show_progress: bool,
+    dry_run: bool,
+    strict: bool,
+    logger: JsonLogger,
+    verbose: bool = False,
+    limit: int | None = None,
+    folders: Sequence[str] | None = None,
+    verify_moves: bool = False,
+    backup_moved: bool = False,
+    backup_all: bool = False,
+    backup_dir: Path | None = None,
+    max_workers: int = 5,
+) -> tuple[PhaseTimer, Dict[str, int]]:
+    """
+    Execute pending actions in parallel (one worker per source folder).
+
+    This is the main entry point for parallel execution. It coordinates:
+    1. Pre-creating all target folders (eliminates race conditions)
+    2. Grouping actions by source folder
+    3. Spawning worker threads to process each folder
+    4. Merging per-thread temp databases into the main database
+
+    Args:
+        secrets_path: Path to IMAP secrets file
+        db_path: Path to SQLite database
+        show_progress: Whether to show progress bars
+        dry_run: If True, simulate execution without IMAP operations
+        strict: If True, abort on first error
+        logger: Logger instance for structured logging
+        verbose: If True, show detailed per-message progress
+        limit: Optional limit on number of actions to process
+        folders: Optional list of folders to process
+        verify_moves: If True, verify moves with Message-ID searches
+        backup_moved: If True, backup messages before moving
+        backup_all: If True, backup all messages after execution
+        backup_dir: Directory for backups
+        max_workers: Number of parallel workers (default: 5)
+
+    Returns:
+        Tuple of (timer, stats_dict)
+    """
+    timer = PhaseTimer("execute_parallel")
+
+    # Validate backup parameters
+    if (backup_moved or backup_all) and backup_dir is None:
+        raise ValueError("backup_dir must be specified when backup is enabled")
+
+    if backup_moved and backup_all:
+        logger.log(
+            "WARN",
+            "backup_both_enabled",
+            console="⚠️  Both --backup-moved and --backup-all specified. Using --backup-all.",
+        )
+        backup_moved = False
+
+    logger.log(
+        "INFO",
+        "execute_parallel_start",
+        {"log_file": str(logger.log_file)},
+        console=f"📝 Detailed logs: {logger.log_file}",
+    )
+
+    # Open database to count pending actions
+    db = sqlite3.connect(str(db_path), timeout=30.0)
+
+    folder_params = tuple(folders) if folders else ()
+    folder_filter = ""
+    if folder_params:
+        placeholders = ",".join("?" for _ in folder_params)
+        folder_filter = f" AND folder IN ({placeholders})"
+
+    # Count pending actions
+    pending_cur = db.cursor()
+    pending_cur.execute(
+        "SELECT COUNT(*) FROM actions WHERE status='pending'" + folder_filter,
+        folder_params,
+    )
+    pending_total = pending_cur.fetchone()[0] or 0
+
+    if pending_total == 0:
+        db.close()
+        logger.log("INFO", "execute_nothing", {"dry_run": dry_run}, console="ℹ️ No pending actions")
+        timer.stop()
+        return timer, {"done": 0, "skipped": 0, "failed": 0, "suppressed": 0}
+
+    logger.log(
+        "INFO",
+        "execute_pending_count",
+        {"count": pending_total},
+        console=f"📊 Pending actions: {pending_total}",
+    )
+
+    # Pre-create all target folders (before parallel execution)
+    if not dry_run:
+        from core.imap_client import imap_login
+        client = imap_login(secrets_path, logger)
+        try:
+            _precreate_target_folders(
+                client=client,
+                db_path=db_path,
+                strict=strict,
+                logger=logger,
+            )
+        finally:
+            client.logout()
+
+    # Group actions by source folder
+    query = """
+        WITH ranked AS (
+            SELECT
+                id, uid, folder, target, rule_name, priority, action_type, action_data,
+                ROW_NUMBER() OVER (
+                    PARTITION BY uid
+                    ORDER BY priority DESC, created_at ASC, id ASC
+                ) AS rn
+            FROM actions
+            WHERE status='pending'
+    """
+    if folder_filter:
+        query = query.replace(
+            "WHERE status='pending'",
+            f"WHERE status='pending'{folder_filter}",
+        )
+    query += """
+        )
+        SELECT folder, id, uid, target, rule_name, priority, action_type, action_data
+        FROM ranked
+        WHERE rn=1
+        ORDER BY folder, target, priority DESC, id ASC
+    """
+    if limit is not None:
+        query += f" LIMIT {int(limit)}"
+
+    cursor = db.cursor()
+    cursor.execute(query, folder_params)
+
+    # Group actions by source folder
+    folder_actions: dict[str, list[dict]] = {}
+    for folder, action_id, uid, target, rule_name, priority, action_type, action_data in cursor.fetchall():
+        if folder not in folder_actions:
+            folder_actions[folder] = []
+        folder_actions[folder].append({
+            "id": action_id,
+            "uid": uid,
+            "folder": folder,
+            "target": target,
+            "rule_name": rule_name,
+            "priority": priority,
+            "action_type": action_type,
+            "action_data": action_data,
+        })
+
+    db.close()
+
+    if not folder_actions:
+        logger.log("INFO", "execute_nothing_after_dedup", console="ℹ️ No actions after deduplication")
+        timer.stop()
+        return timer, {"done": 0, "skipped": 0, "failed": 0, "suppressed": 0}
+
+    # Sort folders by action count (load balance: smallest first)
+    sorted_folders = sorted(folder_actions.keys(), key=lambda f: len(folder_actions[f]))
+
+    logger.log(
+        "INFO",
+        "execute_parallel_folders",
+        {"folder_count": len(sorted_folders), "max_workers": max_workers},
+        console=f"🔧 Processing {len(sorted_folders)} folders with {max_workers} workers",
+    )
+
+    # Create temp directory for worker databases
+    temp_dir = Path(tempfile.gettempdir()) / f"imapfilter_actions_{os.getpid()}"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Set up progress bar: main folder progress
+    folders_bar = tqdm(
+        total=len(sorted_folders),
+        desc="📦 Processing folders",
+        unit="folder",
+        dynamic_ncols=True,
+        leave=True,
+        position=0,
+        disable=not show_progress,
+    )
+
+    # Create connection pool
+    pool = IMAPConnectionPool(secrets_path, max_workers, logger)
+
+    total_done = 0
+    total_failed = 0
+
+    try:
+        # Create ThreadPoolExecutor and spawn workers
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {}
+            for folder in sorted_folders:
+                actions = folder_actions[folder]
+                worker_id = len(futures) % max_workers
+                future = executor.submit(
+                    _execute_folder_worker,
+                    pool=pool,
+                    db_path=db_path,
+                    temp_dir=temp_dir,
+                    folder=folder,
+                    actions=actions,
+                    worker_id=worker_id,
+                    dry_run=dry_run,
+                    strict=strict,
+                    verify_moves=verify_moves,
+                    backup_moved=backup_moved,
+                    backup_all=backup_all,
+                    backup_dir=backup_dir,
+                    logger=logger,
+                )
+                futures[future] = folder
+
+            # Track results as they complete
+            for future in concurrent.futures.as_completed(futures):
+                folder = futures[future]
+                try:
+                    folder_name, actions_done, actions_failed = future.result()
+                    total_done += actions_done
+                    total_failed += actions_failed
+                    folders_bar.set_postfix_str(f"Last: {folder_name}")
+                    folders_bar.update(1)
+                except Exception as exc:
+                    logger.log(
+                        "ERROR",
+                        "execute_folder_worker_failed",
+                        {"folder": folder, "error": str(exc)},
+                        console=f"❌ Worker failed for {folder}: {exc}",
+                    )
+                    folders_bar.update(1)
+                    if strict:
+                        # In strict mode, cancel remaining workers
+                        for f in futures:
+                            f.cancel()
+                        raise
+
+        folders_bar.close()
+
+        # Garbage collection + delay
+        gc.collect()
+        time.sleep(1.0)
+
+        # Merge worker databases
+        merge_done, merge_failed = _merge_worker_databases(
+            db_path=db_path,
+            temp_dir=temp_dir,
+            show_progress=show_progress,
+            logger=logger,
+        )
+
+        # Update totals from merge (in case counts differ)
+        total_done = merge_done
+        total_failed = merge_failed
+
+    finally:
+        # Clean up
+        pool.shutdown()
+        try:
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+    timer.stop()
+    timer.count = total_done
+
+    # Build stats dict compatible with existing code
+    stats = {
+        "done": total_done,
+        "failed": total_failed,
+        "skipped": 0,
+        "suppressed": 0,
+    }
+
+    logger.log(
+        "INFO",
+        "execute_parallel_summary",
+        {"done": total_done, "failed": total_failed, "elapsed": timer.elapsed},
+        console=f"\n✅ Execution complete: {total_done} done, {total_failed} failed ({timer.fmt()})",
+    )
+
+    return timer, stats
+
+
+def should_use_parallel_mode(
+    db_path: Path,
+    parallel_workers: int | None,
+    logger: JsonLogger | None = None,
+) -> bool:
+    """
+    Determine if parallel execution should be used.
+
+    Rules:
+    - parallel_workers == 0: Force sequential (return False)
+    - parallel_workers > 0: Force parallel (return True)
+    - parallel_workers is None: Auto-detect based on folder count
+      - ≥5 unique source folders: Use parallel (return True)
+      - <5 folders: Use sequential (return False)
+
+    Args:
+        db_path: Path to the SQLite database
+        parallel_workers: Optional override for worker count (0=sequential, >0=parallel, None=auto)
+        logger: Optional logger for diagnostic messages
+
+    Returns:
+        True if parallel mode should be used, False otherwise
+    """
+    if parallel_workers == 0:
+        # Force sequential
+        if logger:
+            logger.log(
+                "INFO",
+                "parallel_disabled",
+                {},
+                console="📂 Using sequential execution (--parallel-workers 0)",
+            )
+        return False
+
+    if parallel_workers and parallel_workers > 0:
+        # Force parallel
+        if logger:
+            logger.log(
+                "INFO",
+                "parallel_forced",
+                {"workers": parallel_workers},
+                console=f"🚀 Using parallel execution ({parallel_workers} workers)",
+            )
+        return True
+
+    # Auto-detect: count unique source folders in pending actions
+    count = _count_unique_source_folders(db_path)
+    if count >= 5:
+        if logger:
+            logger.log(
+                "INFO",
+                "parallel_auto",
+                {"folders": count},
+                console=f"🚀 Auto-detecting parallel mode: {count} folders found (≥5 threshold)",
+            )
+        return True
+    else:
+        if logger:
+            logger.log(
+                "INFO",
+                "sequential_auto",
+                {"folders": count},
+                console=f"📂 Auto-detecting sequential mode: {count} folders (<5 threshold)",
+            )
+        return False

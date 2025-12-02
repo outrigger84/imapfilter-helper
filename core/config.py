@@ -232,6 +232,9 @@ class ExecutorConfig:
     strict: bool = False
     limit: Optional[int] = None
     verify_moves: bool = False
+    parallel_workers: Optional[int] = None  # None=auto-detect, 0=sequential, N>0=parallel with N workers
+    max_retries: int = 2  # Number of retry attempts for parallel execution
+    retry_delay_base: float = 5.0  # Initial retry delay in seconds
 
 
 @dataclass

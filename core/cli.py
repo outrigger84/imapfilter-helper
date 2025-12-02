@@ -9,7 +9,7 @@ from typing import Callable, Sequence
 from core.cache_builder import build_cache, build_cache_parallel, compact_cache
 from core.config import AppConfig, build_default_config
 from core.database import init_db
-from core.executor import execute_actions
+from core.executor import execute_actions, execute_actions_parallel, should_use_parallel_mode
 from core.imap_client import imap_login, list_all_folders, get_folder_sizes
 from core.logging_utils import JsonLogger, PhaseTimer
 from core.rule_engine import evaluate_rules, load_rules
@@ -114,6 +114,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Backup all cached messages after execution completes (creates full archive)",
     )
+    p_exec.add_argument(
+        "--parallel-workers",
+        type=int,
+        default=None,
+        help=(
+            "Number of parallel workers for execute phase. "
+            "0=force sequential, N>0=force N workers, None=auto-detect "
+            "(parallel if ≥5 folders, otherwise sequential). Default: None (auto-detect)"
+        ),
+    )
 
     p_run = sub.add_parser("run-all", help="Build cache, evaluate, and execute")
     p_run.add_argument("--dry-run", action="store_true", help="Simulate everything (no IMAP writes)")
@@ -170,6 +180,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--backup-all",
         action="store_true",
         help="Backup all cached messages after execution completes (creates full archive)",
+    )
+    p_run.add_argument(
+        "--parallel-workers",
+        type=int,
+        default=None,
+        help=(
+            "Number of parallel workers for execute phase. "
+            "0=force sequential, N>0=force N workers, None=auto-detect "
+            "(parallel if ≥5 folders, otherwise sequential). Default: None (auto-detect)"
+        ),
     )
 
     p_stream = sub.add_parser(
@@ -371,11 +391,16 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
         folders=selected,
         default_scope=cfg.executor.default_run_scope,
     )
-    client = None if args.dry_run else imap_login(cfg.paths.secrets_file, logger)
-    try:
-        execute_actions(
-            client,
-            db,
+
+    # Get parallel_workers setting from CLI args
+    parallel_workers = getattr(args, "parallel_workers", None)
+
+    # Determine which implementation to use
+    if should_use_parallel_mode(cfg.paths.db_file, parallel_workers, logger):
+        # Use parallel implementation
+        execute_actions_parallel(
+            secrets_path=cfg.paths.secrets_file,
+            db_path=cfg.paths.db_file,
             show_progress=cfg.logging.show_progress,
             dry_run=cfg.executor.dry_run,
             strict=cfg.executor.strict,
@@ -387,10 +412,30 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             backup_moved=getattr(args, "backup_moved", False),
             backup_all=getattr(args, "backup_all", False),
             backup_dir=cfg.paths.backup_dir,
+            max_workers=parallel_workers if parallel_workers and parallel_workers > 0 else 5,
         )
-    finally:
-        if client is not None:
-            client.logout()
+    else:
+        # Use existing sequential implementation
+        client = None if args.dry_run else imap_login(cfg.paths.secrets_file, logger)
+        try:
+            execute_actions(
+                client,
+                db,
+                show_progress=cfg.logging.show_progress,
+                dry_run=cfg.executor.dry_run,
+                strict=cfg.executor.strict,
+                logger=logger,
+                verbose=cfg.logging.verbose,
+                limit=cfg.executor.limit,
+                folders=exec_folders,
+                verify_moves=cfg.executor.verify_moves,
+                backup_moved=getattr(args, "backup_moved", False),
+                backup_all=getattr(args, "backup_all", False),
+                backup_dir=cfg.paths.backup_dir,
+            )
+        finally:
+            if client is not None:
+                client.logout()
     return 0
 
 
@@ -438,21 +483,45 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             debug_headers=args.debug_headers,
             folders=eval_folders,
         )
-        _exec_timer, stats = execute_actions(
-            client,
-            db,
-            show_progress=cfg.logging.show_progress,
-            dry_run=cfg.executor.dry_run,
-            strict=cfg.executor.strict,
-            logger=logger,
-            verbose=cfg.logging.verbose,
-            limit=cfg.executor.limit,
-            folders=eval_folders,
-            verify_moves=cfg.executor.verify_moves,
-            backup_moved=getattr(args, "backup_moved", False),
-            backup_all=getattr(args, "backup_all", False),
-            backup_dir=cfg.paths.backup_dir,
-        )
+        # Get parallel_workers setting from CLI args
+        parallel_workers = getattr(args, "parallel_workers", None)
+
+        # Determine which implementation to use for execute phase
+        if should_use_parallel_mode(cfg.paths.db_file, parallel_workers, logger):
+            # Use parallel implementation
+            _exec_timer, stats = execute_actions_parallel(
+                secrets_path=cfg.paths.secrets_file,
+                db_path=cfg.paths.db_file,
+                show_progress=cfg.logging.show_progress,
+                dry_run=cfg.executor.dry_run,
+                strict=cfg.executor.strict,
+                logger=logger,
+                verbose=cfg.logging.verbose,
+                limit=cfg.executor.limit,
+                folders=eval_folders,
+                verify_moves=cfg.executor.verify_moves,
+                backup_moved=getattr(args, "backup_moved", False),
+                backup_all=getattr(args, "backup_all", False),
+                backup_dir=cfg.paths.backup_dir,
+                max_workers=parallel_workers if parallel_workers and parallel_workers > 0 else 5,
+            )
+        else:
+            # Use existing sequential implementation
+            _exec_timer, stats = execute_actions(
+                client,
+                db,
+                show_progress=cfg.logging.show_progress,
+                dry_run=cfg.executor.dry_run,
+                strict=cfg.executor.strict,
+                logger=logger,
+                verbose=cfg.logging.verbose,
+                limit=cfg.executor.limit,
+                folders=eval_folders,
+                verify_moves=cfg.executor.verify_moves,
+                backup_moved=getattr(args, "backup_moved", False),
+                backup_all=getattr(args, "backup_all", False),
+                backup_dir=cfg.paths.backup_dir,
+            )
         run_timer.stop()
         summary_context: dict[str, object] = {
             "duration_sec": run_timer.elapsed,
