@@ -17,6 +17,7 @@ from typing import Sequence
 from tqdm import tqdm
 
 from core.connection_pool import IMAPConnectionPool
+from core.database import init_db
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 from core.imap_client import safe_search_all
 
@@ -459,9 +460,16 @@ def build_cache_parallel(
                 timeout=5.0,            # Short timeout OK - no contention
                 check_same_thread=False # Allow thread-safe usage
             )
-            # Initialize schema if needed
-            db.execute("CREATE TABLE IF NOT EXISTS headers (folder TEXT, uid TEXT, data TEXT, updated_at TEXT)")
-            db.execute("CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, folder TEXT, parent TEXT, updated_at TEXT)")
+            # Initialize schema to match main database
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS headers "
+                "(folder TEXT, uid TEXT, data TEXT, updated_at TEXT, "
+                "PRIMARY KEY (folder, uid))"
+            )
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS folders "
+                "(id INTEGER PRIMARY KEY, name TEXT, parent TEXT, updated_at TEXT)"
+            )
 
             # Select folder in read-only mode
             sel_typ, _ = client.select(f'"{folder}"', readonly=True)
@@ -637,6 +645,10 @@ def build_cache_parallel(
         bar.close()
     folders_bar.close()
 
+    # Ensure main database is initialized with correct schema
+    init_conn = init_db(db_path, logger=logger)
+    init_conn.close()  # Close the initialization connection to release locks
+
     # Merge temp databases into main database
     logger.log("INFO", "merge_start", {}, console="🔄 Merging worker databases...")
 
@@ -658,8 +670,17 @@ def build_cache_parallel(
             continue
 
         try:
-            # Attach temp database and copy data
-            main_db.execute(f"ATTACH DATABASE '{temp_db_path}' AS worker_{worker_id}")
+            # Attach temp database with retry for lock issues
+            max_attach_retries = 3
+            for attach_attempt in range(max_attach_retries):
+                try:
+                    main_db.execute(f"ATTACH DATABASE '{temp_db_path}' AS worker_{worker_id}")
+                    break
+                except sqlite3.OperationalError as lock_error:
+                    if "database is locked" in str(lock_error) and attach_attempt < max_attach_retries - 1:
+                        time.sleep(0.5)  # Small delay before retry
+                        continue
+                    raise
 
             # Copy headers
             main_db.execute(f"""
@@ -669,8 +690,8 @@ def build_cache_parallel(
 
             # Copy folders
             main_db.execute(f"""
-                INSERT OR REPLACE INTO folders (folder, parent, updated_at)
-                SELECT folder, parent, updated_at FROM worker_{worker_id}.folders
+                INSERT OR REPLACE INTO folders (name, parent, updated_at)
+                SELECT name, parent, updated_at FROM worker_{worker_id}.folders
             """)
 
             main_db.execute(f"DETACH DATABASE worker_{worker_id}")
@@ -780,7 +801,17 @@ def build_cache_parallel(
                 continue
 
             try:
-                main_db.execute(f"ATTACH DATABASE '{temp_db_path}' AS worker_{worker_id}")
+                # Attach temp database with retry for lock issues
+                max_attach_retries = 3
+                for attach_attempt in range(max_attach_retries):
+                    try:
+                        main_db.execute(f"ATTACH DATABASE '{temp_db_path}' AS worker_{worker_id}")
+                        break
+                    except sqlite3.OperationalError as lock_error:
+                        if "database is locked" in str(lock_error) and attach_attempt < max_attach_retries - 1:
+                            time.sleep(0.5)  # Small delay before retry
+                            continue
+                        raise
 
                 main_db.execute(f"""
                     INSERT OR REPLACE INTO headers (folder, uid, data, updated_at)
@@ -788,8 +819,8 @@ def build_cache_parallel(
                 """)
 
                 main_db.execute(f"""
-                    INSERT OR REPLACE INTO folders (folder, parent, updated_at)
-                    SELECT folder, parent, updated_at FROM worker_{worker_id}.folders
+                    INSERT OR REPLACE INTO folders (name, parent, updated_at)
+                    SELECT name, parent, updated_at FROM worker_{worker_id}.folders
                 """)
 
                 main_db.execute(f"DETACH DATABASE worker_{worker_id}")
