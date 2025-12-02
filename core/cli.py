@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import imaplib
 import sqlite3
 from pathlib import Path
 from typing import Callable, Sequence
@@ -349,7 +350,12 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
                 folder_sizes=folder_sizes,
             )
     finally:
-        client.logout()
+        try:
+            client.logout()
+        except (imaplib.IMAP4.abort, OSError, EOFError):
+            # Server may have closed connection or lost socket during long caching
+            # This is safe to ignore since we're exiting anyway
+            pass
     return 0
 
 
@@ -435,7 +441,12 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             )
         finally:
             if client is not None:
-                client.logout()
+                try:
+                    client.logout()
+                except (imaplib.IMAP4.abort, OSError, EOFError):
+                    # Server may have closed connection or lost socket
+                    # Safe to ignore during exit
+                    pass
     return 0
 
 
@@ -550,7 +561,12 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
         )
     finally:
         if client is not None:
-            client.logout()
+            try:
+                client.logout()
+            except (imaplib.IMAP4.abort, OSError, EOFError):
+                # Server may have closed connection or lost socket
+                # Safe to ignore during exit
+                pass
     return 0
 
 
@@ -637,7 +653,12 @@ def handle_stream(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogg
         )
     finally:
         if client is not None:
-            client.logout()
+            try:
+                client.logout()
+            except (imaplib.IMAP4.abort, OSError, EOFError):
+                # Server may have closed connection or lost socket
+                # Safe to ignore during exit
+                pass
     return 0
 
 
