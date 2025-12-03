@@ -1954,7 +1954,8 @@ class RuleWizard:
         elif field == "to":
             items = self.cache_engine.extract_unique_to_addresses(limit=2000)
         elif field == "subject":
-            items = self.cache_engine.extract_unique_subjects(limit=500)
+            # Remove 500 limit - fetch all unique subjects
+            items = self.cache_engine.extract_unique_subjects(limit=999999)
         else:
             items = self.cache_engine.extract_other_header(field, limit=1000)
 
