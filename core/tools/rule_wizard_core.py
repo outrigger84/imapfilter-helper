@@ -1784,6 +1784,10 @@ class RuleWizard:
 
         choice = input("\nChoice (1-4): ").strip()
 
+        # Default to option 1 (save and continue) if user presses Enter
+        if not choice:
+            choice = "1"
+
         if choice == "1" or choice == "2":
             success, message = save_rule(rule, self.config.paths.rules_dir)
             if not success:
