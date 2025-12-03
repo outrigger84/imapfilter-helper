@@ -1648,6 +1648,57 @@ class RuleWizard:
                 print(f"  • {rule_name}: {format_count(count)} messages")
         print("=" * 60)
 
+    def _format_domain_selection(self, domain: str) -> str:
+        """ISSUE #5 FIX: Create standardized '[All from domain]' format.
+
+        This provides a single point to generate the domain-wide selection string,
+        ensuring consistent formatting across batch mode and additional conditions.
+
+        Args:
+            domain: The domain name (e.g., 'example.com')
+
+        Returns:
+            Formatted string: '[All from example.com]'
+        """
+        return f"[All from {domain}]"
+
+    def _is_domain_selection(self, selection: str) -> bool:
+        """ISSUE #5 FIX: Detect if a selection is a domain-wide selection.
+
+        Checks if a string is in the '[All from domain]' format.
+
+        Args:
+            selection: The selection string to check
+
+        Returns:
+            True if selection is domain-wide format, False otherwise
+
+        Examples:
+            '[All from example.com]' -> True
+            'user@example.com' -> False
+        """
+        return selection.startswith("[All from ") and selection.endswith("]")
+
+    def _extract_domain_from_selection(self, selection: str) -> Optional[str]:
+        """ISSUE #5 FIX: Extract domain from '[All from domain]' selection.
+
+        Safely extracts domain name from the domain-wide selection format.
+
+        Args:
+            selection: A selection string, potentially in '[All from domain]' format
+
+        Returns:
+            Domain name if selection is domain format, None otherwise
+
+        Examples:
+            '[All from example.com]' -> 'example.com'
+            'user@example.com' -> None
+        """
+        if self._is_domain_selection(selection):
+            # Remove '[All from ' prefix and ']' suffix
+            return selection[10:-1]  # len("[All from ") = 10
+        return None
+
     def _convert_domain_selection_to_pattern(self, selection: str) -> str:
         """Convert '[All from domain]' selection to '@domain' pattern.
 
@@ -1664,9 +1715,8 @@ class RuleWizard:
             '[All from example.com]' -> '@example.com'
             'user@example.com' -> 'user@example.com'
         """
-        if selection.startswith("[All from "):
-            # Extract domain from '[All from domain]' format
-            domain = selection.replace("[All from ", "").replace("]", "")
+        domain = self._extract_domain_from_selection(selection)
+        if domain:
             return f"@{domain}"
         return selection
 
@@ -1685,7 +1735,8 @@ class RuleWizard:
             pattern = batch_target.value
             self.rule_builder.add_condition(header="from", match_type="contains", value=pattern)
 
-        print(f"\n✓ Condition (pre-populated): sender (from) contains '{pattern}'")
+        # ISSUE #2 FIX: Standardized success message format
+        print(f"\n✓ Condition: sender (from) contains '{pattern}'")
         print(f"  (Estimated to match {format_count(batch_target.estimated_count)} messages)")
 
     def _display_batch_context(self, batch_target: BatchTarget) -> None:
@@ -1740,7 +1791,8 @@ class RuleWizard:
             if not success:
                 print(f"❌ {message}")
                 return 1
-            print(f"✅ {message}")
+            # ISSUE #2 FIX: Standardized success message format
+            print(f"✓ Rule: {message}")
             return 0 if choice == "1" else 130
         elif choice == "3":
             return 0  # Continue without saving
@@ -1831,7 +1883,8 @@ class RuleWizard:
 
         # Step 3: Handle special case for "[All from domain]" selection
         # Uses same conversion logic as batch mode for consistency
-        if value.startswith("[All from "):
+        # ISSUE #5 FIX: Use helper method to check for domain selection
+        if self._is_domain_selection(value):
             pattern = self._convert_domain_selection_to_pattern(value)
             print(f"\nUsing domain pattern: {pattern}")
         else:
@@ -1878,7 +1931,8 @@ class RuleWizard:
         if choice in field_map:
             return field_map[choice]
         elif choice == "6":
-            custom = input("Enter header name: ").strip().lower()
+            # ISSUE #4 FIX: Standardize capitalization in prompts
+            custom = input("Enter Header Name: ").strip().lower()
             return custom if custom else None
         else:
             print("Invalid choice. Please try again.")
@@ -1932,7 +1986,29 @@ class RuleWizard:
             edited_value = self._edit_email_address(selected, f"{field} address")
             return edited_value if edited_value is not None else None
 
-        return selected
+        # ISSUE #3 FIX: Offer confirmation menu for non-email fields
+        # This ensures consistent editing opportunities across all field types
+        print(f"\nSelected {field}: {selected}")
+        response = prompt_yes_no("Use this value?", default=True)
+        if response:
+            return selected
+        else:
+            # User wants to change it
+            print("Options:")
+            print("  1. Select a different value from the list")
+            print("  2. Enter a completely different value")
+            print("  3. Cancel (go back)")
+            choice = input("  > ").strip()
+
+            if choice == "1":
+                # Recursively call to select again
+                return self._select_field_value(field)
+            elif choice == "2":
+                # Manual entry
+                manual = input(f"Enter new {field} value: ").strip()
+                return manual if manual else None
+            else:
+                return None
 
     def _select_from_address_two_step(self) -> Optional[str]:
         """Show two-step from address selector: domain first, then email.
@@ -1984,13 +2060,16 @@ class RuleWizard:
             return None
 
         # Prepend "All from domain" option for consistency with batch mode
+        # ISSUE #5 FIX: Use helper method for consistent format
         domain_total = sum(count for _, count in domain_emails)
-        selector_items = [(f"[All from {selected_domain}]", domain_total)] + domain_emails
+        selector_items = [(self._format_domain_selection(selected_domain), domain_total)] + domain_emails
 
         if len(domain_emails) == 1:
             # Auto-select if only one email (offer all or specific option)
+            # ISSUE #5 FIX: Use helper method for consistent format
+            domain_selection = self._format_domain_selection(selected_domain)
             print(f"\nFound 2 options for {selected_domain}:")
-            print(f"  1. [All from {selected_domain}] ({domain_total} messages)")
+            print(f"  1. {domain_selection} ({domain_total} messages)")
             print(f"  2. {domain_emails[0][0]} ({domain_emails[0][1]} messages)")
 
             choice = input("\nSelect: (1 for all, 2 for specific, or press Enter for all) > ").strip()
@@ -1998,7 +2077,7 @@ class RuleWizard:
                 selected_email = domain_emails[0][0]
             else:
                 # User chose all or just pressed Enter
-                return f"[All from {selected_domain}]"
+                return domain_selection
 
             # Offer post-selection editing
             edited_email = self._edit_email_address(selected_email, "from address")
@@ -2021,12 +2100,13 @@ class RuleWizard:
                 return self._select_from_address_two_step()
 
             # Offer alternative: continue with domain-wide match
+            # ISSUE #5 FIX: Use helper method for consistent format
             domain_response = prompt_yes_no(
                 f"Would you like to match all emails from {selected_domain} instead?",
                 default=False
             )
             if domain_response:
-                return f"[All from {selected_domain}]"
+                return self._format_domain_selection(selected_domain)
 
             return None
 
@@ -2349,7 +2429,8 @@ class RuleWizard:
                 return False
 
             self.rule_builder.add_action("move", target=target)
-            print(f"✓ Action added: move to '{target}'")
+            # ISSUE #2 FIX: Standardized success message format
+            print(f"✓ Action: move to '{target}'")
             return True
 
         elif choice == "2":
@@ -2359,7 +2440,8 @@ class RuleWizard:
                 return False
 
             self.rule_builder.add_action("set_keywords", keywords=keywords)
-            print(f"✓ Action added: add keywords {keywords}")
+            # ISSUE #2 FIX: Standardized success message format
+            print(f"✓ Action: add keywords {keywords}")
             return True
 
         elif choice == "3":
@@ -2369,7 +2451,8 @@ class RuleWizard:
                 return False
 
             self.rule_builder.add_action("remove_keywords", keywords=keywords)
-            print(f"✓ Action added: remove keywords {keywords}")
+            # ISSUE #2 FIX: Standardized success message format
+            print(f"✓ Action: remove keywords {keywords}")
             return True
 
         else:
@@ -2495,7 +2578,10 @@ class RuleWizard:
 
         # For now, return single keyword
         # TODO: Support multiple selection if FilterableListSelector is enhanced
-        return [keyword]
+        selected_keywords = [keyword]
+
+        # ISSUE #3 FIX: Show confirmation/editing menu for selected keywords
+        return self._confirm_keywords(selected_keywords)
 
     def _enter_keywords_manually(self) -> Optional[List[str]]:
         """Prompt user to enter keywords as comma-separated text.
@@ -2577,6 +2663,92 @@ class RuleWizard:
             print(f"✓ Removed keyword: {keyword}")
         else:
             print(f"⚠️  Keyword not found: {keyword}")
+
+    def _confirm_keywords(self, keywords: List[str]) -> Optional[List[str]]:
+        """ISSUE #3 FIX: Show confirmation and editing menu for selected keywords.
+
+        Allows user to review, edit, or add more keywords after selection.
+
+        Args:
+            keywords: List of selected keywords
+
+        Returns:
+            Final list of keywords, or None if cancelled
+        """
+        while True:
+            print(f"\nSelected keywords: {keywords}")
+            print("\nOptions:")
+            print("  1. Confirm and use these keywords")
+            print("  2. Add another keyword")
+            print("  3. Remove a keyword from the list")
+            print("  4. Start over and select different keywords")
+            print("  5. Cancel (go back)")
+
+            choice = input("\n  > ").strip()
+
+            if choice == "1":
+                # Confirm - return the keywords
+                return keywords if keywords else None
+
+            elif choice == "2":
+                # Add another keyword
+                print("\nAdd another keyword:")
+                print("  1. Select from list")
+                print("  2. Enter manually")
+
+                sub_choice = input("  > ").strip()
+
+                if sub_choice == "1":
+                    # Recursive call to select from list
+                    additional = self._get_keywords()
+                    if additional:
+                        # Combine with existing, removing duplicates
+                        keywords = list(dict.fromkeys(keywords + additional))
+                        print(f"✓ Keywords updated: {keywords}")
+                    continue
+
+                elif sub_choice == "2":
+                    # Enter manually
+                    new_kw = input("Enter keyword: ").strip()
+                    if new_kw and new_kw not in keywords:
+                        keywords.append(new_kw)
+                        print(f"✓ Added: {new_kw}")
+                    elif new_kw in keywords:
+                        print(f"⚠️  Already in list: {new_kw}")
+                    continue
+
+            elif choice == "3":
+                # Remove a keyword
+                if len(keywords) == 1:
+                    print("⚠️  Cannot remove - this is your only keyword.")
+                    continue
+
+                print("\nRemove which keyword?")
+                for i, kw in enumerate(keywords, 1):
+                    print(f"  {i}. {kw}")
+
+                try:
+                    idx = int(input("  > ").strip()) - 1
+                    if 0 <= idx < len(keywords):
+                        removed = keywords.pop(idx)
+                        print(f"✓ Removed: {removed}")
+                    else:
+                        print("Invalid choice.")
+                except ValueError:
+                    print("Invalid input.")
+                continue
+
+            elif choice == "4":
+                # Start over
+                print("\nStarting keyword selection again...")
+                return self._get_keywords()
+
+            elif choice == "5":
+                # Cancel
+                return None
+
+            else:
+                print("Invalid choice. Please select 1-5.")
 
     def _configure_metadata(self) -> bool:
         """Set rule name and priority.
@@ -2673,7 +2845,8 @@ class RuleWizard:
             # Save rule and exit
             success, message = save_rule(rule, self.config.paths.rules_dir)
             if success:
-                print(f"\nSuccess! {message}")
+                # ISSUE #2 FIX: Standardized success message format
+                print(f"\n✓ Rule: {message}")
                 return 0
             else:
                 print(f"\nError saving rule: {message}")
@@ -2683,7 +2856,8 @@ class RuleWizard:
             # Save rule and edit in rule_manager
             success, message = save_rule(rule, self.config.paths.rules_dir)
             if success:
-                print(f"\nSuccess! {message}")
+                # ISSUE #2 FIX: Standardized success message format
+                print(f"\n✓ Rule: {message}")
                 # Extract filename from message like "Saved to /path/to/file.json"
                 try:
                     from pathlib import Path
@@ -2728,7 +2902,8 @@ class RuleWizard:
             # Default: save and create new rule (choice == "5" or empty)
             success, message = save_rule(rule, self.config.paths.rules_dir)
             if success:
-                print(f"\nSuccess! {message}")
+                # ISSUE #2 FIX: Standardized success message format
+                print(f"\n✓ Rule: {message}")
                 print("\nStarting new rule...\n")
                 # Reset builder for new rule
                 self.rule_builder = RuleBuilder()
