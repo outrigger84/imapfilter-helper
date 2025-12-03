@@ -12,6 +12,7 @@ from core.config import AppConfig, build_default_config
 from core.database import init_db
 from core.executor import execute_actions, execute_actions_parallel, should_use_parallel_mode
 from core.imap_client import imap_login, list_all_folders, get_folder_sizes
+from core.keywords import KeywordManager
 from core.logging_utils import JsonLogger, PhaseTimer
 from core.rule_engine import evaluate_rules, load_rules
 from core.stream_processor import stream_messages
@@ -232,6 +233,19 @@ def build_parser() -> argparse.ArgumentParser:
         "compact-cache",
         help="Prune cached headers for messages that have already been handled",
     )
+
+    p_keywords = sub.add_parser("keywords", help="Manage predefined keywords")
+    kw_sub = p_keywords.add_subparsers(dest="kw_cmd", required=True)
+
+    kw_sub.add_parser("list", help="List all predefined keywords")
+
+    p_kw_add = kw_sub.add_parser("add", help="Add a new predefined keyword")
+    p_kw_add.add_argument("keyword", help="Keyword to add")
+
+    p_kw_remove = kw_sub.add_parser("remove", help="Remove a predefined keyword")
+    p_kw_remove.add_argument("keyword", help="Keyword to remove")
+
+    kw_sub.add_parser("edit", help="Edit keywords in default editor")
 
     return parser
 
@@ -738,6 +752,87 @@ def handle_compact_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: J
     return 0
 
 
+def handle_keywords(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
+    """Handle the ``keywords`` command for managing predefined keywords."""
+
+    del db, logger  # Unused – kept for consistent handler signature
+
+    keyword_manager = KeywordManager(cfg.paths.data_dir)
+
+    if args.kw_cmd == "list":
+        keywords = keyword_manager.get_keywords()
+        if not keywords:
+            print("No predefined keywords found.")
+        else:
+            print("Predefined Keywords:")
+            for i, kw in enumerate(keywords, 1):
+                print(f"  {i}. {kw}")
+        return 0
+
+    elif args.kw_cmd == "add":
+        keyword = args.keyword.strip()
+        if not keyword:
+            print("Error: Keyword cannot be empty")
+            return 1
+
+        if keyword_manager.add_keyword(keyword):
+            print(f"✓ Added keyword: {keyword}")
+            return 0
+        else:
+            print(f"⚠️  Keyword already exists: {keyword}")
+            return 1
+
+    elif args.kw_cmd == "remove":
+        keyword = args.keyword.strip()
+        if not keyword:
+            print("Error: Keyword cannot be empty")
+            return 1
+
+        if keyword_manager.remove_keyword(keyword):
+            print(f"✓ Removed keyword: {keyword}")
+            return 0
+        else:
+            print(f"⚠️  Keyword not found: {keyword}")
+            return 1
+
+    elif args.kw_cmd == "edit":
+        import subprocess
+        import os
+
+        # Try to open the config file with the default editor
+        config_file = cfg.paths.data_dir / "keywords.json"
+        editor = None
+
+        # Check environment variables first
+        editor = os.environ.get("EDITOR") or os.environ.get("VISUAL")
+
+        # Fallback to common editors if no env var set
+        if not editor:
+            for cmd in ["nano", "vi", "vim", "gedit", "code"]:
+                try:
+                    result = subprocess.run(["which", cmd], capture_output=True, check=False)
+                    if result.returncode == 0:
+                        editor = cmd
+                        break
+                except (OSError, subprocess.CalledProcessError):
+                    pass
+
+        if not editor:
+            print(f"Could not find an editor. Please edit manually: {config_file}")
+            print("Format:")
+            print('  {"predefined_keywords": ["keyword1", "keyword2", ...]}\n')
+            return 1
+
+        try:
+            subprocess.run([editor, str(config_file)], check=False)
+            return 0
+        except (OSError, subprocess.CalledProcessError) as e:
+            print(f"Error opening editor: {e}")
+            return 1
+
+    return 1
+
+
 COMMAND_HANDLERS: dict[str, Handler] = {
     "build-cache": handle_build_cache,
     "evaluate": handle_evaluate,
@@ -747,6 +842,7 @@ COMMAND_HANDLERS: dict[str, Handler] = {
     "clear-pending": handle_clear_pending,
     "clear-cache": handle_clear_cache,
     "compact-cache": handle_compact_cache,
+    "keywords": handle_keywords,
 }
 
 
@@ -783,4 +879,5 @@ __all__ = [
     "handle_clear_pending",
     "handle_clear_cache",
     "handle_compact_cache",
+    "handle_keywords",
 ]

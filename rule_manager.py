@@ -25,6 +25,7 @@ from core.config import build_default_config
 from core.database import init_db
 from core.logging_utils import JsonLogger
 from core.rule_engine import evaluate_rules, load_rules
+from core.rule_utils import slugify, generate_filename
 
 
 # ---------------------------------------------------------------------------
@@ -67,20 +68,6 @@ def confirm(message: str, *, default: bool = False) -> bool:
             return False
         print("⚠️  Please respond with 'y' or 'n'.")
 
-
-def slugify(value: str) -> str:
-    """Return a filesystem safe slug derived from ``value``."""
-
-    safe: list[str] = []
-    for ch in value.lower():
-        if ch.isalnum():
-            safe.append(ch)
-        elif ch in {" ", "-", ".", "/", "_"}:
-            safe.append("_")
-    slug = "".join(safe).strip("_")
-    while "__" in slug:
-        slug = slug.replace("__", "_")
-    return slug or "rule"
 
 
 # ---------------------------------------------------------------------------
@@ -262,10 +249,19 @@ def summarise_condition(node: Any) -> str:
             label = "ALL" if key == "all" else "ANY"
             return f"Group {label} ({len(children)} entries)"
         header = node.get("header", "<header>")
-        if "regex" in node:
-            return f"{header} ~= {node['regex']}"
+        # Check all 6 match types
+        if "equals" in node:
+            return f"{header} == {node['equals']}"
+        if "not_equals" in node:
+            return f"{header} != {node['not_equals']}"
         if "contains" in node:
             return f"{header} ⊃ {node['contains']}"
+        if "not_contains" in node:
+            return f"{header} ⊅ {node['not_contains']}"
+        if "regex" in node:
+            return f"{header} ~= {node['regex']}"
+        if "not_regex" in node:
+            return f"{header} !~ {node['not_regex']}"
         return f"{header} (custom)"
     if isinstance(node, list):
         return f"Implicit ALL ({len(node)})"
@@ -374,9 +370,17 @@ def edit_simple_condition(node: dict[str, Any]) -> dict[str, Any]:
 
     while True:
         header = node.get("header", "")
-        match_field = "regex" if "regex" in node else "contains"
+        # Detect which match type is being used
+        match_field = None
+        for mtype in ["equals", "not_equals", "contains", "not_contains", "regex", "not_regex"]:
+            if mtype in node:
+                match_field = mtype
+                break
+        if not match_field:
+            match_field = "contains"  # default
         match_value = node.get(match_field, "") if match_field in node else ""
-        extras = {k: v for k, v in node.items() if k not in {"header", "contains", "regex"}}
+        # Exclude all 6 match type keys from extras
+        extras = {k: v for k, v in node.items() if k not in {"header", "equals", "not_equals", "contains", "not_contains", "regex", "not_regex"}}
         extras_summary = ", ".join(
             f"{key}={json.dumps(value, ensure_ascii=False)}" for key, value in extras.items()
         ) or "(none)"
@@ -396,31 +400,111 @@ def edit_simple_condition(node: dict[str, Any]) -> dict[str, Any]:
         if action == "h":
             node["header"] = prompt("  Header name: ")
         elif action == "m":
-            new_type = prompt("  Match field (contains/regex): ").lower()
-            if new_type not in {"contains", "regex"}:
-                print("⚠️  Expected 'contains' or 'regex'.")
-                continue
-            node.pop("contains", None)
-            node.pop("regex", None)
+            new_type = _get_match_type_menu()
+            # Remove all existing match type keys
+            for mtype in ["equals", "not_equals", "contains", "not_contains", "regex", "not_regex"]:
+                node.pop(mtype, None)
             node[new_type] = prompt("  Match value: ")
         elif action == "v":
-            if match_field not in {"contains", "regex"}:
+            if match_field not in {"equals", "not_equals", "contains", "not_contains", "regex", "not_regex"}:
                 print("⚠️  Set the match type first.")
                 continue
             node[match_field] = prompt("  Match value: ", allow_empty=True)
         elif action == "x":
-            edit_generic_dict(node, protected={"header", "contains", "regex"})
+            edit_generic_dict(node, protected={"header", "equals", "not_equals", "contains", "not_contains", "regex", "not_regex"})
+
+
+def _get_match_type_menu() -> str:
+    """Display numbered menu for match types and return the selected type."""
+
+    match_types = [
+        ("equals", "Exact match"),
+        ("not_equals", "Does not match exactly"),
+        ("contains", "Contains substring"),
+        ("not_contains", "Does not contain substring"),
+        ("regex", "Regular expression"),
+        ("not_regex", "Does not match regex"),
+    ]
+
+    while True:
+        print("\nMatch type:")
+        for idx, (type_key, description) in enumerate(match_types, start=1):
+            print(f"  {idx}. {description} ({type_key})")
+
+        raw = input("Select match type (1-6): ").strip()
+        if not raw:
+            print("⚠️  Please enter a number between 1 and 6.")
+            continue
+
+        try:
+            choice = int(raw)
+            if 1 <= choice <= 6:
+                return match_types[choice - 1][0]
+            print("⚠️  Please enter a number between 1 and 6.")
+        except ValueError:
+            print("⚠️  Please enter a valid number.")
+
+
+def _get_action_type_menu() -> str:
+    """Display numbered menu for action types and return the selected type."""
+
+    action_types = [
+        ("move", "Move to folder"),
+        ("set_keywords", "Set keywords (add labels)"),
+        ("remove_keywords", "Remove keywords (remove labels)"),
+    ]
+
+    while True:
+        print("\nAction type:")
+        for idx, (type_key, description) in enumerate(action_types, start=1):
+            print(f"  {idx}. {description}")
+
+        raw = input("Select action type (1-3): ").strip()
+        if not raw:
+            print("⚠️  Please enter a number between 1 and 3.")
+            continue
+
+        try:
+            choice = int(raw)
+            if 1 <= choice <= 3:
+                return action_types[choice - 1][0]
+            print("⚠️  Please enter a number between 1 and 3.")
+        except ValueError:
+            print("⚠️  Please enter a valid number.")
+
+
+def select_header_field() -> str:
+    """Let user choose a header field from menu."""
+    print("\nSelect header field:")
+    print("  1. From (sender address)")
+    print("  2. To (recipient address)")
+    print("  3. Subject")
+    print("  4. List-ID")
+    print("  5. Reply-To")
+    print("  6. Other (enter custom header)")
+
+    while True:
+        choice = input("  > ").strip()
+        field_map = {
+            "1": "from",
+            "2": "to",
+            "3": "subject",
+            "4": "list-id",
+            "5": "reply-to",
+        }
+        if choice in field_map:
+            return field_map[choice]
+        elif choice == "6":
+            custom = prompt("  Enter header name: ")
+            return custom.lower()
+        print("⚠️  Please enter a number 1-6.")
 
 
 def make_condition() -> dict[str, Any]:
     """Create a new match condition using prompts."""
 
-    header = prompt("  Header name: ")
-    while True:
-        match_field = prompt("  Match field (contains/regex): ").lower()
-        if match_field in {"contains", "regex"}:
-            break
-        print("⚠️  Please enter either 'contains' or 'regex'.")
+    header = select_header_field()
+    match_field = _get_match_type_menu()
     value = prompt("  Match value: ")
     return {"header": header, match_field: value}
 
@@ -478,34 +562,99 @@ def edit_action_block(action: dict[str, Any]) -> dict[str, Any]:
 
     if not action:
         action = {"type": "move", "target": ""}
+
     while True:
         act_type = action.get("type", "move")
         target = action.get("target", "")
-        extras = {k: v for k, v in action.items() if k not in {"type", "target"}}
+        keywords = action.get("keywords", [])
+
+        # Build menu options based on action type
+        options: list[tuple[str, str]] = [("t", f"Type: {act_type}")]
+
+        if act_type == "move":
+            options.append(("r", f"Target folder: {target or '<unset>'}"))
+        elif act_type in ("set_keywords", "remove_keywords"):
+            keywords_summary = ", ".join(keywords) if keywords else "<unset>"
+            options.append(("k", f"Keywords: {keywords_summary}"))
+
+        # Add extras and back options
+        extras = {k: v for k, v in action.items() if k not in {"type", "target", "keywords"}}
         extras_summary = ", ".join(
             f"{key}={json.dumps(value, ensure_ascii=False)}" for key, value in extras.items()
         ) or "(none)"
+        options.append(("x", f"Extras: {extras_summary}"))
+        options.append(("b", "Back"))
 
-        choice = choose_menu_option(
-            "Action editor",
-            [
-                ("t", f"Type   : {act_type}"),
-                ("r", f"Target : {target or '<unset>'}"),
-                ("x", f"Extras : {extras_summary}"),
-                ("b", "Back"),
-            ],
-        )
+        choice = choose_menu_option("Action editor", options)
+
         if choice in {None, "b"}:
             return action
+
         if choice == "t":
-            action["type"] = prompt("  Action type: ", allow_empty=True) or act_type
-        elif choice == "r":
+            new_type = _get_action_type_menu()
+            # Clean up old fields when changing type
+            if new_type != act_type:
+                action["type"] = new_type
+                action.pop("target", None)
+                action.pop("keywords", None)
+                if new_type == "move":
+                    action["target"] = ""
+                else:
+                    action["keywords"] = []
+
+        elif choice == "r" and act_type == "move":
             action["target"] = prompt("  Target folder: ", allow_empty=True)
+
+        elif choice == "k" and act_type in ("set_keywords", "remove_keywords"):
+            # Edit keywords array
+            keywords = action.get("keywords", [])
+            while True:
+                print("\nCurrent keywords:")
+                if keywords:
+                    for i, kw in enumerate(keywords, 1):
+                        print(f"  {i}. {kw}")
+                else:
+                    print("  (none)")
+
+                print("\nOptions:")
+                print("  a. Add keyword")
+                print("  r. Remove keyword")
+                print("  c. Clear all")
+                print("  d. Done")
+
+                kw_choice = input("  > ").strip().lower()
+
+                if kw_choice == "a":
+                    kw = prompt("Enter keyword: ")
+                    if kw and kw not in keywords:
+                        keywords.append(kw)
+                        print(f"✓ Added: {kw}")
+
+                elif kw_choice == "r":
+                    if keywords:
+                        idx_str = input("Enter number to remove: ").strip()
+                        try:
+                            idx = int(idx_str) - 1
+                            if 0 <= idx < len(keywords):
+                                removed = keywords.pop(idx)
+                                print(f"✓ Removed: {removed}")
+                        except ValueError:
+                            print("⚠️  Invalid number")
+
+                elif kw_choice == "c":
+                    if confirm("Clear all keywords?", default=False):
+                        keywords.clear()
+                        print("✓ Cleared all keywords")
+
+                elif kw_choice == "d":
+                    action["keywords"] = keywords
+                    break
+
         elif choice == "x":
-            extras = {k: v for k, v in action.items() if k not in {"type", "target"}}
+            extras = {k: v for k, v in action.items() if k not in {"type", "target", "keywords"}}
             edit_generic_dict(extras)
             for key in list(action):
-                if key not in {"type", "target"}:
+                if key not in {"type", "target", "keywords"}:
                     action.pop(key)
             action.update(extras)
 
@@ -717,6 +866,82 @@ class RuleManager:
             print("🗑️  Rule removed (file did not exist on disk).")
         self.rules.remove(rule)
 
+    def batch_delete_rules(self) -> None:
+        """Delete multiple rules at once with confirmation."""
+        if not self.rules:
+            print("No rules are available yet.")
+            return
+
+        # Display all rules
+        print("\n📋 Available rules (for batch deletion):")
+        for i, rule in enumerate(self.rules, 1):
+            action_summary = summarise_action(rule.data.get('action'))
+            print(f"  {i:>3}. [{rule.priority:>4}] {rule.name} — {action_summary}")
+
+        # Get rule numbers to delete
+        while True:
+            user_input = input("\nEnter rule numbers to delete (e.g., 1,3,5 or 1-5): ").strip()
+            if not user_input:
+                print("Batch deletion cancelled.")
+                return
+
+            # Parse user input (support both comma-separated and ranges)
+            indices_to_delete = set()
+            try:
+                for part in user_input.split(","):
+                    part = part.strip()
+                    if "-" in part:
+                        # Handle range like "1-5"
+                        start, end = part.split("-")
+                        start, end = int(start.strip()), int(end.strip())
+                        indices_to_delete.update(range(start, end + 1))
+                    else:
+                        # Handle single number
+                        indices_to_delete.add(int(part))
+
+                # Validate indices
+                invalid = [i for i in indices_to_delete if i < 1 or i > len(self.rules)]
+                if invalid:
+                    print(f"⚠️  Invalid rule numbers: {invalid}. Please try again.")
+                    continue
+
+                break
+            except ValueError:
+                print("⚠️  Invalid input format. Please enter numbers (e.g., 1,3,5 or 1-5).")
+
+        # Sort indices in reverse so deletion doesn't affect remaining indices
+        sorted_indices = sorted(indices_to_delete, reverse=True)
+
+        # Show selected rules for confirmation
+        print(f"\n🗑️  Will delete {len(sorted_indices)} rule(s):")
+        for idx in sorted(indices_to_delete):  # Show in original order
+            rule = self.rules[idx - 1]
+            print(f"    - {rule.name}")
+
+        # Confirm deletion
+        if not confirm("\nDelete these rules?", default=False):
+            print("Batch deletion cancelled.")
+            return
+
+        # Delete selected rules
+        deleted_count = 0
+        for idx in sorted_indices:
+            rule = self.rules[idx - 1]
+            if rule.file.exists():
+                backup = rule.file.with_suffix(".bak")
+                shutil.copy2(rule.file, backup)
+                rule.file.unlink()
+                print(f"  ✓ Deleted: {rule.name} (backup: {backup.name})")
+            else:
+                print(f"  ✓ Removed: {rule.name} (file did not exist)")
+            deleted_count += 1
+
+        # Update rules list
+        for idx in sorted_indices:
+            self.rules.pop(idx - 1)
+
+        print(f"\n✅ Successfully deleted {deleted_count} rule(s).")
+
     def test_rule(self, rule: RuleRecord) -> None:
         db_path = self.config.paths.db_file
         if not db_path.exists():
@@ -799,6 +1024,7 @@ class RuleManager:
                     ("c", "Create rule"),
                     ("e", "Edit rule"),
                     ("d", "Delete rule"),
+                    ("b", "Batch delete rules"),
                     ("p", "Priority manager"),
                     ("r", "Reload from disk"),
                     ("q", "Quit"),
@@ -824,6 +1050,9 @@ class RuleManager:
             elif action == "d":
                 self.refresh_rules()
                 self.delete_rule()
+            elif action == "b":
+                self.refresh_rules()
+                self.batch_delete_rules()
             elif action == "p":
                 self.refresh_rules()
                 self.reorder_priorities()

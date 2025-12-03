@@ -1023,7 +1023,15 @@ def execute_actions(
     distinct_uids = distinct_cur.fetchone()[0] or 0
     suppressed = pending_total - distinct_uids
 
-    order_clause = "ORDER BY folder, target, priority DESC, created_at ASC, id ASC"
+    # Order by effective priority first (ensures keywords execute before moves across all rules)
+    # Then by folder/target for batch processing, then by creation order
+    order_clause = "ORDER BY priority DESC, folder, target, created_at ASC, id ASC"
+
+    # Deduplication: Keep only one occurrence of each unique action per UID
+    # PARTITION BY (uid, rule_name, action_type, target, action_data) allows:
+    # - All actions from same rule to execute
+    # - Different rules' actions to execute
+    # - Only prevents identical duplicate actions
     dedup_cte = """
         WITH ranked AS (
             SELECT
@@ -1037,8 +1045,8 @@ def execute_actions(
                 action_type,
                 action_data,
                 ROW_NUMBER() OVER (
-                    PARTITION BY uid
-                    ORDER BY priority DESC, created_at ASC, id ASC
+                    PARTITION BY uid, rule_name, action_type, target, action_data
+                    ORDER BY created_at ASC, id ASC
                 ) AS rn
             FROM actions
             WHERE status='pending'
@@ -2130,7 +2138,8 @@ def execute_actions(
         if not rows:
             break
         for a_id, uid, folder, target, rule_name, _priority, _created_at, action_type, action_data in rows:
-            key = (folder, target)
+            # Group by (folder, target, action_type) to prevent mixing moves with keyword actions
+            key = (folder, target, action_type)
             if current_key is not None and key != current_key:
                 flush_group()
             if key != current_key:

@@ -1,0 +1,64 @@
+[
+  {
+    "name": "Mark newsletters with newsletter keyword",
+    "priority": 100,
+    "conditions": [
+      {
+        "header": "from",
+        "contains": "newsletter@"
+      }
+    ],
+    "action": {
+      "type": "set_keywords",
+      "keywords": ["newsletter", "\\Seen"]
+    }
+  },
+  {
+    "name": "Mark important messages with urgent flag",
+    "priority": 95,
+    "conditions": {
+      "any": [
+        {
+          "header": "subject",
+          "contains": "[URGENT]"
+        },
+        {
+          "header": "subject",
+          "contains": "[IMPORTANT]"
+        }
+      ]
+    },
+    "action": {
+      "type": "set_keywords",
+      "keywords": ["urgent", "\\Flagged"]
+    }
+  },
+  {
+    "name": "Remove work flag from personal emails",
+    "priority": 90,
+    "conditions": [
+      {
+        "header": "from",
+        "contains": "@personal.com"
+      }
+    ],
+    "action": {
+      "type": "remove_keywords",
+      "keywords": ["work"]
+    }
+  },
+  {
+    "name": "Move spam to Junk folder",
+    "priority": 85,
+    "conditions": [
+      {
+        "header": "subject",
+        "contains": "SPAM"
+      }
+    ],
+    "action": {
+      "type": "move",
+      "target": "Junk"
+    }
+  }
+]

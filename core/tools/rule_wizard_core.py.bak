@@ -1566,22 +1566,7 @@ class RuleWizard:
         )
         selected_domain = curses.wrapper(selector.run)
         if not selected_domain:
-            # ISSUE #6 FIX: Enhanced domain cancellation with menu options
-            print("\nDomain selection cancelled.")
-            print("\nWhat would you like to do?")
-            print("  1. Retry domain selection")
-            print("  2. Exit batch mode")
-            print("  3. Cancel")
-
-            choice = input("\nChoice (1-3): ").strip()
-            if choice == "1":
-                return self._select_batch_target(clusters)
-            elif choice == "2":
-                print("\nExiting batch mode. You can continue with the normal wizard.")
-                return None
-            else:
-                return None
-
+            return None
 
         # Find the cluster
         cluster = self.coverage_analyzer.find_cluster(selected_domain)
@@ -1685,7 +1670,7 @@ class RuleWizard:
             pattern = batch_target.value
             self.rule_builder.add_condition(header="from", match_type="contains", value=pattern)
 
-        print(f"\n✓ Condition (pre-populated): sender (from) contains '{pattern}'")
+        print(f"\n✓ Pre-populated condition: sender (from) contains '{pattern}'")
         print(f"  (Estimated to match {format_count(batch_target.estimated_count)} messages)")
 
     def _display_batch_context(self, batch_target: BatchTarget) -> None:
@@ -2227,9 +2212,9 @@ class RuleWizard:
         """
         print(f"\nSelected {field_name}: {email}")
         print("\nOptions:")
-        print(f"  1. Confirm and use this {field_name} (or just press Enter)")
+        print(f"  1. Use this {field_name} (press Enter)")
         print(f"  2. Edit this {field_name}")
-        print("  3. Enter a completely different address")
+        print("  3. Enter a different address")
         print("  4. Cancel (go back)")
 
         choice = input("\n  > ").strip()
@@ -2497,11 +2482,11 @@ class RuleWizard:
         # TODO: Support multiple selection if FilterableListSelector is enhanced
         return [keyword]
 
-    def _enter_keywords_manually(self) -> Optional[List[str]]:
+    def _enter_keywords_manually(self) -> List[str]:
         """Prompt user to enter keywords as comma-separated text.
 
         Returns:
-            List of keywords, or None if cancelled
+            List of keywords, empty list if cancelled
         """
         print("\nEnter keywords (comma-separated):")
         print("Examples: Important, Work, Personal")
@@ -2509,17 +2494,17 @@ class RuleWizard:
         keywords_input = input("  > ").strip()
 
         if not keywords_input:
-            return None
+            return []
 
         # Parse keywords and clean them
         keywords = [kw.strip() for kw in keywords_input.split(",") if kw.strip()]
-        return keywords if keywords else None
+        return keywords
 
-    def _manage_keywords(self) -> Optional[List[str]]:
+    def _manage_keywords(self) -> List[str]:
         """Offer keyword management options (add, remove, list).
 
         Returns:
-            List of selected keywords, or None if cancelled
+            List of selected keywords (for consistency with other _get_* methods)
         """
         while True:
             print("\nManage predefined keywords:")

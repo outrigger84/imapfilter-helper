@@ -197,7 +197,7 @@ section_header("Test 3: Component Initialization")
 
 print("\n3.1 Initialize RuleWizard with config...")
 try:
-    wizard = rule_wizard.RuleWizard(config)
+    wizard = rule_wizard.RuleWizard(config, show_progress=False)
     test_result("RuleWizard instantiation", True)
 except Exception as e:
     test_result("RuleWizard instantiation", False, str(e))
@@ -216,7 +216,7 @@ except AssertionError as e:
 print("\n3.3 Verify cache engine can be initialized...")
 try:
     from core.tools.rule_wizard_core import CacheQueryEngine
-    engine = CacheQueryEngine(cache_path)
+    engine = CacheQueryEngine(cache_path, show_progress=False)
 
     # Test basic query
     cursor = engine.conn.cursor()
@@ -231,7 +231,7 @@ except Exception as e:
 print("\n3.4 Test cache query methods...")
 try:
     from core.tools.rule_wizard_core import CacheQueryEngine
-    engine = CacheQueryEngine(cache_path)
+    engine = CacheQueryEngine(cache_path, show_progress=False)
 
     # Test extract_unique_from_addresses
     from_addrs = engine.extract_unique_from_addresses(limit=5)
@@ -257,7 +257,7 @@ print("\n3.5 Test EmailPatternExtractor...")
 try:
     from core.tools.rule_wizard_core import EmailPatternExtractor, CacheQueryEngine
     extractor = EmailPatternExtractor()
-    engine = CacheQueryEngine(cache_path)
+    engine = CacheQueryEngine(cache_path, show_progress=False)
 
     from_addrs = engine.extract_unique_from_addresses(limit=1)
     if from_addrs:
@@ -277,7 +277,7 @@ print("\n3.6 Test SubjectPatternExtractor...")
 try:
     from core.tools.rule_wizard_core import SubjectPatternExtractor, CacheQueryEngine
     extractor = SubjectPatternExtractor()
-    engine = CacheQueryEngine(cache_path)
+    engine = CacheQueryEngine(cache_path, show_progress=False)
 
     subjects = engine.extract_unique_subjects(limit=1)
     if subjects:

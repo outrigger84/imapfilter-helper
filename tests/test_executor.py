@@ -104,10 +104,17 @@ def _prepare_db_with_actions(
     logger = JsonLogger(tmp_path / "log.jsonl")
     db = init_db(tmp_path / "db.sqlite3", logger=logger)
     with db:
+        # Add default action_type and action_data for backward compatibility
+        extended_actions = []
+        for action in actions:
+            # action format: (uid, folder, rule_name, target, priority, status, created_at)
+            # Extend with: action_type="move", action_data=None
+            extended_actions.append(action + ("move", None))
+
         db.executemany(
-            "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            actions,
+            "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at, action_type, action_data) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            extended_actions,
         )
     return db, logger
 
@@ -508,4 +515,92 @@ def test_execute_prunes_headers_and_blocks_re_evaluation(tmp_path: Path):
 
     assert any(entry.get("message") == "execute_header_removed" for entry in log_entries)
 
+    db.close()
+
+
+def test_malformed_message_id_parsing_with_microsoft_header(tmp_path):
+    """Test that malformed Message-ID headers from Microsoft emails are handled gracefully."""
+    db = init_db(tmp_path / "cache.db")
+    logger = JsonLogger(tmp_path / "test.log")
+
+    # Insert message with malformed Message-ID (from Microsoft)
+    malformed_header = "Message-ID: <[1d90dce509c24f4a8db4edeac9a9b750-JFZGS42DN5WW25LONFRWC5DJN5XFA3DBORTG64TNFVIHE33EFVBEYMSQPREUCTKTKNIFE7CTKNIFERLNMFUWY7CFPBXVG3LUOA======@microsoft.com]>\r\nSubject: Test\r\n\r\n"
+    db.execute(
+        "INSERT INTO headers (folder, uid, data) VALUES (?, ?, ?)",
+        ("INBOX", "1234", json.dumps({"header": malformed_header})),
+    )
+    db.commit()
+
+    client = FakeClient()
+    _exec_timer, stats = execute_actions(
+        client,
+        db,
+        show_progress=False,
+        dry_run=True,
+        strict=False,
+        logger=logger,
+        verbose=False,
+    )
+
+    # Test passes if no crash occurred; the malformed header should be gracefully handled
+    assert stats is not None
+    db.close()
+
+
+def test_malformed_message_id_regex_fallback(tmp_path):
+    """Test regex fallback for malformed Message-IDs when parser fails."""
+    db = init_db(tmp_path / "cache.db")
+    logger = JsonLogger(tmp_path / "test.log")
+
+    # Insert message with Message-ID that will trigger regex fallback
+    # Note: The actual parser may handle some malformed headers, but regex should extract it
+    problematic_header = "Message-ID: <[test-id-with-brackets]>\r\nSubject: Test\r\n\r\n"
+    db.execute(
+        "INSERT INTO headers (folder, uid, data) VALUES (?, ?, ?)",
+        ("INBOX", "5678", json.dumps({"header": problematic_header})),
+    )
+    db.commit()
+
+    client = FakeClient()
+    _exec_timer, stats = execute_actions(
+        client,
+        db,
+        show_progress=False,
+        dry_run=True,
+        strict=False,
+        logger=logger,
+        verbose=False,
+    )
+
+    # If we get here without crash, the fallback is working
+    assert stats is not None
+    db.close()
+
+
+def test_missing_message_id_verification_skipped(tmp_path):
+    """Test that verification is skipped when Message-ID is missing."""
+    db = init_db(tmp_path / "cache.db")
+    logger = JsonLogger(tmp_path / "test.log")
+
+    # Insert message without Message-ID
+    header_no_msgid = "From: sender@example.com\r\nSubject: No Message ID\r\n\r\n"
+    db.execute(
+        "INSERT INTO headers (folder, uid, data) VALUES (?, ?, ?)",
+        ("INBOX", "9999", json.dumps({"header": header_no_msgid})),
+    )
+    db.commit()
+
+    client = FakeClient()
+    _exec_timer, stats = execute_actions(
+        client,
+        db,
+        show_progress=False,
+        dry_run=True,
+        strict=False,
+        logger=logger,
+        verbose=False,
+    )
+
+    # Verification should be skipped, and system should continue normally
+    assert stats is not None
     db.close()

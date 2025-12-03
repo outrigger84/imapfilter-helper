@@ -1,0 +1,15 @@
+# IMAPFilter - Python Package Requirements
+#
+# Core Dependencies
+# ==============================================================================
+
+# Progress bar library for terminal-based progress indication
+# Used in: cache building, message processing, action execution
+tqdm>=4.50.0
+
+# Testing framework
+# Used for: pytest test suite
+pytest>=6.0.0
+
+# Optional: pytest plugins for enhanced testing
+pytest-cov>=2.10.0  # Coverage reporting

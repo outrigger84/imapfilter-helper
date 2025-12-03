@@ -158,6 +158,53 @@ Rules are JSON files stored in the `rules/` directory. Each rule defines conditi
 
 Common headers: `from`, `to`, `cc`, `subject`, `date`, `message-id`
 
+**Negation operators:**
+
+- **`not_contains`** – negated substring match (excludes if present)
+- **`not_equals`** – negated exact match (case-insensitive)
+- **`not_regex`** – negated regular expression match
+- **`equals`** – exact match (case-insensitive)
+
+**Example with negation - Exclude specific sender:**
+
+```json
+{
+  "name": "Amazon except receipts",
+  "conditions": {
+    "all": [
+      {"header": "from", "contains": "@amazon.com"},
+      {"header": "from", "not_contains": "receipts@"}
+    ]
+  },
+  "action": {
+    "type": "move",
+    "target": "Shopping"
+  }
+}
+```
+
+**NOT wrapper - Negate complex conditions:**
+
+- **`not`** – wrapper that inverts any condition or boolean group
+
+```json
+{
+  "name": "Not from spam domains",
+  "conditions": {
+    "not": {
+      "any": [
+        {"header": "from", "regex": "@spam\\.com$"},
+        {"header": "from", "regex": "@junk\\.com$"}
+      ]
+    }
+  },
+  "action": {
+    "type": "move",
+    "target": "Inbox"
+  }
+}
+```
+
 **Example with nested conditions:**
 
 ```json
@@ -181,6 +228,85 @@ Common headers: `from`, `to`, `cc`, `subject`, `date`, `message-id`
   }
 }
 ```
+
+### Common filtering patterns with negation
+
+**Exclude specific senders from a domain:**
+
+```json
+{
+  "name": "Company emails except no-reply",
+  "conditions": {
+    "all": [
+      {"header": "from", "contains": "@company.com"},
+      {"header": "from", "not_equals": "noreply@company.com"}
+    ]
+  },
+  "action": {"type": "move", "target": "Company"}
+}
+```
+
+**Include everything except spam indicators:**
+
+```json
+{
+  "name": "Clean inbox (no spam)",
+  "conditions": {
+    "not": {
+      "any": [
+        {"header": "subject", "regex": "\\[SPAM\\]"},
+        {"header": "from", "contains": "no-reply"},
+        {"has_keyword": "Junk"}
+      ]
+    }
+  },
+  "action": {"type": "move", "target": "Inbox"}
+}
+```
+
+**Newsletter filtering with multiple exclusions:**
+
+```json
+{
+  "name": "Newsletters (excluding promotions)",
+  "conditions": {
+    "all": [
+      {"header": "from", "regex": "newsletter@.*\\.com"},
+      {"header": "subject", "not_contains": "unsubscribe"},
+      {"header": "subject", "not_contains": "promo"},
+      {"header": "subject", "not_contains": "sale"}
+    ]
+  },
+  "action": {"type": "move", "target": "Newsletters"}
+}
+```
+
+**Combine positive and negative flags:**
+
+```json
+{
+  "name": "Unread important messages",
+  "conditions": {
+    "all": [
+      {"has_keyword": "important"},
+      {"not": {"has_keyword": "\\Seen"}}
+    ]
+  },
+  "action": {"type": "set_keywords", "keywords": ["priority"]}
+}
+```
+
+### When to use which operator
+
+| Scenario | Use This | Example |
+|----------|----------|---------|
+| Exclude one substring | `not_contains` | `{"header": "from", "not_contains": "spam"}` |
+| Exclude exact value | `not_equals` | `{"header": "from", "not_equals": "noreply@"}` |
+| Exclude pattern | `not_regex` | `{"header": "from", "not_regex": "^spam@"}` |
+| Match exact value | `equals` | `{"header": "from", "equals": "user@example.com"}` |
+| Negate complex OR group | `not` wrapper | `{"not": {"any": [...]}}` |
+| Negate complex AND group | `not` wrapper | `{"not": {"all": [...]}}` |
+| Negate flag condition | `not` wrapper | `{"not": {"has_keyword": "\\Seen"}}` |
 
 **Priority:** Lower numbers execute first. Use priorities 1-1000 for flexibility.
 

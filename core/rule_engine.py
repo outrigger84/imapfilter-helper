@@ -220,13 +220,46 @@ def _evaluate_age_condition(date: Optional[datetime], condition: dict) -> bool:
 
 
 def rule_match(header: dict, cond: dict) -> bool:
+    """Evaluate a header condition against the header map.
+
+    Supports:
+    - contains: substring match (case-insensitive)
+    - not_contains: negated substring match
+    - equals: exact match (case-insensitive)
+    - not_equals: negated exact match
+    - regex: regex match (case-insensitive)
+    - not_regex: negated regex match
+    """
     value = header.get(cond.get("header", "").lower(), "") or ""
-    pattern = cond.get("contains") or cond.get("regex")
-    if not pattern:
-        return False
+
+    # Positive operators
+    if "contains" in cond:
+        pattern = cond["contains"]
+        return pattern.lower() in value.lower()
+
+    if "equals" in cond:
+        pattern = cond["equals"]
+        return pattern.lower() == value.lower()
+
     if "regex" in cond:
+        pattern = cond["regex"]
         return bool(re.search(pattern, value, re.I))
-    return pattern.lower() in value.lower()
+
+    # Negative operators
+    if "not_contains" in cond:
+        pattern = cond["not_contains"]
+        return pattern.lower() not in value.lower()
+
+    if "not_equals" in cond:
+        pattern = cond["not_equals"]
+        return pattern.lower() != value.lower()
+
+    if "not_regex" in cond:
+        pattern = cond["not_regex"]
+        return not bool(re.search(pattern, value, re.I))
+
+    # No valid operator found
+    return False
 
 
 def _evaluate_condition_node(
@@ -270,6 +303,16 @@ def _evaluate_condition_node(
             matched = True
             if not _evaluate_age_condition(date, node):
                 return False
+
+        # Check for NOT wrapper
+        if "not" in node:
+            matched = True
+            negated_condition = node.get("not")
+            # Evaluate the negated condition and invert the result
+            if _evaluate_condition_node(header, negated_condition, flags, date):
+                return False
+            # If we get here, negated condition was False, so NOT result is True
+            # Continue evaluating other conditions in this node
 
         if "all" in node:
             matched = True
@@ -508,59 +551,77 @@ def evaluate_rules(
             for rule in rule_list:
                 conds = rule.get("conditions")
                 if conditions_match(header, conds, flags=flags, date=date):
-                    action = rule.get("action", {})
-                    action_type = action.get("type", "move")
+                    # Support both "action" (single) and "actions" (array)
+                    actions = rule.get("actions", [])
+                    if not actions and "action" in rule:
+                        actions = [rule.get("action")]
 
-                    # Serialize action data (keywords, etc.) as JSON if present
-                    action_data = None
-                    if action_type in ("set_keywords", "remove_keywords"):
-                        keywords = action.get("keywords", [])
-                        if keywords:
-                            action_data = json.dumps({"keywords": keywords})
+                    base_priority = int(rule.get("priority", 100))
 
-                    db.execute(
-                        "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at, action_type, action_data) "
-                        "VALUES (?,?,?,?,?,?,?,?,?)",
-                        (
-                            uid,
-                            folder,
-                            rule.get("name"),
-                            action.get("target", ""),
-                            int(rule.get("priority", 100)),
-                            "pending" if not dry_run else "simulated",
-                            now_iso(),
-                            action_type,
-                            action_data,
-                        ),
-                    )
-                    total_matches += 1
-                    folder_match_counts[folder] = folder_match_counts.get(folder, 0) + 1
-                    rule_name = rule.get("name") or "(unnamed)"
-                    rule_match_counts[rule_name] = rule_match_counts.get(rule_name, 0) + 1
-                    console_msg: str | None = None
-                    if verbose:
-                        if action_type == "move":
-                            target = action.get("target") or "(no target)"
-                            console_msg = f"✅ {rule_name} matched {folder}/{uid} → {target}"
-                        elif action_type in ("set_keywords", "remove_keywords"):
+                    # Create action entries with effective priorities
+                    for action_index, action in enumerate(actions):
+                        action_type = action.get("type", "move")
+
+                        # Calculate effective priority to ensure execution order:
+                        # - Keywords (1000) execute before moves (500)
+                        # - Higher rule priority always wins
+                        # - effective_priority = rule_priority * 10000 + type_priority - action_index
+                        type_priority = 1000 if action_type in ("set_keywords", "remove_keywords") else 500
+                        effective_priority = base_priority * 10000 + type_priority - action_index
+
+                        # Serialize action data (keywords, etc.) as JSON if present
+                        action_data = None
+                        if action_type in ("set_keywords", "remove_keywords"):
                             keywords = action.get("keywords", [])
-                            console_msg = f"✅ {rule_name} matched {folder}/{uid} ({action_type}: {keywords})"
-                        else:
-                            console_msg = f"✅ {rule_name} matched {folder}/{uid} ({action_type})"
-                    logger.log(
-                        "INFO",
-                        "rule_match",
-                        {
-                            "rule": rule.get("name"),
-                            "priority": int(rule.get("priority", 100)),
-                            "folder": folder,
-                            "uid": uid,
-                            "action_type": action_type,
-                            "target": action.get("target"),
-                            "dry_run": dry_run,
-                        },
-                        console=console_msg,
-                    )
+                            if keywords:
+                                action_data = json.dumps({"keywords": keywords})
+
+                        db.execute(
+                            "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at, action_type, action_data) "
+                            "VALUES (?,?,?,?,?,?,?,?,?)",
+                            (
+                                uid,
+                                folder,
+                                rule.get("name"),
+                                action.get("target", ""),
+                                effective_priority,
+                                "pending" if not dry_run else "simulated",
+                                now_iso(),
+                                action_type,
+                                action_data,
+                            ),
+                        )
+                        total_matches += 1
+                        folder_match_counts[folder] = folder_match_counts.get(folder, 0) + 1
+                        rule_name = rule.get("name") or "(unnamed)"
+                        rule_match_counts[rule_name] = rule_match_counts.get(rule_name, 0) + 1
+
+                        # Log verbose output for each action
+                        console_msg: str | None = None
+                        if verbose:
+                            if action_type == "move":
+                                target = action.get("target") or "(no target)"
+                                console_msg = f"✅ {rule_name} matched {folder}/{uid} → {target}"
+                            elif action_type in ("set_keywords", "remove_keywords"):
+                                keywords = action.get("keywords", [])
+                                console_msg = f"✅ {rule_name} matched {folder}/{uid} ({action_type}: {keywords})"
+                            else:
+                                console_msg = f"✅ {rule_name} matched {folder}/{uid} ({action_type})"
+                        logger.log(
+                            "INFO",
+                            "rule_match",
+                            {
+                                "rule": rule.get("name"),
+                                "priority": base_priority,
+                                "effective_priority": effective_priority,
+                                "folder": folder,
+                                "uid": uid,
+                                "action_type": action_type,
+                                "target": action.get("target"),
+                                "dry_run": dry_run,
+                            },
+                            console=console_msg,
+                        )
 
     _finalize_folder()
     folders_bar.close()
