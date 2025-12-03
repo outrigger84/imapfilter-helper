@@ -2072,15 +2072,24 @@ class RuleWizard:
             # ISSUE #5 FIX: Use helper method for consistent format
             domain_selection = self._format_domain_selection(selected_domain)
             print(f"\nFound 2 options for {selected_domain}:")
-            print(f"  1. {domain_selection} ({domain_total} messages)")
-            print(f"  2. {domain_emails[0][0]} ({domain_emails[0][1]} messages)")
+            print("(Use arrow keys to navigate, Enter to select, ESC to cancel)")
+            input("Press Enter to select option...")
 
-            choice = input("\nSelect: (1 for all, 2 for specific, or press Enter for all) > ").strip()
-            if choice == "2":
-                selected_email = domain_emails[0][0]
-            else:
-                # User chose all or just pressed Enter
-                return domain_selection
+            selector_items = [(domain_selection, domain_total)] + domain_emails
+            selector = FilterableListSelector(selector_items, f"Select Email Option from {selected_domain}")
+            selected_email = curses.wrapper(selector.run)
+
+            if not selected_email:
+                # User cancelled
+                print("\nEmail option selection cancelled.")
+                retry_response = prompt_yes_no("Would you like to try again?", default=True)
+                if retry_response:
+                    return self._select_from_address_two_step()
+                return None
+
+            # If user selected domain-wide format, return it
+            if self._is_domain_selection(selected_email):
+                return selected_email
 
             # Offer post-selection editing
             edited_email = self._edit_email_address(selected_email, "from address")
