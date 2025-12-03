@@ -1357,15 +1357,13 @@ class RuleWizard:
                 choice = input("\nCreate a new rule anyway? (y/n): ").strip().lower()
                 if choice != "y":
                     return 0
-                # Fall through to normal wizard
-                self._display_welcome()
+                # Fall through to normal wizard (will display welcome there)
             elif stats.uncovered_messages > 0:
                 print(f"\n📋 Found {format_count(stats.uncovered_messages)} emails without rules")
                 choice = input("\nEnter batch mode to create rules? (Y/n): ").strip().lower()
                 if choice != "n":
                     return self.run_batch_mode()
-                else:
-                    self._display_welcome()
+                # Fall through to normal wizard (will display welcome there)
 
             # Normal wizard flow
             return self._run_normal_wizard()
