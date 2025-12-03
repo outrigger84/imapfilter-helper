@@ -345,27 +345,32 @@ class RuleWizard:
             if not selected:
                 return True
 
-        print()
-        print(f"Selected: {selected}")
-
         # Suggest patterns
         extractor = EmailPatternExtractor()
         patterns = extractor.suggest_patterns(selected, self.cache_engine)
 
-        if len(patterns) > 1:
+        if patterns:
             print()
-            print("Suggested patterns (broader patterns match more messages):")
-            for idx, (pattern, desc, count) in enumerate(patterns, 1):
-                print(f"  {idx}. {pattern}")
-                print(f"     {desc} - {format_count(count)} messages")
+            print(f"From: {selected}")
+            print("\nSuggested patterns:")
+            for i, (pattern, description, count) in enumerate(patterns, 1):
+                marker = " [RECOMMENDED]" if i == 2 and len(patterns) > 2 else ""
+                print(f"  {i}. {pattern} ({description} - {format_count(count)} messages){marker}")
+            print(f"  {len(patterns) + 1}. [Edit manually]")
             print()
 
-            pattern_choice = input(f"Select pattern [1-{len(patterns)}] or Enter to use exact: ").strip()
+            pattern_choice = input(f"Select pattern [1-{len(patterns) + 1}]: ").strip()
             if pattern_choice.isdigit():
                 idx = int(pattern_choice) - 1
                 if 0 <= idx < len(patterns):
                     selected = patterns[idx][0]
                     print(f"Using pattern: {selected}")
+                elif idx == len(patterns):
+                    # Manual edit
+                    manual = input("Enter pattern for from: ").strip()
+                    if manual:
+                        selected = manual
+            print()
 
         self.builder.add_condition("from", "contains", selected)
         return True
