@@ -2837,9 +2837,13 @@ class RuleWizard:
         print("  2. Save rule and edit in rule_manager")
         print("  3. Cancel (discard rule)")
         print("  4. Edit (start over)")
-        print("  5. Save rule and create another (default)")
+        print("  5. Save rule and create another")
 
         choice = input("  > ").strip()
+
+        # Default to option 1 (save and exit) if user presses Enter
+        if not choice:
+            choice = "1"
 
         if choice == "1":
             # Save rule and exit
@@ -2899,7 +2903,7 @@ class RuleWizard:
             return 1
 
         else:
-            # Default: save and create new rule (choice == "5" or empty)
+            # Handle option 5 or invalid choice: save and create new rule
             success, message = save_rule(rule, self.config.paths.rules_dir)
             if success:
                 # ISSUE #2 FIX: Standardized success message format
