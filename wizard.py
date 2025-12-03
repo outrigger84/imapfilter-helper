@@ -59,6 +59,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="List all predefined keywords and exit",
     )
 
+    # Cache management options
+    cache_group = parser.add_argument_group("cache management")
+    cache_group.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="Clear wizard cache and exit",
+    )
+    cache_group.add_argument(
+        "--cache-status",
+        action="store_true",
+        help="Display cache status and exit",
+    )
+    cache_group.add_argument(
+        "--cache-ttl",
+        type=int,
+        metavar="HOURS",
+        help="Override cache TTL in hours (default: 6)",
+    )
+
     return parser
 
 
@@ -106,6 +125,25 @@ def handle_keyword_operations(args: argparse.Namespace, config) -> int:
     return 0
 
 
+def handle_cache_operations(args: argparse.Namespace, config, logger) -> int:
+    """Handle cache management operations. Returns 0 to continue to wizard, non-zero to exit."""
+    if not any([args.clear_cache, args.cache_status]):
+        return 0  # No cache operations requested, continue to wizard
+
+    # Initialize wizard instance for cache operations
+    wizard = RuleWizard(config, logger)
+
+    if args.clear_cache:
+        wizard.invalidate_cache()
+        return 1  # Exit after clearing cache
+
+    elif args.cache_status:
+        wizard.show_cache_status()
+        return 1  # Exit after showing status
+
+    return 0
+
+
 def main() -> int:
     """Run the rule wizard."""
     parser = build_parser()
@@ -115,16 +153,27 @@ def main() -> int:
         # Build configuration
         config = build_default_config()
 
+        # Create logger for IMAP operations
+        logger = JsonLogger(config.paths.log_file)
+
         # Handle keyword operations
         exit_code = handle_keyword_operations(args, config)
         if exit_code != 0:
             return exit_code
 
-        # Create logger for IMAP operations
-        logger = JsonLogger(config.paths.log_file)
+        # Handle cache operations
+        exit_code = handle_cache_operations(args, config, logger)
+        if exit_code != 0:
+            return exit_code
 
-        # Initialize and run wizard
+        # Initialize wizard
         wizard = RuleWizard(config, logger)
+
+        # Set cache TTL override if provided
+        if args.cache_ttl:
+            wizard.cache_ttl_override = args.cache_ttl
+
+        # Run wizard
         return wizard.run()
 
     except KeyboardInterrupt:

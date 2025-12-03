@@ -1289,12 +1289,96 @@ class RuleWizard:
         self.subject_extractor = SubjectPatternExtractor()
         self.rule_builder = RuleBuilder()
 
+        # NEW: Initialize wizard cache
+        from core.wizard_cache import WizardCache
+        cache_path = self.config.paths.data_dir / "wizard_cache.json"
+        self.wizard_cache = WizardCache(cache_path)
+
         # Validate cache exists
         if not self.config.paths.db_file.exists():
             raise ValueError(
                 f"Cache database not found at {self.config.paths.db_file}. "
                 "Please run 'build-cache' first."
             )
+
+    def _warm_cache(self):
+        """
+        Pre-fetch and cache frequently-used data on wizard startup.
+
+        This prevents delays during rule creation by loading data in advance.
+        Called from run() before showing welcome message.
+        """
+        print("\nPreparing wizard data...")
+
+        # Check if keyword cache is valid
+        cached_keywords = self.wizard_cache.get_keywords()
+        if cached_keywords is None:
+            # Cache miss - extract now
+            try:
+                print("Extracting keywords from cache (this may take a moment)...")
+                keywords = self.cache_engine.extract_unique_keywords(limit=999999, min_count=1)
+                self.wizard_cache.set_keywords(keywords)
+                print(f"✓ Cached {len(keywords)} unique keywords")
+            except Exception as e:
+                print(f"⚠️  Could not cache keywords: {e}")
+        else:
+            print(f"✓ Using cached keywords ({len(cached_keywords)} available)")
+
+        # Pre-fetch folders on startup (USER CONFIRMED)
+        print("Fetching folder list from mail server...")
+        cached_folders = self.wizard_cache.get_folders()
+        if cached_folders is None:
+            # Cache miss - fetch from IMAP server
+            folders = self._get_imap_folders()
+            if folders:
+                print(f"✓ Cached {len(folders)} folders")
+        else:
+            print(f"✓ Using cached folders ({len(cached_folders)} available)")
+
+    def invalidate_cache(self):
+        """Force refresh of all cached data."""
+        self.wizard_cache.clear()
+        print("✓ Cache cleared - will refresh on next wizard run")
+
+    def show_cache_status(self):
+        """Display cache status and age."""
+        import time
+
+        cache = self.wizard_cache.load()
+
+        print("\n" + "=" * 60)
+        print("Wizard Cache Status")
+        print("=" * 60)
+
+        # Folders
+        folders_cache = cache.get('folders', {})
+        folders_timestamp = folders_cache.get('timestamp', 0)
+        folders_data = folders_cache.get('data')
+
+        if folders_data:
+            age_hours = (time.time() - folders_timestamp) / 3600
+            status = "✓ Valid" if age_hours < 6 else "⚠️ Stale"
+            print(f"Folders: {status}")
+            print(f"  Count: {len(folders_data)}")
+            print(f"  Age: {age_hours:.1f} hours")
+        else:
+            print("Folders: ❌ Not cached")
+
+        # Keywords
+        keywords_cache = cache.get('keywords', {})
+        keywords_timestamp = keywords_cache.get('timestamp', 0)
+        keywords_data = keywords_cache.get('data')
+
+        if keywords_data:
+            age_hours = (time.time() - keywords_timestamp) / 3600
+            status = "✓ Valid" if age_hours < 6 else "⚠️ Stale"
+            print(f"\nKeywords: {status}")
+            print(f"  Count: {len(keywords_data)}")
+            print(f"  Age: {age_hours:.1f} hours")
+        else:
+            print("\nKeywords: ❌ Not cached")
+
+        print("=" * 60)
 
     def _input_with_prefill(self, prompt: str, prefill: str = "") -> str:
         """
@@ -1338,6 +1422,13 @@ class RuleWizard:
             # Display welcome and validate cache
             if not self._validate_cache():
                 return 1
+
+            # Handle cache TTL override from CLI
+            if hasattr(self, 'cache_ttl_override') and self.cache_ttl_override:
+                self.wizard_cache.CACHE_TTL_SECONDS = self.cache_ttl_override * 3600
+
+            # NEW: Warm cache before starting wizard
+            self._warm_cache()
 
             # Analyze coverage and offer batch mode
             print("\n🔍 Analyzing rule coverage...")
@@ -2233,24 +2324,33 @@ class RuleWizard:
 
     def _get_imap_folders(self) -> List[str]:
         """
-        Fetch folder list directly from IMAP server.
+        Fetch folder list from IMAP server (cached for 6 hours).
 
         Returns:
             List of folder names (e.g., ['INBOX', 'Archive', 'Banking/NatWest'])
             Empty list if connection fails
-
-        Note:
-            This queries the live IMAP server, not the cache, ensuring
-            the complete folder list is available regardless of cache state.
         """
+        # Try cache first
+        cached_folders = self.wizard_cache.get_folders()
+        if cached_folders is not None:
+            print(f"Using cached folder list ({len(cached_folders)} folders)")
+            return cached_folders
+
+        # Cache miss - fetch from server
         client = None
         try:
             print("Connecting to mail server to fetch folder list...")
             client = imap_login(self.config.paths.secrets_file, self.logger)
             folders = list_all_folders(client)
+
+            # Cache the result
+            self.wizard_cache.set_folders(folders)
+            print(f"Fetched and cached {len(folders)} folders")
+
             return folders
+
         except FileNotFoundError:
-            print("⚠️ Error: Credentials file not found at", self.config.paths.secrets_file)
+            print("⚠️ Error: Credentials file not found")
             return []
         except imaplib.IMAP4.error as e:
             print(f"⚠️ Error connecting to mail server: {e}")
@@ -2263,7 +2363,7 @@ class RuleWizard:
                 try:
                     client.logout()
                 except:
-                    pass  # Ignore logout errors
+                    pass
 
     def _edit_folder_path(self, folder_path: str) -> Optional[str]:
         """Allow user to edit a folder path after selection.
@@ -2481,14 +2581,22 @@ class RuleWizard:
         predefined_keywords = self.keyword_manager.get_keywords()
         predefined_count = len(predefined_keywords)
 
-        # Try to get keywords from cache
+        # Try to get keywords from cache (NEW: check wizard cache first)
         try:
-            keyword_tuples = self.cache_engine.extract_unique_keywords(limit=500, min_count=1)
+            # Check wizard cache first (6-hour TTL)
+            keyword_tuples = self.wizard_cache.get_keywords()
+
+            if keyword_tuples is None:
+                # Cache miss - extract from database and cache result
+                print("Extracting keywords from email cache...")
+                keyword_tuples = self.cache_engine.extract_unique_keywords(limit=999999, min_count=1)
+                self.wizard_cache.set_keywords(keyword_tuples)
+
         except Exception as e:
             print(f"⚠️  Could not load keywords from cache: {e}")
             keyword_tuples = []
 
-        # Show predefined keywords count if available
+        # Rest of method unchanged
         if predefined_count > 0:
             print(f"\n📌 {predefined_count} predefined keyword(s) available")
 
