@@ -1777,7 +1777,7 @@ class RuleWizard:
 
         # Save options
         print("\nOptions:")
-        print("  1. Save and continue to next email")
+        print("  1. Save and continue to next email (default - press Enter)")
         print("  2. Save and exit batch mode")
         print("  3. Discard and continue")
         print("  4. Cancel")
@@ -2836,7 +2836,7 @@ class RuleWizard:
         # Ask to save
         print("\n" + "=" * 60)
         print("Options:")
-        print("  1. Save rule and exit")
+        print("  1. Save rule and exit (default - press Enter)")
         print("  2. Save rule and edit in rule_manager")
         print("  3. Cancel (discard rule)")
         print("  4. Edit (start over)")
