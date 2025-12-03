@@ -2798,7 +2798,7 @@ class RuleWizard:
         while True:
             print(f"\nSelected keywords: {keywords}")
             print("\nOptions:")
-            print("  1. Confirm and use these keywords")
+            print("  1. Confirm and use these keywords (or just press Enter)")
             print("  2. Add another keyword")
             print("  3. Remove a keyword from the list")
             print("  4. Start over and select different keywords")
@@ -2806,7 +2806,7 @@ class RuleWizard:
 
             choice = input("\n  > ").strip()
 
-            if choice == "1":
+            if choice == "1" or choice == "":
                 # Confirm - return the keywords
                 return keywords if keywords else None
 
