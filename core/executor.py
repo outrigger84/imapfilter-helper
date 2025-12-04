@@ -28,6 +28,20 @@ from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 HEADER_PARSER = HeaderParser(policy=default)
 
 
+def _quote_mailbox(mailbox: str) -> str:
+    """
+    Quote a mailbox name for use in IMAP commands.
+
+    This properly escapes and quotes mailbox names that contain spaces,
+    quotes, backslashes, or other special characters.
+    """
+    if not mailbox:
+        return '""'
+    # Escape backslashes and quotes, then wrap in quotes
+    escaped = mailbox.replace('\\', '\\\\').replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def _imap_response_text(response: Iterable[bytes | str] | None) -> str:
     if not response:
         return ""
@@ -689,6 +703,143 @@ def _perform_move_operation(
         return ('failed', error_msg)
 
 
+def _perform_batch_keyword_operations(
+    client: imaplib.IMAP4,
+    temp_db: sqlite3.Connection,
+    folder: str,
+    actions: list[dict],
+    action_type: str,
+    logger: JsonLogger | None = None,
+    verbose: bool = False,
+) -> tuple[int, int]:
+    """
+    Perform batch keyword operations (set or remove) for multiple actions.
+
+    Dramatically reduces IMAP operations by batching multiple UIDs with the same
+    keywords into a single STORE command.
+
+    Args:
+        client: IMAP client connection
+        temp_db: Per-worker temporary database connection
+        folder: Source folder containing messages
+        actions: List of action dicts with {id, uid, action_type, action_data, ...}
+        action_type: Either 'set_keywords' or 'remove_keywords'
+        logger: Optional logger for detailed logging
+        verbose: Enable verbose logging
+
+    Returns:
+        Tuple of (actions_done, actions_failed)
+    """
+    actions_done = 0
+    actions_failed = 0
+
+    # First, select the folder once
+    try:
+        sel_typ, sel_resp = client.select(f'"{folder}"', readonly=False)
+        if sel_typ != "OK":
+            error_msg = f"Cannot open folder: {_imap_response_text(sel_resp)}"
+            for action in actions:
+                temp_db.execute(
+                    "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
+                    (action["id"], "failed", now_iso(), error_msg),
+                )
+                actions_failed += 1
+            temp_db.commit()
+            return actions_done, actions_failed
+    except Exception as exc:
+        error_msg = str(exc)
+        for action in actions:
+            temp_db.execute(
+                "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
+                (action["id"], "failed", now_iso(), error_msg),
+            )
+            actions_failed += 1
+        temp_db.commit()
+        return actions_done, actions_failed
+
+    # Parse and group actions by keyword set
+    uid_keyword_map: dict[str, tuple[int, list[str]]] = {}  # uid -> (action_id, keywords)
+    invalid_actions: list[tuple[int, str]] = []  # (action_id, reason)
+
+    for action in actions:
+        action_id = action["id"]
+        uid = action["uid"]
+        action_data = action.get("action_data")
+
+        keywords = []
+        if action_data:
+            try:
+                data = json.loads(action_data)
+                keywords = data.get("keywords", [])
+            except json.JSONDecodeError:
+                invalid_actions.append((action_id, "Invalid action_data JSON"))
+                continue
+
+        if not keywords:
+            invalid_actions.append((action_id, "No keywords specified"))
+            continue
+
+        uid_keyword_map[uid] = (action_id, keywords)
+
+    # Handle invalid actions
+    for action_id, reason in invalid_actions:
+        temp_db.execute(
+            "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
+            (action_id, "skipped", now_iso(), reason),
+        )
+        actions_failed += 1
+
+    # Group UIDs by keyword set for batching
+    if uid_keyword_map:
+        keyword_set_to_data: dict[tuple, list[tuple[str, int]]] = {}  # keyword_tuple -> [(uid, action_id)]
+        for uid, (action_id, keywords) in uid_keyword_map.items():
+            key = tuple(sorted(keywords))
+            if key not in keyword_set_to_data:
+                keyword_set_to_data[key] = []
+            keyword_set_to_data[key].append((uid, action_id))
+
+        # Execute one STORE per keyword set (batch operation)
+        for keyword_tuple, uid_action_pairs in keyword_set_to_data.items():
+            keywords = list(keyword_tuple)
+            uids = [uid for uid, _ in uid_action_pairs]
+            uid_str = ",".join(uids)
+            flags_str = " ".join(keywords)
+
+            try:
+                if action_type == "set_keywords":
+                    typ, resp = client.uid("STORE", uid_str, "+FLAGS", f"({flags_str})")
+                else:  # remove_keywords
+                    typ, resp = client.uid("STORE", uid_str, "-FLAGS", f"({flags_str})")
+
+                # Record result for each UID
+                for uid, action_id in uid_action_pairs:
+                    if typ == "OK":
+                        temp_db.execute(
+                            "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
+                            (action_id, "done", now_iso(), None),
+                        )
+                        actions_done += 1
+                    else:
+                        error_msg = f"STORE {action_type} failed: {_format_imap_details(resp)}"
+                        temp_db.execute(
+                            "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
+                            (action_id, "failed", now_iso(), error_msg),
+                        )
+                        actions_failed += 1
+
+            except Exception as exc:
+                error_msg = str(exc)
+                for uid, action_id in uid_action_pairs:
+                    temp_db.execute(
+                        "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
+                        (action_id, "failed", now_iso(), error_msg),
+                    )
+                    actions_failed += 1
+
+    temp_db.commit()
+    return actions_done, actions_failed
+
+
 def _perform_keyword_operation(
     client: imaplib.IMAP4,
     temp_db: sqlite3.Connection,
@@ -1305,7 +1456,7 @@ def execute_actions(
     )
 
     chunk_size = 512
-    current_key: tuple[str, str | None] | None = None
+    current_key: tuple[str, str | None, str] | None = None
     # Store: (action_id, uid, rule_name, action_type, action_data)
     current_items: list[tuple[int, str, str | None, str, str | None]] = []
     current_rule_name: str | None = None
@@ -1356,6 +1507,128 @@ def execute_actions(
             context,
             console=f"      ↪ {op_label} {status}{details}{suffix}",
         )
+
+    def _execute_batch_set_keywords(
+        folder: str,
+        uid_keyword_map: dict[str, list[str]],
+    ) -> dict[str, tuple[str, Any]]:
+        """
+        Batch set keywords on multiple messages with different keywords.
+
+        Groups UIDs by keyword set and executes one STORE per keyword group,
+        dramatically reducing IMAP operations.
+
+        Args:
+            folder: Folder containing messages
+            uid_keyword_map: Dict mapping UID -> list of keywords
+
+        Returns:
+            Dict mapping UID -> (status, response)
+        """
+        assert client is not None
+        results: dict[str, tuple[str, Any]] = {}
+
+        # Select folder once for all operations
+        sel_typ, sel_resp = client.select(f'"{folder}"')
+        log_imap_call(
+            "imap_select",
+            op_label=f'SELECT "{folder}"',
+            status=sel_typ,
+            response=sel_resp,
+            folder=folder,
+        )
+        if sel_typ != "OK":
+            raise imaplib.IMAP4.error(f"Cannot open folder {folder}")
+
+        # Group UIDs by keyword set for efficient batching
+        keyword_set_to_uids: dict[tuple, list[str]] = {}
+        for uid, keywords in uid_keyword_map.items():
+            key = tuple(sorted(keywords))
+            if key not in keyword_set_to_uids:
+                keyword_set_to_uids[key] = []
+            keyword_set_to_uids[key].append(uid)
+
+        # Execute one STORE per keyword set (batch operation)
+        for keyword_tuple, uids in keyword_set_to_uids.items():
+            keywords = list(keyword_tuple)
+            flags_str = " ".join(keywords)
+            uid_str = ",".join(uids)
+
+            typ, resp = client.uid("STORE", uid_str, "+FLAGS", f"({flags_str})")
+            log_imap_call(
+                "imap_uid_store_batch_set",
+                op_label="UID STORE +FLAGS (batch)",
+                status=typ,
+                response=resp,
+                folder=folder,
+            )
+
+            # Record result for each UID
+            for uid in uids:
+                results[uid] = (typ, resp)
+
+        return results
+
+    def _execute_batch_remove_keywords(
+        folder: str,
+        uid_keyword_map: dict[str, list[str]],
+    ) -> dict[str, tuple[str, Any]]:
+        """
+        Batch remove keywords from multiple messages with different keywords.
+
+        Groups UIDs by keyword set and executes one STORE per keyword group,
+        dramatically reducing IMAP operations.
+
+        Args:
+            folder: Folder containing messages
+            uid_keyword_map: Dict mapping UID -> list of keywords to remove
+
+        Returns:
+            Dict mapping UID -> (status, response)
+        """
+        assert client is not None
+        results: dict[str, tuple[str, Any]] = {}
+
+        # Select folder once for all operations
+        sel_typ, sel_resp = client.select(f'"{folder}"')
+        log_imap_call(
+            "imap_select",
+            op_label=f'SELECT "{folder}"',
+            status=sel_typ,
+            response=sel_resp,
+            folder=folder,
+        )
+        if sel_typ != "OK":
+            raise imaplib.IMAP4.error(f"Cannot open folder {folder}")
+
+        # Group UIDs by keyword set for efficient batching
+        keyword_set_to_uids: dict[tuple, list[str]] = {}
+        for uid, keywords in uid_keyword_map.items():
+            key = tuple(sorted(keywords))
+            if key not in keyword_set_to_uids:
+                keyword_set_to_uids[key] = []
+            keyword_set_to_uids[key].append(uid)
+
+        # Execute one STORE per keyword set (batch operation)
+        for keyword_tuple, uids in keyword_set_to_uids.items():
+            keywords = list(keyword_tuple)
+            flags_str = " ".join(keywords)
+            uid_str = ",".join(uids)
+
+            typ, resp = client.uid("STORE", uid_str, "-FLAGS", f"({flags_str})")
+            log_imap_call(
+                "imap_uid_store_batch_remove",
+                op_label="UID STORE -FLAGS (batch)",
+                status=typ,
+                response=resp,
+                folder=folder,
+            )
+
+            # Record result for each UID
+            for uid in uids:
+                results[uid] = (typ, resp)
+
+        return results
 
     def _execute_set_keywords(
         folder: str,
@@ -1514,14 +1787,13 @@ def execute_actions(
         if current_key is None or not current_items:
             return
 
-        folder, target = current_key
+        folder, target, action_type = current_key
         display_target = target or "(no target)"
         total_for_group = group_totals.get(current_key, len(current_items))
         folders_bar.set_postfix_str(f"{folder} → {display_target}")
 
         # Extract metadata from first item
         # current_items: (action_id, uid, rule_name, action_type, action_data)
-        action_type = current_items[0][3] if current_items and len(current_items[0]) > 3 else "move"
         rule_name = current_items[0][2] if current_items else None
 
         # Handle keyword actions (set_keywords, remove_keywords)
@@ -1546,6 +1818,11 @@ def execute_actions(
                         )
             else:
                 assert client is not None
+
+                # Build UID->keywords map for batching, validate keywords first
+                uid_keyword_map: dict[str, list[str]] = {}
+                items_to_skip: dict[int, str] = {}  # action_id -> reason
+
                 for a_id, uid, _, _, action_data in current_items:
                     keywords = []
                     if action_data:
@@ -1558,6 +1835,8 @@ def execute_actions(
                                 "action_data_parse_failed",
                                 {"folder": folder, "uid": uid, "action_id": a_id},
                             )
+                            items_to_skip[a_id] = "Invalid action_data JSON"
+                            continue
 
                     if not keywords:
                         logger.log(
@@ -1565,46 +1844,76 @@ def execute_actions(
                             f"{action_type}_empty",
                             {"folder": folder, "uid": uid},
                         )
-                        db.execute(
-                            "UPDATE actions SET status='skipped', executed_at=? WHERE id=?",
-                            (now_iso(), a_id),
-                        )
-                        stats["skipped"] += 1
-                        actions_bar.update(1)
+                        items_to_skip[a_id] = "No keywords specified"
                         continue
 
-                    try:
-                        if action_type == "set_keywords":
-                            typ, resp = _execute_set_keywords(folder, uid, keywords)
-                        else:  # remove_keywords
-                            typ, resp = _execute_remove_keywords(folder, uid, keywords)
+                    uid_keyword_map[uid] = (a_id, keywords)
 
-                        if typ == "OK":
-                            db.execute(
-                                "UPDATE actions SET status='done', executed_at=? WHERE id=?",
-                                (now_iso(), a_id),
-                            )
-                            stats["done"] += 1
-                        else:
+                # Process skipped items first
+                for a_id, reason in items_to_skip.items():
+                    db.execute(
+                        "UPDATE actions SET status='skipped', executed_at=? WHERE id=?",
+                        (now_iso(), a_id),
+                    )
+                    stats["skipped"] += 1
+                    actions_bar.update(1)
+
+                # Execute batch operation if there are items to process
+                if uid_keyword_map:
+                    try:
+                        # Build map for batch execution (uid -> keywords only)
+                        batch_map: dict[str, list[str]] = {
+                            uid: keywords for uid, (_, keywords) in uid_keyword_map.items()
+                        }
+
+                        # Execute batch operation
+                        if action_type == "set_keywords":
+                            results = _execute_batch_set_keywords(folder, batch_map)
+                        else:  # remove_keywords
+                            results = _execute_batch_remove_keywords(folder, batch_map)
+
+                        # Process results
+                        for uid, (a_id, keywords) in uid_keyword_map.items():
+                            typ, resp = results.get(uid, ("FAILED", None))
+
+                            if typ == "OK":
+                                db.execute(
+                                    "UPDATE actions SET status='done', executed_at=? WHERE id=?",
+                                    (now_iso(), a_id),
+                                )
+                                stats["done"] += 1
+                                if verbose:
+                                    logger.log(
+                                        "INFO",
+                                        f"batch_{action_type}_done",
+                                        {"folder": folder, "uid": uid, "keywords": keywords},
+                                        console=f"   🏷️  Batch {action_type} on {folder}/{uid}: {keywords}",
+                                    )
+                            else:
+                                db.execute(
+                                    "UPDATE actions SET status='failed', executed_at=? WHERE id=?",
+                                    (now_iso(), a_id),
+                                )
+                                stats["failed"] += 1
+
+                            actions_bar.update(1)
+
+                    except Exception as exc:
+                        # On batch error, mark all as failed
+                        for uid, (a_id, keywords) in uid_keyword_map.items():
                             db.execute(
                                 "UPDATE actions SET status='failed', executed_at=? WHERE id=?",
                                 (now_iso(), a_id),
                             )
                             stats["failed"] += 1
-                    except Exception as exc:
-                        db.execute(
-                            "UPDATE actions SET status='failed', executed_at=? WHERE id=?",
-                            (now_iso(), a_id),
-                        )
-                        stats["failed"] += 1
+                            actions_bar.update(1)
+
                         logger.log(
                             "ERROR",
-                            f"{action_type}_exception",
-                            {"folder": folder, "uid": uid, "error": str(exc)},
-                            console=f"❌ {folder}/{uid}: {exc}",
+                            f"batch_{action_type}_exception",
+                            {"folder": folder, "error": str(exc)},
+                            console=f"❌ Batch {action_type} failed for {folder}: {exc}",
                         )
-                    finally:
-                        actions_bar.update(1)
 
                 db.commit()
 
@@ -2273,12 +2582,13 @@ def _precreate_target_folders(
     for target in targets:
         try:
             # Check if folder exists with LIST
-            list_typ, list_resp = client.list("", f'"{target}"')
+            quoted_target = _quote_mailbox(target)
+            list_typ, list_resp = client.list('""', quoted_target)
             exists = list_typ == "OK" and list_resp and list_resp[0] is not None
 
             if not exists:
                 # CREATE folder
-                create_typ, create_resp = client.create(f'"{target}"')
+                create_typ, create_resp = client.create(quoted_target)
                 if create_typ == "OK":
                     created_count += 1
                     logger.log(
@@ -2584,88 +2894,95 @@ def _execute_folder_worker(
                 # Check if server supports UID MOVE
                 supports_uid_move = hasattr(client, "capabilities") and b"MOVE" in getattr(client, "capabilities", ())
 
+                # Separate keyword and move actions for batch processing
+                keyword_actions_set = [a for a in group_actions if a.get("action_type") == "set_keywords"]
+                keyword_actions_remove = [a for a in group_actions if a.get("action_type") == "remove_keywords"]
+                move_actions = [a for a in group_actions if a.get("action_type", "move") == "move"]
+
+                # Process keyword actions in batches
+                if keyword_actions_set:
+                    batch_done, batch_failed = _perform_batch_keyword_operations(
+                        client=client,
+                        temp_db=temp_db,
+                        folder=grp_folder,
+                        actions=keyword_actions_set,
+                        action_type="set_keywords",
+                        logger=logger,
+                        verbose=False,
+                    )
+                    actions_done += batch_done
+                    actions_failed += batch_failed
+
+                if keyword_actions_remove:
+                    batch_done, batch_failed = _perform_batch_keyword_operations(
+                        client=client,
+                        temp_db=temp_db,
+                        folder=grp_folder,
+                        actions=keyword_actions_remove,
+                        action_type="remove_keywords",
+                        logger=logger,
+                        verbose=False,
+                    )
+                    actions_done += batch_done
+                    actions_failed += batch_failed
+
                 # Collect successful move actions for verification
                 successful_moves: list[tuple[dict, str | None]] = []
 
-                # Process each action in the group
-                for action in group_actions:
+                # Process move actions individually (they need selective logic)
+                for action in move_actions:
                     uid = action["uid"]
                     action_type = action.get("action_type", "move")
 
                     try:
-                        # Handle keyword actions
-                        if action_type in ("set_keywords", "remove_keywords"):
-                            status, error_msg = _perform_keyword_operation(
-                                client=client,
-                                temp_db=temp_db,
-                                action=action,
-                                dry_run=False,  # Real execution
-                                strict=strict,
-                                logger=logger,
-                                verbose=False,  # Avoid excessive logging in worker
-                            )
+                        status, error_msg = _perform_move_operation(
+                            client=client,
+                            temp_db=temp_db,
+                            action=action,
+                            verify_moves=False,  # Verification done after EXPUNGE
+                            backup_moved=backup_moved,
+                            backup_dir=backup_dir,
+                            dry_run=False,  # Real execution
+                            supports_uid_move=supports_uid_move,
+                            logger=logger,
+                            verbose=False,  # Avoid excessive logging in worker
+                        )
 
-                            # Update action with INSERT OR REPLACE to ensure it's in temp DB
-                            temp_db.execute(
-                                "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
-                                (action["id"], status, now_iso(), error_msg if error_msg else None),
-                            )
+                        # Update action with INSERT OR REPLACE to ensure it's in temp DB
+                        temp_db.execute(
+                            "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
+                            (action["id"], status, now_iso(), error_msg if error_msg else None),
+                        )
 
-                            if status == "done":
-                                actions_done += 1
-                            else:
-                                actions_failed += 1
-
-                        # Handle move actions
+                        if status == "done":
+                            actions_done += 1
+                            # Track for verification if needed
+                            if verify_moves and target:
+                                # Get Message-ID from main database if available
+                                message_id = None
+                                try:
+                                    main_db = sqlite3.connect(str(db_path), timeout=5.0)
+                                    row = main_db.execute(
+                                        "SELECT data FROM headers WHERE folder=? AND uid=?",
+                                        (grp_folder, uid)
+                                    ).fetchone()
+                                    main_db.close()
+                                    if row and row[0]:
+                                        data = json.loads(row[0])
+                                        header_text = data.get("header", "")
+                                        # Extract Message-ID with regex
+                                        match = re.search(
+                                            r'Message-I[Dd]:\s*<?(\[?[^\]>\s]+\]?)>?',
+                                            header_text,
+                                            re.IGNORECASE | re.MULTILINE
+                                        )
+                                        if match:
+                                            message_id = match.group(1).strip()
+                                except Exception:
+                                    pass
+                                successful_moves.append((action, message_id))
                         else:
-                            status, error_msg = _perform_move_operation(
-                                client=client,
-                                temp_db=temp_db,
-                                action=action,
-                                verify_moves=False,  # Verification done after EXPUNGE
-                                backup_moved=backup_moved,
-                                backup_dir=backup_dir,
-                                dry_run=False,  # Real execution
-                                supports_uid_move=supports_uid_move,
-                                logger=logger,
-                                verbose=False,  # Avoid excessive logging in worker
-                            )
-
-                            # Update action with INSERT OR REPLACE to ensure it's in temp DB
-                            temp_db.execute(
-                                "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
-                                (action["id"], status, now_iso(), error_msg if error_msg else None),
-                            )
-
-                            if status == "done":
-                                actions_done += 1
-                                # Track for verification if needed
-                                if verify_moves and target:
-                                    # Get Message-ID from main database if available
-                                    message_id = None
-                                    try:
-                                        main_db = sqlite3.connect(str(db_path), timeout=5.0)
-                                        row = main_db.execute(
-                                            "SELECT data FROM headers WHERE folder=? AND uid=?",
-                                            (grp_folder, uid)
-                                        ).fetchone()
-                                        main_db.close()
-                                        if row and row[0]:
-                                            data = json.loads(row[0])
-                                            header_text = data.get("header", "")
-                                            # Extract Message-ID with regex
-                                            match = re.search(
-                                                r'Message-I[Dd]:\s*<?(\[?[^\]>\s]+\]?)>?',
-                                                header_text,
-                                                re.IGNORECASE | re.MULTILINE
-                                            )
-                                            if match:
-                                                message_id = match.group(1).strip()
-                                    except Exception:
-                                        pass
-                                    successful_moves.append((action, message_id))
-                            else:
-                                actions_failed += 1
+                            actions_failed += 1
 
                     except Exception as exc:
                         error_msg = str(exc)
