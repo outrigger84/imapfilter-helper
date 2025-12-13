@@ -3246,7 +3246,7 @@ class RuleWizard:
                     counter[value] += 1
 
             print(f"  Processed {processed:,} uncovered messages total")
-            result = counter.most_common(limit=999999)
+            result = counter.most_common()  # Get all values, sorted by count
             print(f"  Found {len(result)} unique values in uncovered messages")
             return result
 
