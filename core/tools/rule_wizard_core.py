@@ -2484,19 +2484,73 @@ class RuleWizard:
                     return None  # Cancelled on first condition
                 # Otherwise continue loop
 
+    def _display_condition_stack(self) -> None:
+        """Display the current conditions being built as a stack."""
+        if not self.rule_builder.conditions:
+            return
+
+        print("\nCurrent conditions:")
+        print("=" * 60)
+        for i, cond in enumerate(self.rule_builder._flat_conditions, 1):
+            formatted = self._format_condition(cond)
+            if i < len(self.rule_builder._flat_conditions):
+                print(f"  {i}. {formatted}")
+                print(f"     ↓ AND ↓")
+            else:
+                print(f"  {i}. {formatted}")
+        print("=" * 60)
+
+    def _ask_condition_intent(self, field: str) -> Optional[str]:
+        """Ask user how they want to add a condition (Exclude/Refine vs Include Additional).
+
+        Args:
+            field: The header field being added (from, to, subject, etc)
+
+        Returns:
+            "refine" for Exclude/Refine, "include" for Include Additional, or None if cancelled
+        """
+        if not self.rule_builder.conditions:
+            # First condition - no intent needed
+            return "refine"
+
+        print(f"\nHow would you like to add this {field.upper()} condition?")
+        print()
+        print("  [1] Exclude/Refine: Narrow down from current selection")
+        print("      (Show values only from messages matching current criteria)")
+        print()
+        print("  [2] Include Additional: Add criteria beyond current selection")
+        print("      (Show values from all uncovered messages)")
+        print()
+
+        choice = input("Choice (1-2): ").strip()
+        if choice == "1":
+            return "refine"
+        elif choice == "2":
+            return "include"
+        else:
+            return None
+
     def _add_single_condition(self) -> bool:
         """Add a single condition to the rule.
 
         Returns:
             True if condition was added, False if cancelled
         """
+        # Step 0: Display existing conditions stack
+        self._display_condition_stack()
+
         # Step 1: Select header field
         field = self._select_header_field()
         if not field:
             return False
 
+        # Step 1b: Ask about condition intent (new Option C)
+        intent = self._ask_condition_intent(field)
+        if intent is None:
+            return False
+
         # Step 2: Select field value
-        value = self._select_field_value(field)
+        value = self._select_field_value(field, intent=intent)
         if not value:
             return False
 
@@ -2557,11 +2611,12 @@ class RuleWizard:
             print("Invalid choice. Please try again.")
             return self._select_header_field()
 
-    def _select_field_value(self, field: str) -> Optional[str]:
+    def _select_field_value(self, field: str, intent: str = "refine") -> Optional[str]:
         """Show filterable list and let user pick value.
 
         Args:
             field: Header field name (from, to, subject, etc.)
+            intent: "refine" to show values from matching messages, "include" for all uncovered
 
         Returns:
             Selected value, or None if cancelled
@@ -2569,12 +2624,20 @@ class RuleWizard:
         # Get values from cache
         # Email fields use two-step selector with domain grouping and consolidation
         if field in ("from", "to", "cc", "bcc", "reply-to"):
-            return self._select_email_address_two_step(field)
+            return self._select_email_address_two_step(field, intent=intent)
         elif field == "subject":
-            # Remove 500 limit - fetch all unique subjects
-            items = self.cache_engine.extract_unique_subjects(limit=999999)
+            if intent == "refine" and self.rule_builder.conditions:
+                # Get subjects from messages matching current conditions
+                items = self._extract_values_from_matching_messages(field)
+            else:
+                # Remove 500 limit - fetch all unique subjects
+                items = self.cache_engine.extract_unique_subjects(limit=999999)
         else:
-            items = self.cache_engine.extract_other_header(field, limit=1000)
+            if intent == "refine" and self.rule_builder.conditions:
+                # Get values from messages matching current conditions
+                items = self._extract_values_from_matching_messages(field)
+            else:
+                items = self.cache_engine.extract_other_header(field, limit=1000)
 
         if not items:
             print(f"\nNo values found for header '{field}' in cache.")
@@ -2628,7 +2691,7 @@ class RuleWizard:
             else:
                 return None
 
-    def _select_email_address_two_step(self, field: str = "from") -> Optional[str]:
+    def _select_email_address_two_step(self, field: str = "from", intent: str = "refine") -> Optional[str]:
         """Show two-step email address selector with domain grouping and consolidation.
 
         Works with any email field (from, to, cc, bcc, reply-to) by using domain grouping
@@ -2636,6 +2699,7 @@ class RuleWizard:
 
         Args:
             field: Email field name ('from', 'to', 'cc', 'bcc', 'reply-to')
+            intent: "refine" to show from current criteria, "include" for all uncovered
 
         Returns:
             Selected email address, '[All {field} domain]' for domain-wide selection,
@@ -2648,11 +2712,14 @@ class RuleWizard:
         # Step 1: Load all unique addresses for the specified field
         print(f"\nLoading {field} addresses...")
 
-        # In batch mode, use cluster data (uncovered messages only) for FROM field
-        if self.batch_mode_active and self.batch_selected_cluster and field == "from":
+        # In batch mode with refine intent, use cluster data (uncovered messages only)
+        if self.batch_mode_active and self.batch_selected_cluster and field == "from" and intent == "refine":
             # Use senders from the domain cluster (uncovered messages only)
             all_addresses = [(addr, count) for addr, count in self.batch_selected_cluster.senders.items()]
             print(f"(Showing {len(all_addresses)} uncovered {field} addresses)")
+        elif intent == "refine" and self.rule_builder.conditions and field in ("from", "to"):
+            # Refine intent with existing conditions: show addresses from matching messages
+            all_addresses = self._extract_values_from_matching_messages(field)
         elif field == "from":
             all_addresses = self.cache_engine.extract_unique_from_addresses(limit=2000)
         elif field == "to":
@@ -2673,8 +2740,8 @@ class RuleWizard:
             return None
 
         # Step 3: First selector - select domain
-        # In batch mode, use the pre-selected domain from cluster
-        if self.batch_mode_active and self.batch_selected_cluster and field == "from":
+        # In batch mode with refine intent, use the pre-selected domain from cluster
+        if self.batch_mode_active and self.batch_selected_cluster and field == "from" and intent == "refine":
             selected_domain = self.batch_selected_cluster.domain
             print(f"\nUsing batch domain: {selected_domain}")
         else:
@@ -3066,6 +3133,91 @@ class RuleWizard:
                 print(f"  → [Group {i}: {logic_name} of {len(group.indices)} conditions]")
                 for idx in group.indices:
                     print(f"      • {self._format_condition(conditions[idx])}")
+
+    def _extract_values_from_matching_messages(self, field: str) -> List[Tuple[str, int]]:
+        """Extract unique values for a field from messages matching current conditions.
+
+        This is used for "Refine" intent - show values that exist in messages
+        matching the current rule conditions.
+
+        Args:
+            field: The header field to extract (subject, to, list-id, etc.)
+
+        Returns:
+            List of (value, count) tuples, sorted by count descending
+        """
+        from collections import Counter
+        from core.rule_engine import _extract_raw_header, _parse_header_map, find_matching_rule
+
+        if not self.rule_builder.conditions or not self.cache_engine:
+            # Fallback to regular extraction if no conditions
+            if field == "subject":
+                return self.cache_engine.extract_unique_subjects(limit=999999)
+            else:
+                return self.cache_engine.extract_other_header(field, limit=1000)
+
+        try:
+            print(f"\nFiltering cache for {field} values matching current conditions...")
+
+            # Build a temporary rule from current conditions for matching
+            temp_rule = {
+                "name": "temporary_matching_rule",
+                "conditions": self.rule_builder.conditions,
+                "actions": []
+            }
+
+            # Query all messages from cache
+            cursor = self.cache_engine.conn.cursor()
+            cursor.execute("SELECT data FROM headers")
+            all_rows = cursor.fetchall()
+
+            counter = Counter()
+            checked_count = 0
+
+            for row in all_rows:
+                checked_count += 1
+                if checked_count % 1000 == 0:
+                    print(f"  Checked {checked_count:,} messages...", end="\r")
+
+                data = row[0] if row else ""
+                # Parse header
+                raw_header = _extract_raw_header(data)
+                header = _parse_header_map(raw_header)
+
+                # Check if this message matches current conditions
+                try:
+                    if find_matching_rule(header, [temp_rule]):
+                        # Message matches - extract field value
+                        if field == "subject":
+                            value = header.get("subject", "").strip()
+                        elif field in ("to", "cc", "bcc"):
+                            value = header.get(field, "").strip()
+                        elif field == "from":
+                            value = header.get("from", "").strip()
+                        elif field == "list-id":
+                            value = header.get("list-id", "").strip()
+                        else:
+                            value = header.get(field, "").strip()
+
+                        if value:
+                            counter[value] += 1
+                except Exception:
+                    # Skip messages that can't be parsed
+                    continue
+
+            print(f"  Checked {checked_count:,} messages total")
+            result = counter.most_common(limit=999999)
+            print(f"  Found {len(result)} unique values matching criteria")
+            return result
+
+        except Exception as e:
+            print(f"\n⚠️ Error filtering messages: {e}")
+            print("Falling back to showing all values...")
+            # Fallback
+            if field == "subject":
+                return self.cache_engine.extract_unique_subjects(limit=999999)
+            else:
+                return self.cache_engine.extract_other_header(field, limit=1000)
 
     def _get_imap_folders(self) -> List[str]:
         """
