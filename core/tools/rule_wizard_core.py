@@ -1283,14 +1283,24 @@ class RuleBuilder:
             if "header" not in condition:
                 return False, f"Condition {i+1} missing header field"
 
-            if "contains" not in condition and "regex" not in condition:
-                return False, f"Condition {i+1} must have either 'contains' or 'regex'"
+            # Check for match type keys (supports multiple match types)
+            match_type_keys = ["contains", "regex", "equals", "not_equals", "not_contains", "not_regex"]
+            has_match_type = any(key in condition for key in match_type_keys)
+            if not has_match_type:
+                return False, f"Condition {i+1} must have a match type (contains, regex, equals, etc.)"
 
-            if "contains" in condition and "regex" in condition:
-                return False, f"Condition {i+1} cannot have both 'contains' and 'regex'"
+            # Check for multiple match types (should only have one)
+            present_keys = [key for key in match_type_keys if key in condition]
+            if len(present_keys) > 1:
+                return False, f"Condition {i+1} has multiple match types: {', '.join(present_keys)}"
 
-            # Get the match value
-            value = condition.get("contains") or condition.get("regex")
+            # Get the match value from whichever match type is present
+            value = None
+            for key in present_keys:
+                value = condition.get(key)
+                if value:
+                    break
+
             if not value or not str(value).strip():
                 return False, f"Condition {i+1} has empty match value"
 
@@ -2265,7 +2275,7 @@ class RuleWizard:
             return 130  # Exit
 
     def _fix_missing_match_type(self, condition_idx: int) -> bool:
-        """Fix a condition missing 'contains' or 'regex' field.
+        """Fix a condition missing a match type field.
 
         Args:
             condition_idx: Index of the condition to fix
@@ -2280,37 +2290,46 @@ class RuleWizard:
         print(f"\n⚠️  Condition {condition_idx + 1} is missing a match type.")
         print(f"   Header: {condition.get('header', '<unknown>')}")
         print("\nWhich match type would you like to use?")
-        print("  1. Contains (substring match)")
-        print("  2. Regex (regular expression)")
-        print("  3. Cancel")
+        print("  1. Equals (exact match)")
+        print("  2. Not Equals (does not match exactly)")
+        print("  3. Contains (substring match - case insensitive)")
+        print("  4. Not Contains (does not contain substring)")
+        print("  5. Regex (regular expression)")
+        print("  6. Not Regex (does not match regex pattern)")
+        print("  7. Cancel")
 
-        choice = input("\nChoice (1-3): ").strip() or "3"
+        choice = input("\nChoice (1-7): ").strip() or "7"
 
-        if choice == "1":
-            value = input("Enter the substring to match: ").strip()
+        # Map of choices to match type keys and prompts
+        choice_map = {
+            "1": ("equals", "Enter the exact value to match: "),
+            "2": ("not_equals", "Enter the value NOT to match: "),
+            "3": ("contains", "Enter the substring to match: "),
+            "4": ("not_contains", "Enter the substring NOT to match: "),
+            "5": ("regex", "Enter the regex pattern to match: "),
+            "6": ("not_regex", "Enter the regex pattern NOT to match: "),
+        }
+
+        if choice in choice_map:
+            match_type_key, prompt = choice_map[choice]
+            value = input(prompt).strip()
             if not value:
                 print("⚠️  Match value cannot be empty.")
                 return self._fix_missing_match_type(condition_idx)  # Retry
-            condition["contains"] = value
-            # Remove any other match type that might exist
-            condition.pop("regex", None)
-            print("✓ Condition fixed!")
-            return True
-        elif choice == "2":
-            value = input("Enter the regex pattern to match: ").strip()
-            if not value:
-                print("⚠️  Match value cannot be empty.")
-                return self._fix_missing_match_type(condition_idx)  # Retry
-            condition["regex"] = value
-            # Remove any other match type that might exist
-            condition.pop("contains", None)
+
+            # Clear all existing match types
+            for key in ["contains", "regex", "equals", "not_equals", "not_contains", "not_regex"]:
+                condition.pop(key, None)
+
+            # Set the new match type
+            condition[match_type_key] = value
             print("✓ Condition fixed!")
             return True
         else:
             return False
 
     def _fix_duplicate_match_type(self, condition_idx: int) -> bool:
-        """Fix a condition with both 'contains' and 'regex' fields.
+        """Fix a condition with multiple match type fields.
 
         Args:
             condition_idx: Index of the condition to fix
@@ -2322,27 +2341,42 @@ class RuleWizard:
             return False
 
         condition = self.rule_builder.conditions[condition_idx]
-        print(f"\n⚠️  Condition {condition_idx + 1} has both 'contains' and 'regex'.")
-        print(f"   Header: {condition.get('header', '<unknown>')}")
-        print(f"   Contains: {condition.get('contains')}")
-        print(f"   Regex: {condition.get('regex')}")
-        print("\nWhich one should be kept?")
-        print("  1. Keep 'contains'")
-        print("  2. Keep 'regex'")
-        print("  3. Cancel")
 
-        choice = input("\nChoice (1-3): ").strip() or "3"
+        # Find all present match types
+        match_type_keys = ["contains", "regex", "equals", "not_equals", "not_contains", "not_regex"]
+        present_keys = [key for key in match_type_keys if key in condition]
 
-        if choice == "1":
-            condition.pop("regex", None)
-            print("✓ Condition fixed!")
-            return True
-        elif choice == "2":
-            condition.pop("contains", None)
-            print("✓ Condition fixed!")
-            return True
-        else:
+        if len(present_keys) < 2:
+            # Not actually duplicate - shouldn't happen
             return False
+
+        print(f"\n⚠️  Condition {condition_idx + 1} has multiple match types:")
+        print(f"   Header: {condition.get('header', '<unknown>')}")
+
+        for i, key in enumerate(present_keys, 1):
+            print(f"   {i}. {key}: {condition.get(key)}")
+
+        print("\nWhich one should be kept?")
+        for i in range(1, len(present_keys) + 1):
+            print(f"  {i}. Keep '{present_keys[i-1]}'")
+        print(f"  {len(present_keys) + 1}. Cancel")
+
+        choice = input(f"\nChoice (1-{len(present_keys) + 1}): ").strip() or str(len(present_keys) + 1)
+
+        try:
+            choice_idx = int(choice) - 1
+            if 0 <= choice_idx < len(present_keys):
+                # Keep the selected key, remove others
+                keep_key = present_keys[choice_idx]
+                for key in present_keys:
+                    if key != keep_key:
+                        condition.pop(key, None)
+                print("✓ Condition fixed!")
+                return True
+        except (ValueError, IndexError):
+            pass
+
+        return False
 
     def _fix_empty_value(self, condition_idx: int) -> bool:
         """Fix a condition with an empty match value.
