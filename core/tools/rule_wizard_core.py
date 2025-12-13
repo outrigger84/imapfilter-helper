@@ -2663,6 +2663,9 @@ class RuleWizard:
             if intent == "refine" and self.rule_builder.conditions:
                 # Get subjects from messages matching current conditions
                 items = self._extract_values_from_matching_messages(field)
+            elif intent == "include":
+                # Include intent: show from all uncovered messages (not covered by existing rules)
+                items = self._extract_uncovered_values(field)
             else:
                 # Remove 500 limit - fetch all unique subjects
                 items = self.cache_engine.extract_unique_subjects(limit=999999)
@@ -2670,6 +2673,9 @@ class RuleWizard:
             if intent == "refine" and self.rule_builder.conditions:
                 # Get values from messages matching current conditions
                 items = self._extract_values_from_matching_messages(field)
+            elif intent == "include":
+                # Include intent: show from all uncovered messages (not covered by existing rules)
+                items = self._extract_uncovered_values(field)
             else:
                 items = self.cache_engine.extract_other_header(field, limit=1000)
 
@@ -2754,6 +2760,9 @@ class RuleWizard:
         elif intent == "refine" and self.rule_builder.conditions and field in ("from", "to"):
             # Refine intent with existing conditions: show addresses from matching messages
             all_addresses = self._extract_values_from_matching_messages(field)
+        elif intent == "include":
+            # Include intent: show from all uncovered messages (not covered by existing rules)
+            all_addresses = self._extract_uncovered_values(field)
         elif field == "from":
             all_addresses = self.cache_engine.extract_unique_from_addresses(limit=2000)
         elif field == "to":
@@ -3167,6 +3176,88 @@ class RuleWizard:
                 print(f"  → [Group {i}: {logic_name} of {len(group.indices)} conditions]")
                 for idx in group.indices:
                     print(f"      • {self._format_condition(conditions[idx])}")
+
+    def _extract_uncovered_values(self, field: str) -> List[Tuple[str, int]]:
+        """Extract unique values for a field from UNCOVERED messages only.
+
+        This is used for "Include Additional" intent - show values from all
+        uncovered messages across all domains, not just matching current conditions.
+
+        Args:
+            field: The header field to extract (subject, to, list-id, etc.)
+
+        Returns:
+            List of (value, count) tuples from uncovered messages only, sorted by count descending
+        """
+        from collections import Counter
+        from core.rule_engine import _extract_raw_header, _parse_header_map
+
+        if not self.coverage_analyzer:
+            # Fallback to cache if no coverage analyzer
+            if field == "subject":
+                return self.cache_engine.extract_unique_subjects(limit=999999)
+            else:
+                return self.cache_engine.extract_other_header(field, limit=1000)
+
+        try:
+            print(f"\nExtracting {field} values from uncovered messages...")
+
+            # Get all uncovered messages from coverage analyzer
+            uncovered_messages = self.coverage_analyzer.get_uncovered_messages()
+
+            if not uncovered_messages:
+                print(f"No uncovered messages found")
+                return []
+
+            counter = Counter()
+            processed = 0
+
+            # For each uncovered message, extract the field value
+            for msg in uncovered_messages:
+                processed += 1
+                if processed % 1000 == 0:
+                    print(f"  Processed {processed:,} uncovered messages...", end="\r")
+
+                # Parse the message header from cache
+                cursor = self.cache_engine.conn.cursor()
+                cursor.execute("SELECT data FROM headers WHERE uid = ? AND folder = ?", (msg.uid, msg.folder))
+                row = cursor.fetchone()
+
+                if not row:
+                    continue
+
+                data = row[0] if row else ""
+                raw_header = _extract_raw_header(data)
+                header = _parse_header_map(raw_header)
+
+                # Extract the field value
+                if field == "subject":
+                    value = header.get("subject", "").strip()
+                elif field in ("to", "cc", "bcc"):
+                    value = header.get(field, "").strip()
+                elif field == "from":
+                    value = header.get("from", "").strip()
+                elif field == "list-id":
+                    value = header.get("list-id", "").strip()
+                else:
+                    value = header.get(field, "").strip()
+
+                if value:
+                    counter[value] += 1
+
+            print(f"  Processed {processed:,} uncovered messages total")
+            result = counter.most_common(limit=999999)
+            print(f"  Found {len(result)} unique values in uncovered messages")
+            return result
+
+        except Exception as e:
+            print(f"\n⚠️ Error extracting uncovered values: {e}")
+            print("Falling back to all cached values...")
+            # Fallback
+            if field == "subject":
+                return self.cache_engine.extract_unique_subjects(limit=999999)
+            else:
+                return self.cache_engine.extract_other_header(field, limit=1000)
 
     def _extract_values_from_matching_messages(self, field: str) -> List[Tuple[str, int]]:
         """Extract unique values for a field from messages matching current conditions.
