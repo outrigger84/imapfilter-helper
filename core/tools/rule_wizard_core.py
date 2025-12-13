@@ -13,6 +13,7 @@ import imaplib
 import json
 import sqlite3
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
@@ -849,6 +850,30 @@ class SubjectPatternExtractor:
         return patterns
 
 
+def extract_email_address(addr: str) -> str:
+    """Extract the actual email address from various display name formats.
+
+    Handles formats like:
+    - email@domain.com → email@domain.com
+    - <email@domain.com> → email@domain.com
+    - Name <email@domain.com> → email@domain.com
+    - "Name" <email@domain.com> → email@domain.com
+
+    Args:
+        addr: Email address string, possibly with display name
+
+    Returns:
+        The email address without display name or angle brackets
+    """
+    addr = addr.strip()
+    if '<' in addr and '>' in addr:
+        # Extract content between angle brackets
+        start = addr.index('<')
+        end = addr.index('>', start)
+        return addr[start + 1:end].strip()
+    return addr
+
+
 def compute_domain_counts(addresses: List[Tuple[str, int]]) -> List[Tuple[str, int]]:
     """Aggregate message counts grouped by domain.
 
@@ -871,8 +896,9 @@ def compute_domain_counts(addresses: List[Tuple[str, int]]) -> List[Tuple[str, i
 
     domain_counts = defaultdict(int)
     for addr, count in addresses:
-        if '@' in addr:
-            domain = addr.rsplit('@', 1)[1].strip().lower()
+        email = extract_email_address(addr)
+        if '@' in email:
+            domain = email.rsplit('@', 1)[1].strip().lower()
             domain_counts[domain] += count
 
     return sorted(domain_counts.items(), key=lambda x: x[1], reverse=True)
@@ -903,10 +929,137 @@ def get_emails_for_domain(
     filtered = [
         (addr, count)
         for addr, count in addresses
-        if '@' in addr and addr.rsplit('@', 1)[1].lower() == domain_lower
+        if '@' in (email := extract_email_address(addr)) and email.rsplit('@', 1)[1].lower() == domain_lower
     ]
     # Sort by count descending
     return sorted(filtered, key=lambda x: x[1], reverse=True)
+
+
+def consolidate_email_addresses(
+    addresses: List[Tuple[str, int]]
+) -> List[Tuple[str, int, int]]:
+    """Consolidate email addresses with different display names.
+
+    Groups addresses by their normalized email (ignoring display names),
+    sums their message counts, and tracks the number of variations.
+
+    Args:
+        addresses: List of (email_address_with_display_name, count) tuples
+
+    Returns:
+        List of (normalized_email, total_count, variation_count) tuples,
+        sorted by total_count descending
+
+    Example:
+        >>> addresses = [
+        ...     ('ClearScore <marketing@clearscore.com>', 582),
+        ...     ('"ClearScore" <marketing@clearscore.com>', 404),
+        ...     ('Clearscore <marketing@clearscore.com>', 17),
+        ...     ('updates@clearscore.com', 1008),
+        ... ]
+        >>> consolidate_email_addresses(addresses)
+        [
+            ('marketing@clearscore.com', 1003, 3),
+            ('updates@clearscore.com', 1008, 1)
+        ]
+    """
+    from collections import defaultdict
+
+    # Group by normalized email
+    email_data = defaultdict(lambda: {'count': 0, 'variations': set()})
+
+    for addr, count in addresses:
+        normalized = extract_email_address(addr)
+        email_data[normalized]['count'] += count
+        email_data[normalized]['variations'].add(addr)
+
+    # Convert to list with variation counts
+    result = [
+        (email, data['count'], len(data['variations']))
+        for email, data in email_data.items()
+    ]
+
+    # Sort by count descending
+    return sorted(result, key=lambda x: x[1], reverse=True)
+
+
+class ConditionNode:
+    """Tree node for nested condition structures in rules.
+
+    Represents a node in the condition tree, which can be:
+    - A leaf node containing a single condition dict
+    - A group node containing child nodes with a logic operator
+    - A root node that wraps the entire condition tree
+
+    This enables nested boolean logic like: ALL [ condition1, ANY [ condition2, condition3 ] ]
+
+    Attributes:
+        type: One of "leaf", "group", or "root"
+        condition: The condition dict (for leaf nodes only)
+        children: List of child ConditionNode objects (for group/root nodes)
+        logic: The logical operator - "any" (OR) or "all" (AND) for group/root nodes
+    """
+
+    def __init__(self):
+        """Initialize an empty condition node."""
+        self.type: str = "leaf"  # "leaf", "group", or "root"
+        self.condition: Optional[dict] = None  # For leaf nodes
+        self.children: List[ConditionNode] = []  # For group/root nodes
+        self.logic: str = "any"  # For group/root: "any" or "all"
+
+    def to_dict(self) -> dict:
+        """Convert this node to rule engine format (dict).
+
+        For leaf nodes: returns the condition dict
+        For group nodes: returns {logic: [children_dicts]}
+        For root nodes: always returns {logic: [children_dicts]} (never unwrapped)
+        Optimizes single-child group nodes to avoid unnecessary nesting
+
+        Returns:
+            Dictionary in rule engine format
+        """
+        if self.type == "leaf":
+            return self.condition
+        elif self.type == "group":
+            # Optimize: if only one child in a group, return it directly
+            if len(self.children) == 1:
+                return self.children[0].to_dict()
+            # Multiple children: wrap in logic operator
+            return {self.logic: [child.to_dict() for child in self.children]}
+        elif self.type == "root":
+            # Root must always be wrapped to satisfy validation
+            # Never optimize root - always include the logic operator
+            return {self.logic: [child.to_dict() for child in self.children]}
+        return {}
+
+
+@dataclass
+class ConditionGroup:
+    """A group of related conditions that share the same logic operator.
+
+    Attributes:
+        indices: List of 0-based indices into the flat conditions list
+        logic: The logic operator for this group - "any" (OR) or "all" (AND)
+    """
+
+    indices: List[int]
+    logic: str
+
+
+@dataclass
+class GroupingSpec:
+    """Specification for how to group conditions in a rule.
+
+    This captures the user's grouping choices and is used to convert
+    a flat list of conditions into a nested tree structure.
+
+    Attributes:
+        groups: List of ConditionGroup objects describing each group
+        overall_logic: The logic operator for the root - "any" or "all"
+    """
+
+    groups: List[ConditionGroup]
+    overall_logic: str
 
 
 class RuleBuilder:
@@ -934,8 +1087,20 @@ class RuleBuilder:
         """Initialize an empty rule builder."""
         self.name: str = ""
         self.priority: int = 100
-        self.conditions: List[dict] = []
-        self.logic: str = "any"  # Default to "any" for multiple conditions
+
+        # Tree structure for nested conditions (replaces flat list)
+        self.root: ConditionNode = ConditionNode()
+        self.root.type = "root"
+
+        # Backward compatibility: Keep flat interface during collection
+        # These are used while building conditions, then converted to tree
+        self._flat_conditions: List[dict] = []
+        self._flat_logic: str = "any"
+
+        # Deprecated: kept for backward compatibility with existing code
+        self.conditions: List[dict] = []  # Alias to _flat_conditions
+        self.logic: str = "any"
+
         self.actions: List[dict] = []  # Support multiple actions
         self.comments: List[str] = []
 
@@ -977,7 +1142,9 @@ class RuleBuilder:
             Self for method chaining
         """
         condition = {"header": header.lower(), match_type: value}
-        self.conditions.append(condition)
+        self._flat_conditions.append(condition)
+        # Maintain backward compatibility alias
+        self.conditions = self._flat_conditions
         return self
 
     def set_logic(self, logic: str) -> "RuleBuilder":
@@ -990,7 +1157,8 @@ class RuleBuilder:
             Self for method chaining
         """
         if logic.lower() in ("all", "any"):
-            self.logic = logic.lower()
+            self._flat_logic = logic.lower()
+            self.logic = self._flat_logic  # Backward compatibility
         return self
 
     def add_action(self, action_type: str, target: str = "", keywords: List[str] = None) -> "RuleBuilder":
@@ -1024,6 +1192,58 @@ class RuleBuilder:
         if comment.strip():
             self.comments.append(comment.strip())
         return self
+
+    def finalize_conditions(self, grouping: Optional[GroupingSpec] = None) -> None:
+        """Convert flat conditions to tree structure for nested logic support.
+
+        This method must be called before generate_rule() when using grouped conditions.
+        For simple rules without grouping, generate_rule() will auto-finalize.
+
+        Args:
+            grouping: Optional GroupingSpec describing how to group conditions.
+                     If None, creates simple flat structure (backward compatible).
+        """
+        if grouping is None:
+            # Simple case: wrap all conditions in single logic operator
+            for cond in self._flat_conditions:
+                node = ConditionNode()
+                node.type = "leaf"
+                node.condition = cond
+                self.root.children.append(node)
+            self.root.logic = self._flat_logic
+        else:
+            # Complex case: apply grouping specification
+            self._apply_grouping(grouping)
+
+    def _apply_grouping(self, spec: GroupingSpec) -> None:
+        """Apply grouping specification to create nested structure.
+
+        Args:
+            spec: GroupingSpec defining how to organize conditions
+        """
+        self.root.logic = spec.overall_logic
+
+        for group in spec.groups:
+            if len(group.indices) == 1:
+                # Single condition - add as leaf to root
+                idx = group.indices[0]
+                node = ConditionNode()
+                node.type = "leaf"
+                node.condition = self._flat_conditions[idx]
+                self.root.children.append(node)
+            else:
+                # Multiple conditions - create group node
+                group_node = ConditionNode()
+                group_node.type = "group"
+                group_node.logic = group.logic
+
+                for idx in group.indices:
+                    leaf = ConditionNode()
+                    leaf.type = "leaf"
+                    leaf.condition = self._flat_conditions[idx]
+                    group_node.children.append(leaf)
+
+                self.root.children.append(group_node)
 
     def validate(self) -> Tuple[bool, str]:
         """Validate the rule configuration.
@@ -1083,11 +1303,12 @@ class RuleBuilder:
     def generate_rule(self) -> dict:
         """Generate the complete rule dictionary in IMAPFilter format.
 
+        Automatically finalizes conditions if not already done.
         For single action: uses "action" field (backward compatible)
         For multiple actions: uses "actions" array
 
         Returns:
-            Dictionary in IMAPFilter rule format
+            Dictionary in IMAPFilter rule format (with nested conditions if grouped)
 
         Raises:
             ValueError: If rule validation fails
@@ -1096,14 +1317,18 @@ class RuleBuilder:
         if not valid:
             raise ValueError(f"Invalid rule configuration: {error}")
 
+        # Auto-finalize if conditions haven't been finalized yet
+        if not self.root.children:
+            self.finalize_conditions(grouping=None)
+
         # Build rule with correct key order: name, priority, conditions
         rule = {
             "name": self.name,
             "priority": self.priority,
         }
 
-        # Build conditions block (same logic for single or multiple conditions)
-        rule["conditions"] = {self.logic: self.conditions}
+        # Build conditions block using tree structure (supports nesting)
+        rule["conditions"] = self.root.to_dict()
 
         # Add actions (single or multiple)
         if len(self.actions) == 1:
@@ -1493,10 +1718,15 @@ class RuleWizard:
                 print("\nAt least one condition is required. Please try again.\n")
                 continue
 
-            # Step 2: Configure logic (if multiple conditions)
-            if len(self.rule_builder.conditions) > 1:
-                if not self._configure_logic():
-                    continue  # Restart if cancelled
+            # Step 2: Configure logic/grouping (if multiple conditions)
+            if len(self.rule_builder._flat_conditions) > 1:
+                # New: Use grouping workflow which allows mixing AND/OR logic
+                grouping = self._configure_grouping()
+            else:
+                grouping = None
+
+            # Finalize conditions (convert flat to tree structure)
+            self.rule_builder.finalize_conditions(grouping)
 
             # Step 3: Configure action
             if not self._configure_action():
@@ -1590,11 +1820,18 @@ class RuleWizard:
                 iteration += 1
                 continue
 
-            # Step 2: Configure logic (if multiple conditions)
-            if len(self.rule_builder.conditions) > 1:
+            # Step 2: Configure logic/grouping (if multiple conditions)
+            # Note: Batch mode uses simple logic (no grouping) for now
+            if len(self.rule_builder._flat_conditions) > 1:
                 if not self._configure_logic():
                     iteration += 1
                     continue  # Restart if cancelled
+                grouping = None
+            else:
+                grouping = None
+
+            # Finalize conditions (convert flat to tree structure)
+            self.rule_builder.finalize_conditions(grouping)
 
             # Step 3: Configure action
             if not self._configure_action():
@@ -1679,15 +1916,23 @@ class RuleWizard:
             return None
 
         # Step 2: Select specific sender or all from domain
+        # Convert cluster.senders dict to list of tuples for consolidation
+        senders_list = [(email, count) for email, count in cluster.senders.items()]
+
+        # Consolidate email addresses with different display names
+        consolidated = consolidate_email_addresses(senders_list)
+
+        # Format consolidated senders with variation count display
+        formatted_senders = []
+        for email, count, variation_count in consolidated:
+            if variation_count > 1:
+                label = f"{email} [{variation_count} display names]"
+            else:
+                label = email
+            formatted_senders.append((label, count))
+
         sender_items = [(f"[All from {cluster.domain}]", cluster.total_count)]
-        sender_items.extend(
-            [
-                (email, count)
-                for email, count in sorted(
-                    cluster.senders.items(), key=lambda x: x[1], reverse=True
-                )
-            ]
-        )
+        sender_items.extend(formatted_senders)
 
         print(f"\nSelect Sender from {cluster.domain}")
         print("(Use arrow keys to navigate, type to filter, Enter to select, ESC to cancel)")
@@ -1708,12 +1953,22 @@ class RuleWizard:
                 sample_messages=cluster.messages[:5],
             )
         else:
+            # Extract email from consolidated label (remove "[N display names]" suffix if present)
+            email_address = self._extract_email_from_consolidated_label(selected)
+
+            # Sum counts for all variations of this email address
+            estimated_count = sum(
+                count for addr, count in cluster.senders.items()
+                if extract_email_address(addr) == email_address
+            )
+
             return BatchTarget(
                 target_type="email",
-                value=selected,
-                estimated_count=cluster.senders.get(selected, 0),
+                value=email_address,
+                estimated_count=estimated_count,
                 sample_messages=[
-                    m for m in cluster.messages if m.from_address == selected
+                    m for m in cluster.messages
+                    if extract_email_address(m.from_address) == email_address
                 ][:5],
             )
 
@@ -1737,24 +1992,25 @@ class RuleWizard:
                 print(f"  • {rule_name}: {format_count(count)} messages")
         print("=" * 60)
 
-    def _format_domain_selection(self, domain: str) -> str:
-        """ISSUE #5 FIX: Create standardized '[All from domain]' format.
+    def _format_domain_selection(self, domain: str, field: str = "from") -> str:
+        """ISSUE #5 FIX: Create standardized '[All {field} domain]' format.
 
         This provides a single point to generate the domain-wide selection string,
         ensuring consistent formatting across batch mode and additional conditions.
 
         Args:
             domain: The domain name (e.g., 'example.com')
+            field: Email field name ('from', 'to', 'cc', 'bcc', 'reply-to')
 
         Returns:
-            Formatted string: '[All from example.com]'
+            Formatted string: '[All from example.com]', '[All to example.com]', etc.
         """
-        return f"[All from {domain}]"
+        return f"[All {field} {domain}]"
 
     def _is_domain_selection(self, selection: str) -> bool:
         """ISSUE #5 FIX: Detect if a selection is a domain-wide selection.
 
-        Checks if a string is in the '[All from domain]' format.
+        Checks if a string is in the '[All {field} domain]' format.
 
         Args:
             selection: The selection string to check
@@ -1764,28 +2020,38 @@ class RuleWizard:
 
         Examples:
             '[All from example.com]' -> True
+            '[All to example.com]' -> True
+            '[All cc example.com]' -> True
             'user@example.com' -> False
         """
-        return selection.startswith("[All from ") and selection.endswith("]")
+        return selection.startswith("[All ") and selection.endswith("]") and " " in selection[5:-1]
 
     def _extract_domain_from_selection(self, selection: str) -> Optional[str]:
-        """ISSUE #5 FIX: Extract domain from '[All from domain]' selection.
+        """ISSUE #5 FIX: Extract domain from '[All {field} domain]' selection.
 
         Safely extracts domain name from the domain-wide selection format.
+        Supports all field types (from, to, cc, bcc, reply-to).
 
         Args:
-            selection: A selection string, potentially in '[All from domain]' format
+            selection: A selection string, potentially in '[All {field} domain]' format
 
         Returns:
             Domain name if selection is domain format, None otherwise
 
         Examples:
             '[All from example.com]' -> 'example.com'
+            '[All to example.com]' -> 'example.com'
+            '[All cc example.com]' -> 'example.com'
             'user@example.com' -> None
         """
         if self._is_domain_selection(selection):
-            # Remove '[All from ' prefix and ']' suffix
-            return selection[10:-1]  # len("[All from ") = 10
+            # Extract from '[All {field} {domain}]' format
+            # Remove '[All ' prefix (5 chars) and ']' suffix (1 char)
+            content = selection[5:-1]
+            # Split on last space to separate field from domain
+            parts = content.rsplit(' ', 1)
+            if len(parts) == 2:
+                return parts[1]  # Return domain part
         return None
 
     def _convert_domain_selection_to_pattern(self, selection: str) -> str:
@@ -1808,6 +2074,26 @@ class RuleWizard:
         if domain:
             return f"@{domain}"
         return selection
+
+    def _extract_email_from_consolidated_label(self, label: str) -> str:
+        """Extract email address from consolidated label format.
+
+        Removes the '[N display names]' suffix if present, which is added
+        when consolidating email addresses with different display names.
+
+        Args:
+            label: Email label, potentially in format "email@domain.com [N display names]"
+
+        Returns:
+            The email address without the consolidation suffix
+
+        Examples:
+            'marketing@clearscore.com [4 display names]' -> 'marketing@clearscore.com'
+            'marketing@clearscore.com' -> 'marketing@clearscore.com'
+        """
+        if ' [' in label and label.endswith(' display names]'):
+            return label.split(' [')[0]
+        return label
 
     def _prepopulate_condition(self, batch_target: BatchTarget) -> None:
         """Pre-populate first condition based on batch selection.
@@ -1857,7 +2143,69 @@ class RuleWizard:
         Returns:
             0 to continue batch, 1 to save and exit, 130 to exit without saving
         """
-        rule = self.rule_builder.generate_rule()
+        # Try to generate and save the rule, handling validation errors gracefully
+        while True:
+            try:
+                rule = self.rule_builder.generate_rule()
+                break  # Rule is valid, proceed to save
+            except ValueError as e:
+                error_msg = str(e)
+                if "must have either 'contains' or 'regex'" in error_msg:
+                    # Extract condition number
+                    import re
+                    match = re.search(r"Condition (\d+)", error_msg)
+                    if match:
+                        condition_idx = int(match.group(1)) - 1
+                        if self._fix_missing_match_type(condition_idx):
+                            continue  # Retry with fixed condition
+                        else:
+                            return 130  # User cancelled
+                elif "cannot have both 'contains' and 'regex'" in error_msg:
+                    # Extract condition number
+                    import re
+                    match = re.search(r"Condition (\d+)", error_msg)
+                    if match:
+                        condition_idx = int(match.group(1)) - 1
+                        if self._fix_duplicate_match_type(condition_idx):
+                            continue  # Retry with fixed condition
+                        else:
+                            return 130  # User cancelled
+                elif "empty match value" in error_msg:
+                    # Extract condition number
+                    import re
+                    match = re.search(r"Condition (\d+)", error_msg)
+                    if match:
+                        condition_idx = int(match.group(1)) - 1
+                        if self._fix_empty_value(condition_idx):
+                            continue  # Retry with fixed condition
+                        else:
+                            return 130  # User cancelled
+                elif "Action" in error_msg and ("requires" in error_msg or "missing" in error_msg):
+                    # Action-related error
+                    if self._fix_action_error(error_msg):
+                        continue  # Retry with fixed action
+                    else:
+                        # Can't fix, show error and options
+                        print(f"\n⚠️  Validation Error: {error_msg}")
+                        print("\nWhat would you like to do?")
+                        print("  1. Discard and try next email")
+                        print("  2. Exit batch mode")
+                        choice = input("\nChoice (1-2): ").strip() or "1"
+                        if choice == "2":
+                            return 130  # Exit
+                        else:
+                            return 0  # Continue to next email
+                else:
+                    # Generic validation error - show error and options
+                    print(f"\n⚠️  Validation Error: {error_msg}")
+                    print("\nWhat would you like to do?")
+                    print("  1. Discard and try next email")
+                    print("  2. Exit batch mode")
+                    choice = input("\nChoice (1-2): ").strip() or "1"
+                    if choice == "2":
+                        return 130  # Exit
+                    else:
+                        return 0  # Continue to next email
 
         # Display rule JSON
         print("\n" + "=" * 60)
@@ -1891,6 +2239,160 @@ class RuleWizard:
             return 0  # Continue without saving
         else:
             return 130  # Exit
+
+    def _fix_missing_match_type(self, condition_idx: int) -> bool:
+        """Fix a condition missing 'contains' or 'regex' field.
+
+        Args:
+            condition_idx: Index of the condition to fix
+
+        Returns:
+            True if fixed successfully, False if user cancelled
+        """
+        if condition_idx >= len(self.rule_builder.conditions):
+            return False
+
+        condition = self.rule_builder.conditions[condition_idx]
+        print(f"\n⚠️  Condition {condition_idx + 1} is missing a match type.")
+        print(f"   Header: {condition.get('header', '<unknown>')}")
+        print("\nWhich match type would you like to use?")
+        print("  1. Contains (substring match)")
+        print("  2. Regex (regular expression)")
+        print("  3. Cancel")
+
+        choice = input("\nChoice (1-3): ").strip() or "3"
+
+        if choice == "1":
+            value = input("Enter the substring to match: ").strip()
+            if not value:
+                print("⚠️  Match value cannot be empty.")
+                return self._fix_missing_match_type(condition_idx)  # Retry
+            condition["contains"] = value
+            # Remove any other match type that might exist
+            condition.pop("regex", None)
+            print("✓ Condition fixed!")
+            return True
+        elif choice == "2":
+            value = input("Enter the regex pattern to match: ").strip()
+            if not value:
+                print("⚠️  Match value cannot be empty.")
+                return self._fix_missing_match_type(condition_idx)  # Retry
+            condition["regex"] = value
+            # Remove any other match type that might exist
+            condition.pop("contains", None)
+            print("✓ Condition fixed!")
+            return True
+        else:
+            return False
+
+    def _fix_duplicate_match_type(self, condition_idx: int) -> bool:
+        """Fix a condition with both 'contains' and 'regex' fields.
+
+        Args:
+            condition_idx: Index of the condition to fix
+
+        Returns:
+            True if fixed successfully, False if user cancelled
+        """
+        if condition_idx >= len(self.rule_builder.conditions):
+            return False
+
+        condition = self.rule_builder.conditions[condition_idx]
+        print(f"\n⚠️  Condition {condition_idx + 1} has both 'contains' and 'regex'.")
+        print(f"   Header: {condition.get('header', '<unknown>')}")
+        print(f"   Contains: {condition.get('contains')}")
+        print(f"   Regex: {condition.get('regex')}")
+        print("\nWhich one should be kept?")
+        print("  1. Keep 'contains'")
+        print("  2. Keep 'regex'")
+        print("  3. Cancel")
+
+        choice = input("\nChoice (1-3): ").strip() or "3"
+
+        if choice == "1":
+            condition.pop("regex", None)
+            print("✓ Condition fixed!")
+            return True
+        elif choice == "2":
+            condition.pop("contains", None)
+            print("✓ Condition fixed!")
+            return True
+        else:
+            return False
+
+    def _fix_empty_value(self, condition_idx: int) -> bool:
+        """Fix a condition with an empty match value.
+
+        Args:
+            condition_idx: Index of the condition to fix
+
+        Returns:
+            True if fixed successfully, False if user cancelled
+        """
+        if condition_idx >= len(self.rule_builder.conditions):
+            return False
+
+        condition = self.rule_builder.conditions[condition_idx]
+        match_type = "contains" if "contains" in condition else "regex"
+
+        print(f"\n⚠️  Condition {condition_idx + 1} has an empty match value.")
+        print(f"   Header: {condition.get('header', '<unknown>')}")
+        print(f"   Match type: {match_type}")
+
+        value = input(f"Enter the {match_type} pattern to match: ").strip()
+        if not value:
+            print("⚠️  Match value cannot be empty.")
+            return self._fix_empty_value(condition_idx)  # Retry
+
+        condition[match_type] = value
+        print("✓ Condition fixed!")
+        return True
+
+    def _fix_action_error(self, error_msg: str) -> bool:
+        """Fix an action-related validation error.
+
+        Args:
+            error_msg: The error message describing the issue
+
+        Returns:
+            True if fixed or error doesn't apply to actions, False if user cancelled
+        """
+        import re
+
+        # Extract action number
+        match = re.search(r"Action (\d+)", error_msg)
+        if not match:
+            return False
+
+        action_idx = int(match.group(1)) - 1
+        if action_idx >= len(self.rule_builder.actions):
+            return False
+
+        action = self.rule_builder.actions[action_idx]
+
+        # Handle different action errors
+        if "requires a target folder" in error_msg:
+            print(f"\n⚠️  Action {action_idx + 1} (move) requires a target folder.")
+            target = input("Enter the target folder path: ").strip()
+            if not target:
+                print("⚠️  Target folder cannot be empty.")
+                return self._fix_action_error(error_msg)  # Retry
+            action["target"] = target
+            print("✓ Action fixed!")
+            return True
+
+        elif "requires at least one keyword" in error_msg:
+            action_type = action.get("type", "unknown")
+            print(f"\n⚠️  Action {action_idx + 1} ({action_type}) requires at least one keyword.")
+            keyword = input("Enter a keyword to add: ").strip()
+            if not keyword:
+                print("⚠️  Keyword cannot be empty.")
+                return self._fix_action_error(error_msg)  # Retry
+            action["keywords"] = [keyword]
+            print("✓ Action fixed!")
+            return True
+
+        return False
 
     def _validate_cache(self) -> bool:
         """Check if cache exists and has data.
@@ -2041,11 +2543,9 @@ class RuleWizard:
             Selected value, or None if cancelled
         """
         # Get values from cache
-        if field == "from":
-            # Use two-step selector for better UX with many senders
-            return self._select_from_address_two_step()
-        elif field == "to":
-            items = self.cache_engine.extract_unique_to_addresses(limit=2000)
+        # Email fields use two-step selector with domain grouping and consolidation
+        if field in ("from", "to", "cc", "bcc", "reply-to"):
+            return self._select_email_address_two_step(field)
         elif field == "subject":
             # Remove 500 limit - fetch all unique subjects
             items = self.cache_engine.extract_unique_subjects(limit=999999)
@@ -2104,30 +2604,43 @@ class RuleWizard:
             else:
                 return None
 
-    def _select_from_address_two_step(self) -> Optional[str]:
-        """Show two-step from address selector: domain first, then email.
+    def _select_email_address_two_step(self, field: str = "from") -> Optional[str]:
+        """Show two-step email address selector with domain grouping and consolidation.
+
+        Works with any email field (from, to, cc, bcc, reply-to) by using domain grouping
+        and consolidating addresses with different display names.
+
+        Args:
+            field: Email field name ('from', 'to', 'cc', 'bcc', 'reply-to')
 
         Returns:
-            Selected email address, '[All from domain]' for domain-wide selection,
+            Selected email address, '[All {field} domain]' for domain-wide selection,
             or None if cancelled
 
         Note:
-            The '[All from domain]' format is consistent with batch mode and gets
+            The '[All {field} domain]' format is consistent with batch mode and gets
             converted to '@domain' pattern by _convert_domain_selection_to_pattern()
         """
-        # Step 1: Load all unique from addresses
-        print("\nLoading from addresses...")
-        all_addresses = self.cache_engine.extract_unique_from_addresses(limit=2000)
+        # Step 1: Load all unique addresses for the specified field
+        print(f"\nLoading {field} addresses...")
+
+        if field == "from":
+            all_addresses = self.cache_engine.extract_unique_from_addresses(limit=2000)
+        elif field == "to":
+            all_addresses = self.cache_engine.extract_unique_to_addresses(limit=2000)
+        else:
+            # Use generic extraction for cc, bcc, reply-to
+            all_addresses = self.cache_engine.extract_other_header(field, limit=2000)
 
         if not all_addresses:
-            print("No senders found in cache.")
+            print(f"No {field} addresses found in cache.")
             return None
 
         # Step 2: Compute domain counts
         domain_counts = compute_domain_counts(all_addresses)
 
         if not domain_counts:
-            print("Could not extract domains from addresses.")
+            print(f"Could not extract domains from {field} addresses.")
             return None
 
         # Step 3: First selector - select domain
@@ -2135,7 +2648,7 @@ class RuleWizard:
         print("(Use arrow keys to navigate, type to filter, Enter to select, ESC to cancel)")
         input("Press Enter to select domain...")
 
-        selector = FilterableListSelector(domain_counts, "Select Domain")
+        selector = FilterableListSelector(domain_counts, f"Select Domain for {field.upper()}")
         selected_domain = curses.wrapper(selector.run)
 
         if not selected_domain:
@@ -2143,30 +2656,42 @@ class RuleWizard:
             print("\nDomain selection cancelled.")
             retry_response = prompt_yes_no("Would you like to try again?", default=True)
             if retry_response:
-                return self._select_from_address_two_step()
+                return self._select_email_address_two_step(field)
             return None
 
         # Step 4: Second selector - select email from domain
         domain_emails = get_emails_for_domain(all_addresses, selected_domain)
 
         if not domain_emails:
-            print(f"\nNo emails found for domain {selected_domain}")
+            print(f"\nNo {field} addresses found for domain {selected_domain}")
             return None
 
-        # Prepend "All from domain" option for consistency with batch mode
-        # ISSUE #5 FIX: Use helper method for consistent format
-        domain_total = sum(count for _, count in domain_emails)
-        selector_items = [(self._format_domain_selection(selected_domain), domain_total)] + domain_emails
+        # Consolidate email addresses with different display names
+        consolidated = consolidate_email_addresses(domain_emails)
 
-        if len(domain_emails) == 1:
+        # Format consolidated emails with variation count display
+        formatted_emails = []
+        for email, count, variation_count in consolidated:
+            if variation_count > 1:
+                label = f"{email} [{variation_count} display names]"
+            else:
+                label = email
+            formatted_emails.append((label, count))
+
+        # Prepend "All {field} domain" option for consistency with batch mode
+        # ISSUE #5 FIX: Use helper method for consistent format
+        domain_total = sum(count for _, count, _ in consolidated)
+        selector_items = [(self._format_domain_selection(selected_domain, field), domain_total)] + formatted_emails
+
+        if len(consolidated) == 1:
             # Auto-select if only one email (offer all or specific option)
             # ISSUE #5 FIX: Use helper method for consistent format
-            domain_selection = self._format_domain_selection(selected_domain)
+            domain_selection = self._format_domain_selection(selected_domain, field)
             print(f"\nFound 2 options for {selected_domain}:")
             print("(Use arrow keys to navigate, Enter to select, ESC to cancel)")
             input("Press Enter to select option...")
 
-            selector_items = [(domain_selection, domain_total)] + domain_emails
+            selector_items = [(domain_selection, domain_total)] + formatted_emails
             selector = FilterableListSelector(selector_items, f"Select Email Option from {selected_domain}")
             selected_email = curses.wrapper(selector.run)
 
@@ -2175,7 +2700,7 @@ class RuleWizard:
                 print("\nEmail option selection cancelled.")
                 retry_response = prompt_yes_no("Would you like to try again?", default=True)
                 if retry_response:
-                    return self._select_from_address_two_step()
+                    return self._select_email_address_two_step(field)
                 return None
 
             # If user selected domain-wide format, return it
@@ -2183,14 +2708,14 @@ class RuleWizard:
                 return selected_email
 
             # Offer post-selection editing
-            edited_email = self._edit_email_address(selected_email, "from address")
+            edited_email = self._edit_email_address(selected_email, f"{field} address")
             return edited_email if edited_email is not None else None
 
-        print(f"\nFound {len(domain_emails)} senders from {selected_domain}...")
+        print(f"\nFound {len(consolidated)} {field} addresses from {selected_domain}...")
         print("(Use arrow keys to navigate, type to filter, Enter to select, ESC to cancel)")
         input("Press Enter to select email...")
 
-        selector = FilterableListSelector(selector_items, f"Select Email from {selected_domain}")
+        selector = FilterableListSelector(selector_items, f"Select {field.upper()} Address from {selected_domain}")
         selected_email = curses.wrapper(selector.run)
 
         if not selected_email:
@@ -2200,25 +2725,28 @@ class RuleWizard:
             if retry_response:
                 # Go back to domain selection for full retry
                 print("\nRestarting from domain selection...")
-                return self._select_from_address_two_step()
+                return self._select_email_address_two_step(field)
 
             # Offer alternative: continue with domain-wide match
             # ISSUE #5 FIX: Use helper method for consistent format
             domain_response = prompt_yes_no(
-                f"Would you like to match all emails from {selected_domain} instead?",
+                f"Would you like to match all {field} addresses from {selected_domain} instead?",
                 default=False
             )
             if domain_response:
-                return self._format_domain_selection(selected_domain)
+                return self._format_domain_selection(selected_domain, field)
 
             return None
 
-        # Check if user selected "All from domain"
-        if selected_email.startswith("[All from "):
+        # Check if user selected domain-wide format
+        if self._is_domain_selection(selected_email):
             return selected_email
 
+        # Extract email from consolidated label format (remove "[N display names]" suffix if present)
+        actual_email = self._extract_email_from_consolidated_label(selected_email)
+
         # Offer post-selection editing for specific email
-        edited_email = self._edit_email_address(selected_email, "from address")
+        edited_email = self._edit_email_address(actual_email, f"{field} address")
         return edited_email if edited_email is not None else None
 
     def _suggest_patterns(self, field: str, value: str) -> Optional[str]:
@@ -2321,6 +2849,189 @@ class RuleWizard:
             self.rule_builder.set_logic("any")
 
         return True
+
+    def _configure_grouping(self) -> Optional[GroupingSpec]:
+        """Configure grouping for mixed AND/OR logic in conditions.
+
+        Allows users to group conditions and assign different logic operators
+        to each group, enabling nested boolean logic like:
+        "FROM condition AND (SUBJECT condition1 OR condition2)"
+
+        Returns:
+            GroupingSpec if grouping was configured, None for simple flat logic
+        """
+        if len(self.rule_builder._flat_conditions) < 2:
+            return None  # Single condition - no grouping needed
+
+        print(f"\nYou have {len(self.rule_builder._flat_conditions)} conditions.")
+        self._display_conditions_numbered()
+
+        print("\nHow should these be combined?")
+        print("  1. ALL conditions (AND) - message must match all")
+        print("  2. ANY condition (OR) - message must match any")
+        print("  3. Create groups for mixed logic (advanced)")
+
+        choice = input("  > ").strip()
+
+        if choice == "1":
+            self.rule_builder._flat_logic = "all"
+            return None  # Simple flat structure
+        elif choice == "2":
+            self.rule_builder._flat_logic = "any"
+            return None  # Simple flat structure
+        elif choice == "3":
+            return self._create_grouping_interactive()
+        else:
+            # Default to ANY
+            self.rule_builder._flat_logic = "any"
+            return None
+
+    def _create_grouping_interactive(self) -> GroupingSpec:
+        """Interactive workflow to create condition groups.
+
+        Users select which conditions to group together, and set the logic
+        for each group. Returns a GroupingSpec that describes the grouping.
+        """
+        conditions = self.rule_builder._flat_conditions
+        ungrouped = set(range(len(conditions)))
+        groups: List[ConditionGroup] = []
+
+        while ungrouped:
+            print("\n" + "=" * 60)
+            print("GROUPING CONDITIONS")
+            print("=" * 60)
+
+            # Show available conditions
+            print("\nAvailable conditions:")
+            for i in sorted(ungrouped):
+                cond = conditions[i]
+                print(f"  {i+1}. {self._format_condition(cond)}")
+
+            if len(ungrouped) == 1:
+                # Last condition - auto-add as single item
+                idx = list(ungrouped)[0]
+                groups.append(ConditionGroup(indices=[idx], logic="any"))
+                break
+
+            # Get group selection
+            print("\nEnter condition numbers to group (e.g., '2,3,4')")
+            print("or press Enter to keep remaining separate:")
+            selection = input("  > ").strip()
+
+            if not selection:
+                # Keep remaining separate
+                for idx in sorted(ungrouped):
+                    groups.append(ConditionGroup(indices=[idx], logic="any"))
+                break
+
+            # Parse selection
+            try:
+                selected_indices = self._parse_number_list(selection, len(conditions))
+                if not selected_indices or not all(i in ungrouped for i in selected_indices):
+                    print("Invalid selection. Try again.")
+                    continue
+            except ValueError as e:
+                print(f"Invalid format: {e}")
+                continue
+
+            # Set logic for this group
+            print(f"\nGroup: {len(selected_indices)} conditions")
+            for idx in selected_indices:
+                print(f"  • {self._format_condition(conditions[idx])}")
+
+            print("\nThis group should match:")
+            print("  1. ANY (OR) - match if any condition is true")
+            print("  2. ALL (AND) - match only if all are true")
+            group_logic_choice = input("  > ").strip()
+
+            group_logic = "all" if group_logic_choice == "2" else "any"
+            groups.append(ConditionGroup(indices=selected_indices, logic=group_logic))
+
+            # Remove grouped conditions
+            ungrouped -= set(selected_indices)
+
+        # Set overall logic
+        print("\n" + "=" * 60)
+        print("OVERALL LOGIC")
+        print("=" * 60)
+        self._display_group_structure(groups, conditions)
+
+        print("\nAll groups/conditions must match:")
+        print("  1. ALL (AND) - message must satisfy all groups")
+        print("  2. ANY (OR) - message must satisfy any group")
+        overall_choice = input("  > ").strip()
+
+        overall_logic = "all" if overall_choice == "1" else "any"
+
+        return GroupingSpec(groups=groups, overall_logic=overall_logic)
+
+    def _parse_number_list(self, text: str, max_num: int) -> List[int]:
+        """Parse comma-separated numbers into 0-based indices.
+
+        Args:
+            text: Input like "2,3,4"
+            max_num: Maximum allowed value (for validation)
+
+        Returns:
+            List of 0-based indices [1, 2, 3]
+
+        Raises:
+            ValueError: If input is invalid
+        """
+        parts = [p.strip() for p in text.split(",")]
+        indices = []
+        for part in parts:
+            try:
+                num = int(part)
+                if num < 1 or num > max_num:
+                    raise ValueError(f"Numbers must be between 1 and {max_num}")
+                indices.append(num - 1)  # Convert to 0-based
+            except ValueError:
+                raise ValueError(f"Invalid number: '{part}'")
+        return indices
+
+    def _format_condition(self, cond: dict) -> str:
+        """Format a condition dict for display.
+
+        Args:
+            cond: Condition dictionary
+
+        Returns:
+            Formatted string like "from contains 'sender@example.com'"
+        """
+        header = cond.get("header", "?")
+        for op in ["contains", "equals", "regex", "not_contains", "not_equals", "not_regex"]:
+            if op in cond:
+                value = cond[op]
+                if len(value) > 40:
+                    value = value[:37] + "..."
+                return f"{header} {op} '{value}'"
+        return str(cond)
+
+    def _display_conditions_numbered(self) -> None:
+        """Display all conditions with numbers for selection."""
+        for i, cond in enumerate(self.rule_builder._flat_conditions, 1):
+            print(f"  {i}. {self._format_condition(cond)}")
+
+    def _display_group_structure(
+        self, groups: List[ConditionGroup], conditions: List[dict]
+    ) -> None:
+        """Display visual tree of groups.
+
+        Args:
+            groups: List of ConditionGroup objects
+            conditions: Original list of all conditions
+        """
+        print("\nRule structure:")
+        for i, group in enumerate(groups, 1):
+            if len(group.indices) == 1:
+                cond = conditions[group.indices[0]]
+                print(f"  → {self._format_condition(cond)}")
+            else:
+                logic_name = "ANY" if group.logic == "any" else "ALL"
+                print(f"  → [Group {i}: {logic_name} of {len(group.indices)} conditions]")
+                for idx in group.indices:
+                    print(f"      • {self._format_condition(conditions[idx])}")
 
     def _get_imap_folders(self) -> List[str]:
         """
@@ -2928,14 +3639,35 @@ class RuleWizard:
         # Validate rule
         valid, error = self.rule_builder.validate()
         if not valid:
-            print(f"\nError: {error}")
+            print(f"\n⚠️  Validation Error: {error}")
+            # Offer to fix specific errors
+            if "must have either 'contains' or 'regex'" in error:
+                import re
+                match = re.search(r"Condition (\d+)", error)
+                if match and self._fix_missing_match_type(int(match.group(1)) - 1):
+                    return self._preview_and_save()  # Retry after fixing
+            elif "cannot have both 'contains' and 'regex'" in error:
+                import re
+                match = re.search(r"Condition (\d+)", error)
+                if match and self._fix_duplicate_match_type(int(match.group(1)) - 1):
+                    return self._preview_and_save()  # Retry after fixing
+            elif "empty match value" in error:
+                import re
+                match = re.search(r"Condition (\d+)", error)
+                if match and self._fix_empty_value(int(match.group(1)) - 1):
+                    return self._preview_and_save()  # Retry after fixing
+            elif "Action" in error and ("requires" in error or "missing" in error):
+                if self._fix_action_error(error):
+                    return self._preview_and_save()  # Retry after fixing
+            print("\nPlease go back and edit the rule.")
             return 1
 
         # Generate rule
         try:
             rule = self.rule_builder.generate_rule()
         except ValueError as e:
-            print(f"\nError generating rule: {e}")
+            print(f"\n⚠️  Error generating rule: {e}")
+            print("\nPlease go back and edit the rule.")
             return 1
 
         # Display rule JSON
@@ -2947,8 +3679,10 @@ class RuleWizard:
 
         # Run dry-run preview
         print("\nRunning dry-run preview...")
-        match_count = self._preview_rule(rule)
-        print(f"\nThis rule will match approximately {format_count(match_count)} messages.")
+        total_matches, folder_matches, stats = self._preview_rule(rule)
+
+        # Display detailed preview summary
+        self._display_preview_summary(total_matches, folder_matches, stats)
 
         # Ask to save
         print("\n" + "=" * 60)
@@ -3036,21 +3770,28 @@ class RuleWizard:
                 print(f"\nError saving rule: {message}")
                 return 1
 
-    def _preview_rule(self, rule: dict) -> int:
-        """Run dry-run preview and count matching messages.
+    def _preview_rule(self, rule: dict) -> tuple[int, dict[str, int], dict]:
+        """Run dry-run preview and collect detailed match statistics.
 
         Args:
             rule: The rule dictionary to preview
 
         Returns:
-            Number of matching messages
+            Tuple of (total_matches, folder_matches, stats_dict)
+            where:
+            - total_matches: Total number of matching messages
+            - folder_matches: Dict mapping folder names to match counts
+            - stats_dict: Dict with 'duration', 'rate', 'rule_name' for display
         """
         from core.rule_engine import rule_match
+        from core.logging_utils import PhaseTimer
 
-        # Get all cached headers
+        timer = PhaseTimer("preview")
+
+        # Get all cached headers with folder information
         cursor = self.cache_engine.conn.cursor()
         total_count = self.cache_engine._get_total_count()
-        cursor.execute("SELECT data FROM headers")
+        cursor.execute("SELECT folder, data FROM headers ORDER BY folder")
 
         progress_bar = tqdm(
             cursor,
@@ -3062,10 +3803,18 @@ class RuleWizard:
         )
 
         match_count = 0
+        folder_match_counts: dict[str, int] = {}
         conditions = rule.get("conditions", {})
+        rule_name = rule.get("name", "Preview Rule")
 
         for row in progress_bar:
-            data = row[0] if row else ""
+            if not row or len(row) < 2:
+                continue
+
+            folder, data = row[0], row[1]
+            if not data:
+                continue
+
             header = safe_parse_header(data)
 
             # Evaluate conditions
@@ -3079,8 +3828,49 @@ class RuleWizard:
 
             if matched:
                 match_count += 1
+                folder_match_counts[folder] = folder_match_counts.get(folder, 0) + 1
 
-        return match_count
+        # Prepare stats for display
+        stats = {
+            "duration": timer.fmt(),
+            "rate": f"{timer.rate():.1f}" if timer.elapsed > 0 else "0.0",
+            "rule_name": rule_name,
+        }
+
+        return match_count, folder_match_counts, stats
+
+    def _display_preview_summary(
+        self,
+        total_matches: int,
+        folder_matches: dict[str, int],
+        stats: dict
+    ) -> None:
+        """Display a detailed preview summary matching the rule manager style.
+
+        Args:
+            total_matches: Total number of matching messages
+            folder_matches: Dict mapping folder names to match counts
+            stats: Dict with 'duration', 'rate', 'rule_name' for display
+        """
+        print("\n" + "=" * 60)
+        print("📊 Summary — Preview Rule")
+        print("=" * 60)
+        print(f"   🧩  Rules evaluated: 1")
+        print(f"   🎯  Matches found: {total_matches}")
+        print(f"   ⏱️  Duration: {stats.get('duration', 'N/A')} ({stats.get('rate', 'N/A')} msg/s)")
+
+        # Show matches by folder
+        if folder_matches:
+            sorted_folders = sorted(folder_matches.items(), key=lambda kv: (-kv[1], kv[0]))
+            print(f"   📂  Matches by folder:")
+            for folder, count in sorted_folders:
+                print(f"      • {folder}: {count}")
+
+        # Show matches by rule
+        rule_name = stats.get('rule_name', 'Preview Rule')
+        print(f"   🧠  Matches by rule:")
+        print(f"      • {rule_name}: {total_matches}")
+        print("=" * 60 + "\n")
 
     def _prompt_text(self, prompt: str, default: str = "") -> str:
         """Prompt for text input.
