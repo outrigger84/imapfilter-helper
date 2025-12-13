@@ -1519,6 +1519,10 @@ class RuleWizard:
         cache_path = self.config.paths.data_dir / "wizard_cache.json"
         self.wizard_cache = WizardCache(cache_path)
 
+        # Batch mode context for consistency across condition selection
+        self.batch_mode_active = False
+        self.batch_selected_cluster: Optional[DomainCluster] = None
+
         # Validate cache exists
         if not self.config.paths.db_file.exists():
             raise ValueError(
@@ -1775,6 +1779,17 @@ class RuleWizard:
                     return self._run_normal_wizard()
                 return 0
 
+            # Set batch context for consistent address selection across conditions
+            self.batch_mode_active = True
+            if batch_target.target_type == "domain":
+                # Domain-wide selection: use the domain directly
+                domain = batch_target.value
+            else:
+                # Email selection: extract domain from email address
+                domain = batch_target.value.split("@")[-1] if "@" in batch_target.value else batch_target.value
+
+            self.batch_selected_cluster = self.coverage_analyzer.find_cluster(domain)
+
             # Pre-populate first condition based on selection
             self._prepopulate_condition(batch_target)
             self._display_batch_context(batch_target)
@@ -1856,15 +1871,24 @@ class RuleWizard:
                     print("\n✅ All emails now have rules!")
                     return 0
 
+                # Clear batch context for next iteration
+                self.batch_mode_active = False
+                self.batch_selected_cluster = None
+
                 # Continue loop
                 iteration += 1
                 continue
             elif exit_code == 130:
                 # User wants to exit batch mode
+                self.batch_mode_active = False
+                self.batch_selected_cluster = None
                 return 0
             else:
                 # Error occurred
                 print("⚠️  Error saving rule, continuing...")
+                # Clear batch context for next iteration
+                self.batch_mode_active = False
+                self.batch_selected_cluster = None
                 iteration += 1
                 continue
 
@@ -2624,7 +2648,12 @@ class RuleWizard:
         # Step 1: Load all unique addresses for the specified field
         print(f"\nLoading {field} addresses...")
 
-        if field == "from":
+        # In batch mode, use cluster data (uncovered messages only) for FROM field
+        if self.batch_mode_active and self.batch_selected_cluster and field == "from":
+            # Use senders from the domain cluster (uncovered messages only)
+            all_addresses = [(addr, count) for addr, count in self.batch_selected_cluster.senders.items()]
+            print(f"(Showing {len(all_addresses)} uncovered {field} addresses)")
+        elif field == "from":
             all_addresses = self.cache_engine.extract_unique_from_addresses(limit=2000)
         elif field == "to":
             all_addresses = self.cache_engine.extract_unique_to_addresses(limit=2000)
@@ -2644,12 +2673,17 @@ class RuleWizard:
             return None
 
         # Step 3: First selector - select domain
-        print(f"\nFound {len(domain_counts)} unique domains...")
-        print("(Use arrow keys to navigate, type to filter, Enter to select, ESC to cancel)")
-        input("Press Enter to select domain...")
+        # In batch mode, use the pre-selected domain from cluster
+        if self.batch_mode_active and self.batch_selected_cluster and field == "from":
+            selected_domain = self.batch_selected_cluster.domain
+            print(f"\nUsing batch domain: {selected_domain}")
+        else:
+            print(f"\nFound {len(domain_counts)} unique domains...")
+            print("(Use arrow keys to navigate, type to filter, Enter to select, ESC to cancel)")
+            input("Press Enter to select domain...")
 
-        selector = FilterableListSelector(domain_counts, f"Select Domain for {field.upper()}")
-        selected_domain = curses.wrapper(selector.run)
+            selector = FilterableListSelector(domain_counts, f"Select Domain for {field.upper()}")
+            selected_domain = curses.wrapper(selector.run)
 
         if not selected_domain:
             # ISSUE #6 FIX: Offer retry on domain cancellation
