@@ -216,16 +216,52 @@ def extract_emails_from_cache(
     return emails
 
 
+def _convert_wizard_condition_to_rule_engine_format(condition: dict) -> dict:
+    """Convert wizard condition format to rule engine format.
+
+    Wizard format: {"field": "from", "match_type": "contains", "value": "pattern"}
+    Rule engine format: {"header": "from", "contains": "pattern"}
+
+    Args:
+        condition: Wizard-format condition
+
+    Returns:
+        Rule engine-format condition
+    """
+    field = condition.get("field", "")
+    match_type = condition.get("match_type", "")
+    value = condition.get("value", "")
+
+    # Build rule engine format condition
+    rule_condition = {"header": field}
+
+    # Map match_type to rule engine operator keys
+    match_type_map = {
+        "contains": "contains",
+        "not_contains": "not_contains",
+        "equals": "equals",
+        "not_equals": "not_equals",
+        "regex": "regex",
+        "not_regex": "not_regex",
+    }
+
+    operator = match_type_map.get(match_type, match_type)
+    rule_condition[operator] = value
+
+    return rule_condition
+
+
 def _matches_conditions(
     header_dict: dict[str, str], conditions: Optional[List[dict]]
 ) -> bool:
     """Check if header matches rule conditions.
 
     Uses the rule engine to match emails against conditions.
+    Handles both wizard-format and rule engine-format conditions.
 
     Args:
         header_dict: Parsed email headers
-        conditions: Rule conditions to match
+        conditions: Rule conditions to match (wizard format)
 
     Returns:
         True if header matches all conditions, False otherwise
@@ -236,10 +272,16 @@ def _matches_conditions(
     try:
         from core.rule_engine import find_matching_rule
 
-        # Build a temporary rule with the conditions
+        # Convert wizard conditions to rule engine format
+        converted_conditions = [
+            _convert_wizard_condition_to_rule_engine_format(cond)
+            for cond in conditions
+        ]
+
+        # Build a temporary rule with the converted conditions
         temp_rule = {
             "name": "filter_rule",
-            "conditions": {"all": conditions},  # Match ALL conditions (AND logic)
+            "conditions": {"all": converted_conditions},  # Match ALL conditions (AND logic)
             "actions": [],
         }
 
@@ -247,7 +289,7 @@ def _matches_conditions(
         matches = find_matching_rule(header_dict, [temp_rule])
         return bool(matches)
 
-    except Exception:
+    except Exception as e:
         # If rule engine fails, skip filtering
         return True
 

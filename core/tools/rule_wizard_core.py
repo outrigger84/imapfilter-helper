@@ -4248,9 +4248,15 @@ class RuleWizard:
             print("\nLoading matching emails from cache...")
 
             # Extract conditions from current rule builder
+            # Note: rule_builder.conditions is a dict like {"all": [...]} or {"any": [...]}
+            # We need to extract the list of conditions from it
             conditions = None
             if self.rule_builder.conditions:
-                conditions = self.rule_builder.conditions
+                # Get the list of conditions from either "all" or "any" key
+                if "all" in self.rule_builder.conditions:
+                    conditions = self.rule_builder.conditions["all"]
+                elif "any" in self.rule_builder.conditions:
+                    conditions = self.rule_builder.conditions["any"]
 
             # Extract emails from cache
             emails = extract_emails_from_cache(
