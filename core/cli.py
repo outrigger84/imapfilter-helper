@@ -247,6 +247,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     kw_sub.add_parser("edit", help="Edit keywords in default editor")
 
+    p_view_cache = sub.add_parser("view-cache", help="View email cache in interactive table")
+    p_view_cache.add_argument(
+        "--limit",
+        type=int,
+        default=1000,
+        help="Maximum emails to load (default: 1000)",
+    )
+    p_view_cache.add_argument(
+        "--folder",
+        type=str,
+        help="Filter by folder name",
+    )
+
     return parser
 
 
@@ -833,6 +846,16 @@ def handle_keywords(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLo
     return 1
 
 
+def handle_view_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
+    """Handle the ``view-cache`` command for interactive cache viewing."""
+
+    del db, logger  # Unused – kept for consistent handler signature
+
+    from core.tools.cache_viewer import launch_cache_viewer
+
+    return launch_cache_viewer(cfg, limit=args.limit, folder=args.folder)
+
+
 COMMAND_HANDLERS: dict[str, Handler] = {
     "build-cache": handle_build_cache,
     "evaluate": handle_evaluate,
@@ -843,6 +866,7 @@ COMMAND_HANDLERS: dict[str, Handler] = {
     "clear-cache": handle_clear_cache,
     "compact-cache": handle_compact_cache,
     "keywords": handle_keywords,
+    "view-cache": handle_view_cache,
 }
 
 
@@ -880,4 +904,5 @@ __all__ = [
     "handle_clear_cache",
     "handle_compact_cache",
     "handle_keywords",
+    "handle_view_cache",
 ]

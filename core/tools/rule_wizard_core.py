@@ -2601,13 +2601,17 @@ class RuleWizard:
                 return False
 
         # Step 4: Select match type
-        match_type = self._select_match_type()
+        match_type = self._select_match_type(field)
         if not match_type:
             return False
 
         # Add condition to builder
         self.rule_builder.add_condition(field, match_type, pattern)
         print(f"\n✓ Condition: {field} {match_type} '{pattern}'")
+
+        # NEW: Offer to view matching emails
+        if prompt_yes_no("View matching emails in cache?", default=False):
+            self._view_matching_cache()
 
         return True
 
@@ -2939,36 +2943,77 @@ class RuleWizard:
             print("Invalid input, using original value.")
             return value
 
-    def _select_match_type(self) -> Optional[str]:
-        """Prompt for match type.
+    def _select_match_type(self, field: str) -> Optional[str]:
+        """Prompt for match type with field-specific guidance.
+
+        Args:
+            field: The header field name (e.g., "from", "subject", "list-id")
 
         Returns:
-            Match type string: 'equals', 'not_equals', 'contains', 'not_contains', 'regex', or 'not_regex'
+            Match type string: 'equals', 'not_equals', 'contains', 'not_contains',
+                              'regex', or 'not_regex'
+            None if user cancels
         """
-        print("\nMatch type:")
-        print("  1. Equals (exact match)")
-        print("  2. Not Equals (does not match exactly)")
-        print("  3. Contains (substring match - case insensitive)")
-        print("  4. Not Contains (does not contain substring)")
-        print("  5. Regex (regular expression)")
-        print("  6. Not Regex (does not match regex pattern)")
+        is_email_field = field in ("from", "to", "cc", "bcc", "reply-to")
 
-        choice = input("  > ").strip()
+        if is_email_field:
+            print("\n⚠️  NOTE: Email addresses often include display names like \"Name <email@domain.com>\"")
+            print("   Use 'Contains' to match any display name format.")
+            print("   'Equals' requires exact match (rarely what you want for email addresses).")
+            print("\nMatch type:")
+            print("  1. Contains (substring match - RECOMMENDED)")
+            print("  2. Not Contains (exclude substring - RECOMMENDED)")
+            print("  3. Equals (exact match - use with caution)")
+            print("  4. Not Equals (exclude exact match - use with caution)")
+            print("  5. Regex (regular expression)")
+            print("  6. Not Regex (exclude regex pattern)")
 
-        match_types = {
-            "1": "equals",
-            "2": "not_equals",
-            "3": "contains",
-            "4": "not_contains",
-            "5": "regex",
-            "6": "not_regex",
-        }
+            choice = input("  > ").strip()
 
-        if choice in match_types:
-            return match_types[choice]
+            match_types = {
+                "1": "contains",
+                "2": "not_contains",
+                "3": "equals",
+                "4": "not_equals",
+                "5": "regex",
+                "6": "not_regex",
+            }
+
+            if choice in match_types:
+                return match_types[choice]
+            elif choice == "":
+                # Empty input - use recommended default
+                print("Using recommended: 'contains'")
+                return "contains"
+            else:
+                print("Invalid choice, using 'contains' by default.")
+                return "contains"
         else:
-            print("Invalid choice, using 'contains' by default.")
-            return "contains"
+            # Non-email fields: keep current behavior
+            print("\nMatch type:")
+            print("  1. Equals (exact match)")
+            print("  2. Not Equals (does not match exactly)")
+            print("  3. Contains (substring match - case insensitive)")
+            print("  4. Not Contains (does not contain substring)")
+            print("  5. Regex (regular expression)")
+            print("  6. Not Regex (does not match regex pattern)")
+
+            choice = input("  > ").strip()
+
+            match_types = {
+                "1": "equals",
+                "2": "not_equals",
+                "3": "contains",
+                "4": "not_contains",
+                "5": "regex",
+                "6": "not_regex",
+            }
+
+            if choice in match_types:
+                return match_types[choice]
+            else:
+                print("Invalid choice, using 'contains' by default.")
+                return "contains"
 
     def _configure_logic(self) -> bool:
         """Configure logic operator for multiple conditions.
@@ -3995,6 +4040,10 @@ class RuleWizard:
         # Display detailed preview summary
         self._display_preview_summary(total_matches, folder_matches, stats)
 
+        # NEW: Offer to view sample of matching emails before saving
+        if total_matches > 0 and prompt_yes_no("View sample of matching emails?", default=False):
+            self._view_matching_cache(limit=50)
+
         # Ask to save
         print("\n" + "=" * 60)
         print("Options:")
@@ -4182,6 +4231,55 @@ class RuleWizard:
         print(f"   🧠  Matches by rule:")
         print(f"      • {rule_name}: {total_matches}")
         print("=" * 60 + "\n")
+
+    def _view_matching_cache(self, limit: int = 1000) -> None:
+        """Launch interactive cache viewer showing emails matching current conditions.
+
+        This displays an interactive ASCII table of emails from the cache that match
+        the current rule conditions being built.
+
+        Args:
+            limit: Maximum number of emails to display (default: 1000)
+        """
+        try:
+            from core.tools.cache_viewer import CacheTableViewer, extract_emails_from_cache
+            import curses
+
+            print("\nLoading matching emails from cache...")
+
+            # Extract conditions from current rule builder
+            conditions = None
+            if self.rule_builder.conditions:
+                conditions = self.rule_builder.conditions
+
+            # Extract emails from cache
+            emails = extract_emails_from_cache(
+                self.config.paths.db_file,
+                conditions=conditions,
+                limit=limit,
+                show_progress=False,
+            )
+
+            if not emails:
+                print("No matching emails found in cache.")
+                return
+
+            print(f"Found {format_count(len(emails))} matching emails.")
+            print("Press Enter to open interactive viewer (press 'q' to close)...")
+            input()
+
+            # Launch interactive viewer
+            viewer = CacheTableViewer(emails, title=f"Matching Emails ({format_count(len(emails))})")
+            curses.wrapper(viewer.run)
+
+            print("\n✓ Cache viewer closed.")
+
+        except ImportError as e:
+            print(f"⚠️  Could not load cache viewer: {e}")
+        except FileNotFoundError:
+            print("⚠️  Cache database not found. Please build cache first.")
+        except Exception as e:
+            print(f"⚠️  Error viewing cache: {e}")
 
     def _prompt_text(self, prompt: str, default: str = "") -> str:
         """Prompt for text input.
