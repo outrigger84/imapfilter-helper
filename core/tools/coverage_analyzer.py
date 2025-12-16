@@ -4,6 +4,7 @@ from __future__ import annotations
 import sqlite3
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from email.header import decode_header
 from pathlib import Path
 from typing import Optional
 
@@ -15,6 +16,40 @@ from core.rule_engine import (
     find_matching_rule,
     load_rules,
 )
+
+
+def _decode_mime_header(header_value: str) -> str:
+    """Decode MIME-encoded header values (RFC 2047).
+
+    Converts encoded text like =?utf-8?B?...?= to readable text.
+
+    Args:
+        header_value: Raw header value that may be MIME-encoded
+
+    Returns:
+        Decoded header value as a string
+    """
+    if not header_value:
+        return header_value
+
+    try:
+        # decode_header returns list of (decoded_bytes, charset) tuples
+        decoded_parts = []
+        for part, charset in decode_header(header_value):
+            if isinstance(part, bytes):
+                # Decode bytes using the specified charset or fallback to utf-8
+                try:
+                    decoded = part.decode(charset or 'utf-8', errors='replace')
+                except (TypeError, LookupError):
+                    decoded = part.decode('utf-8', errors='replace')
+            else:
+                decoded = part
+            decoded_parts.append(decoded)
+
+        return ''.join(decoded_parts)
+    except Exception:
+        # If decoding fails, return original value
+        return header_value
 
 
 @dataclass
@@ -46,9 +81,13 @@ class UncoveredMessage:
 
     @classmethod
     def from_header(cls, uid: str, folder: str, header: dict[str, str]) -> UncoveredMessage:
-        """Create from parsed header dictionary."""
-        from_addr = header.get("from", "").strip()
-        subject = header.get("subject", "").strip()
+        """Create from parsed header dictionary.
+
+        Decodes MIME-encoded headers (subjects and display names).
+        """
+        # Decode MIME-encoded headers
+        from_addr = _decode_mime_header(header.get("from", "")).strip()
+        subject = _decode_mime_header(header.get("subject", "")).strip()
 
         # Extract domain from email
         if "@" in from_addr:

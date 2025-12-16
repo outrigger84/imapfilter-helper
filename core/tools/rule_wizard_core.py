@@ -28,6 +28,7 @@ from core.tools.coverage_analyzer import (
     RuleCoverageAnalyzer,
     DomainCluster,
     BatchTarget,
+    _decode_mime_header,
 )
 
 
@@ -442,7 +443,8 @@ class CacheQueryEngine:
         for row in progress_bar:
             data = row[0] if row else ""
             header = safe_parse_header(data)
-            subject = header.get("subject", "").strip()
+            # Decode MIME-encoded subjects
+            subject = _decode_mime_header(header.get("subject", "")).strip()
             if subject:
                 counter[subject] += 1
 
