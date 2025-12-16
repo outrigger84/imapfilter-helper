@@ -140,6 +140,26 @@ def stream_execute(
                     )
                 continue
 
+            # Skip redundant same-folder move actions
+            if msg.folder == target:
+                stats["skipped"] += 1
+                rule_name = matching_rule.get("name", "(unnamed)")
+                if verbose:
+                    logger.log(
+                        "INFO",
+                        "stream_skipped_same_folder_move",
+                        {
+                            "folder": msg.folder,
+                            "uid": msg.uid,
+                            "rule": rule_name,
+                            "target": target,
+                        },
+                        console=f"   ⊘ {msg.folder}/{msg.uid} already in target folder {target}",
+                    )
+                if resume_log:
+                    resume_log.mark_processed(msg.folder, msg.uid)
+                continue
+
             stats["matched"] += 1
             rule_name = matching_rule.get("name", "(unnamed)")
 

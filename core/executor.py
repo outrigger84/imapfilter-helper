@@ -462,6 +462,22 @@ def _perform_move_operation(
     target = action.get('target')
     rule_name = action.get('rule_name')
 
+    # Guard: Skip if email is already in target folder
+    if target and folder == target:
+        temp_db.execute(
+            "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+            ('skipped', now_iso(), 'Already in target folder', action_id)
+        )
+        temp_db.commit()
+        if logger and verbose:
+            logger.log(
+                "INFO",
+                "skipped_redundant_move",
+                {"folder": folder, "uid": uid, "target": target},
+                console=f"      ⊘ {folder}/{uid} already in {target}",
+            )
+        return ('skipped', 'Already in target folder')
+
     if dry_run:
         # Simulate backup if requested
         if backup_moved and backup_dir is not None:
@@ -1179,10 +1195,11 @@ def execute_actions(
     order_clause = "ORDER BY priority DESC, folder, target, created_at ASC, id ASC"
 
     # Deduplication: Keep only one occurrence of each unique action per UID
-    # PARTITION BY (uid, rule_name, action_type, target, action_data) allows:
+    # PARTITION BY (uid, folder, rule_name, action_type, target, action_data) allows:
     # - All actions from same rule to execute
     # - Different rules' actions to execute
-    # - Only prevents identical duplicate actions
+    # - Only prevents identical duplicate actions in the same folder
+    # - Includes folder to handle cases where emails are moved and re-matched
     dedup_cte = """
         WITH ranked AS (
             SELECT
@@ -1196,7 +1213,7 @@ def execute_actions(
                 action_type,
                 action_data,
                 ROW_NUMBER() OVER (
-                    PARTITION BY uid, rule_name, action_type, target, action_data
+                    PARTITION BY uid, folder, rule_name, action_type, target, action_data
                     ORDER BY created_at ASC, id ASC
                 ) AS rn
             FROM actions
@@ -2157,6 +2174,23 @@ def execute_actions(
                         )
 
                 for a_id, uid, _, _, _ in current_items:
+                    # Guard: Skip if email is already in target folder
+                    if target and folder == target:
+                        db.execute(
+                            "UPDATE actions SET status='skipped', executed_at=?, error_message=? WHERE id=?",
+                            (now_iso(), 'Already in target folder', a_id),
+                        )
+                        stats["skipped"] += 1
+                        actions_bar.update(1)
+                        if verbose:
+                            logger.log(
+                                "INFO",
+                                "skipped_redundant_move",
+                                {"folder": folder, "uid": uid, "target": target},
+                                console=f"      ⊘ {folder}/{uid} already in {target}",
+                            )
+                        continue
+
                     deleted_flagged = False
                     try:
                         move_typ = "NO"

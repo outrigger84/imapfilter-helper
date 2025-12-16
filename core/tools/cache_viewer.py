@@ -18,10 +18,45 @@ import email
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.header import decode_header
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 from core.ui_components import format_count
+
+
+def _decode_mime_header(header_value: str) -> str:
+    """Decode MIME-encoded header values (RFC 2047).
+
+    Converts encoded text like =?utf-8?B?...?= to readable text.
+
+    Args:
+        header_value: Raw header value that may be MIME-encoded
+
+    Returns:
+        Decoded header value as a string
+    """
+    if not header_value:
+        return header_value
+
+    try:
+        # decode_header returns list of (decoded_bytes, charset) tuples
+        decoded_parts = []
+        for part, charset in decode_header(header_value):
+            if isinstance(part, bytes):
+                # Decode bytes using the specified charset or fallback to utf-8
+                try:
+                    decoded = part.decode(charset or 'utf-8', errors='replace')
+                except (TypeError, LookupError):
+                    decoded = part.decode('utf-8', errors='replace')
+            else:
+                decoded = part
+            decoded_parts.append(decoded)
+
+        return ''.join(decoded_parts)
+    except Exception:
+        # If decoding fails, return original value
+        return header_value
 
 
 @dataclass
@@ -161,10 +196,10 @@ def extract_emails_from_cache(
                 # Parse header data
                 header_dict = safe_parse_header(data)
 
-                # Extract fields
-                from_addr = header_dict.get("from", "").strip()
-                to_addr = header_dict.get("to", "").strip()
-                subject = header_dict.get("subject", "").strip()
+                # Extract fields and decode MIME-encoded headers
+                from_addr = _decode_mime_header(header_dict.get("from", "")).strip()
+                to_addr = _decode_mime_header(header_dict.get("to", "")).strip()
+                subject = _decode_mime_header(header_dict.get("subject", "")).strip()
 
                 # Parse internaldate
                 import json
@@ -222,12 +257,20 @@ def _convert_wizard_condition_to_rule_engine_format(condition: dict) -> dict:
     Wizard format: {"field": "from", "match_type": "contains", "value": "pattern"}
     Rule engine format: {"header": "from", "contains": "pattern"}
 
+    Handles both formats and returns rule engine format.
+
     Args:
-        condition: Wizard-format condition
+        condition: Wizard-format condition or rule engine format condition
 
     Returns:
         Rule engine-format condition
     """
+    # Check if already in rule engine format (has "header" key)
+    if "header" in condition:
+        # Already in rule engine format, return as-is
+        return condition
+
+    # Convert from wizard format
     field = condition.get("field", "")
     match_type = condition.get("match_type", "")
     value = condition.get("value", "")
@@ -246,7 +289,8 @@ def _convert_wizard_condition_to_rule_engine_format(condition: dict) -> dict:
     }
 
     operator = match_type_map.get(match_type, match_type)
-    rule_condition[operator] = value
+    if value:  # Only add operator if value is present
+        rule_condition[operator] = value
 
     return rule_condition
 
@@ -363,16 +407,29 @@ class CacheTableViewer:
             subject_width = 20 + extra
             return (20, 20, subject_width, 16)
 
-    def _truncate_text(self, text: str, width: int) -> str:
+    def _truncate_text(self, text: str, width: int, is_email: bool = False) -> str:
         """Truncate text to fit column width with ellipsis.
+
+        For email addresses, prefers to show just the address part (without display name).
 
         Args:
             text: Text to truncate
             width: Maximum width in characters
+            is_email: If True, extract email address from "Name <email@domain>" format
 
         Returns:
             Truncated text, left-padded to width
         """
+        if is_email and '<' in text and '>' in text:
+            # Extract email address from "Name <email@domain>" format
+            start = text.rfind('<') + 1
+            end = text.rfind('>')
+            if start > 0 and end > start:
+                email_only = text[start:end]
+                if len(email_only) <= width:
+                    return email_only.ljust(width)
+                text = email_only
+
         if len(text) <= width:
             return text.ljust(width)
         return (text[: width - 3] + "...").ljust(width)
@@ -397,8 +454,9 @@ class CacheTableViewer:
         Returns:
             Formatted row string
         """
-        from_text = self._truncate_text(email.from_addr, from_width)
-        to_text = self._truncate_text(email.to_addr, to_width)
+        # For email addresses, extract just the address part (without display name)
+        from_text = self._truncate_text(email.from_addr, from_width, is_email=True)
+        to_text = self._truncate_text(email.to_addr, to_width, is_email=True)
         subject_text = self._truncate_text(email.subject, subject_width)
         date_text = email.date.rjust(date_width)  # Right-align dates
 

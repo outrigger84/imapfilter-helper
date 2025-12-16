@@ -561,6 +561,23 @@ def evaluate_rules(
                     # Create action entries with effective priorities
                     for action_index, action in enumerate(actions):
                         action_type = action.get("type", "move")
+                        target = action.get("target", "")
+
+                        # Skip redundant same-folder move actions
+                        if action_type == "move" and target and folder == target:
+                            rule_name = rule.get("name") or "(unnamed)"
+                            logger.log(
+                                "INFO",
+                                "skipped_same_folder_move",
+                                {
+                                    "rule": rule.get("name"),
+                                    "folder": folder,
+                                    "uid": uid,
+                                    "target": target,
+                                },
+                                console=f"⊘ {rule_name}: {folder}/{uid} already in target folder {target}",
+                            )
+                            continue
 
                         # Calculate effective priority to ensure execution order:
                         # - Keywords (1000) execute before moves (500)
@@ -583,7 +600,7 @@ def evaluate_rules(
                                 uid,
                                 folder,
                                 rule.get("name"),
-                                action.get("target", ""),
+                                target,
                                 effective_priority,
                                 "pending" if not dry_run else "simulated",
                                 now_iso(),
@@ -600,7 +617,6 @@ def evaluate_rules(
                         console_msg: str | None = None
                         if verbose:
                             if action_type == "move":
-                                target = action.get("target") or "(no target)"
                                 console_msg = f"✅ {rule_name} matched {folder}/{uid} → {target}"
                             elif action_type in ("set_keywords", "remove_keywords"):
                                 keywords = action.get("keywords", [])
@@ -617,7 +633,7 @@ def evaluate_rules(
                                 "folder": folder,
                                 "uid": uid,
                                 "action_type": action_type,
-                                "target": action.get("target"),
+                                "target": target,
                                 "dry_run": dry_run,
                             },
                             console=console_msg,

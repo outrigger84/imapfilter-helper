@@ -26,6 +26,7 @@ from core.database import init_db
 from core.logging_utils import JsonLogger
 from core.rule_engine import evaluate_rules, load_rules
 from core.rule_utils import slugify, generate_filename
+from core.rule_validator import RuleValidator
 
 
 # ---------------------------------------------------------------------------
@@ -268,18 +269,100 @@ def summarise_condition(node: Any) -> str:
     return str(node)
 
 
-def summarise_action(action: Any) -> str:
-    """Return a concise description of an action block."""
+def summarise_action(actions: Any) -> str:
+    """Return a concise description of an action block or list of actions."""
 
-    if not isinstance(action, dict):
+    # Handle list of actions (multiple actions)
+    if isinstance(actions, list):
+        if not actions:
+            return "(no actions)"
+        if len(actions) == 1:
+            return summarise_action(actions[0])
+        # Multiple actions: summarize each and combine
+        summaries = []
+        for action in actions:
+            if isinstance(action, dict):
+                act_type = action.get("type", "move")
+                target = action.get("target")
+                summary = f"{act_type} → {target}" if target else act_type
+                summaries.append(summary)
+        if summaries:
+            return f"{len(actions)} actions: {', '.join(summaries)}"
+        return "(no actions)"
+
+    # Handle single action (dict)
+    if not isinstance(actions, dict):
         return "(no action)"
-    act_type = action.get("type", "move")
-    target = action.get("target")
+    act_type = actions.get("type", "move")
+    target = actions.get("target")
     summary = f"{act_type} → {target}" if target else act_type
-    extras = [key for key in action.keys() if key not in {"type", "target"}]
+    extras = [key for key in actions.keys() if key not in {"type", "target"}]
     if extras:
         summary += f" (+{len(extras)} extra field{'s' if len(extras) != 1 else ''})"
     return summary
+
+
+def _format_condition_tree(
+    node: Any, indent: int = 0, max_depth: int = 5, current_depth: int = 0
+) -> str:
+    """Format a condition node as a hierarchical tree with indentation and operators.
+
+    Args:
+        node: Condition node (dict, list, or single condition)
+        indent: Starting indentation level (spaces)
+        max_depth: Maximum recursion depth before truncating
+        current_depth: Current recursion depth
+
+    Returns:
+        Formatted tree string with AND/OR operators and indentation
+
+    Example output:
+        → [Group: ANY of 2 conditions]
+            • from contains '@e.hollisterco.com'
+            • from contains '@em.hollisterco.com'
+        ↓ AND ↓
+        → from not_contains 'orders@e.hollisterco.com'
+    """
+    if current_depth >= max_depth:
+        return " " * indent + "→ ..."
+
+    if not node:
+        return " " * indent + "→ (empty)"
+
+    # Handle group (all/any)
+    if isinstance(node, dict) and ("all" in node or "any" in node):
+        key = "all" if "all" in node else "any"
+        children = node.get(key) or []
+        logic_label = "ALL" if key == "all" else "ANY"
+
+        if not children:
+            return " " * indent + f"→ [Group: {logic_label} of 0 conditions]"
+
+        lines = []
+        lines.append(" " * indent + f"→ [Group: {logic_label} of {len(children)} conditions]")
+
+        for i, child in enumerate(children):
+            # Format child condition
+            if isinstance(child, dict) and ("all" in child or "any" in child):
+                # Nested group
+                child_str = _format_condition_tree(
+                    child, indent + 4, max_depth, current_depth + 1
+                )
+                lines.append(child_str)
+            else:
+                # Leaf condition
+                summary = summarise_condition(child)
+                lines.append(" " * (indent + 4) + f"• {summary}")
+
+            # Add operator between items (except after last item)
+            if i < len(children) - 1:
+                lines.append(" " * indent + f"↓ {logic_label} ↓")
+
+        return "\n".join(lines)
+
+    # Handle single condition
+    summary = summarise_condition(node)
+    return " " * indent + f"→ {summary}"
 
 
 def ensure_group(node: Any) -> dict[str, Any]:
@@ -400,7 +483,7 @@ def edit_simple_condition(node: dict[str, Any]) -> dict[str, Any]:
         if action == "h":
             node["header"] = prompt("  Header name: ")
         elif action == "m":
-            new_type = _get_match_type_menu()
+            new_type = _get_match_type_menu(header=node.get("header"))
             # Remove all existing match type keys
             for mtype in ["equals", "not_equals", "contains", "not_contains", "regex", "not_regex"]:
                 node.pop(mtype, None)
@@ -414,22 +497,83 @@ def edit_simple_condition(node: dict[str, Any]) -> dict[str, Any]:
             edit_generic_dict(node, protected={"header", "equals", "not_equals", "contains", "not_contains", "regex", "not_regex"})
 
 
-def _get_match_type_menu() -> str:
-    """Display numbered menu for match types and return the selected type."""
+def _get_field_guidance(header: str | None) -> str:
+    """Return contextual guidance for a header field.
 
-    match_types = [
-        ("equals", "Exact match"),
-        ("not_equals", "Does not match exactly"),
-        ("contains", "Contains substring"),
-        ("not_contains", "Does not contain substring"),
-        ("regex", "Regular expression"),
-        ("not_regex", "Does not match regex"),
-    ]
+    Args:
+        header: Header field name (from, to, subject, etc.)
+
+    Returns:
+        Guidance text for the field
+    """
+    if not header:
+        return ""
+
+    guidance = {
+        "from": "Sender address. Often includes display names like 'Name <email@domain.com>'. "
+        "Use 'contains' to match any display name format.",
+        "to": "Recipient address. May have multiple recipients. "
+        "Use 'contains' to match email parts.",
+        "cc": "Carbon copy address. Similar to 'to' field. "
+        "Use 'contains' to match email patterns.",
+        "bcc": "Blind carbon copy address. "
+        "Use 'contains' to match email patterns.",
+        "reply-to": "Reply address (may differ from From). "
+        "Use 'contains' like the From field.",
+        "subject": "Email subject line. "
+        "Use 'contains' for keywords or 'regex' for patterns.",
+        "list-id": "Mailing list identifier. "
+        "Use 'contains' to match domain or list name.",
+    }
+
+    return guidance.get(header.lower(), "")
+
+
+def _get_match_type_menu(header: str | None = None) -> str:
+    """Display numbered menu for match types with field-specific recommendations.
+
+    Args:
+        header: Optional header field name for context-aware recommendations
+
+    Returns:
+        Selected match type key
+    """
+    # Show field guidance if available
+    if header:
+        guidance = _get_field_guidance(header)
+        if guidance:
+            print(f"\n📝 {guidance}")
+
+    # For email fields, recommend contains/not_contains
+    is_email_field = header and header.lower() in {
+        "from", "to", "cc", "bcc", "reply-to"
+    }
+
+    if is_email_field:
+        print("\n⚠️ Email address hint: Email fields often include display names.")
+        print("   Recommend using 'Contains' or 'Not Contains' for flexibility.\n")
+        match_types = [
+            ("contains", "Contains substring [RECOMMENDED]"),
+            ("not_contains", "Does not contain substring [RECOMMENDED]"),
+            ("regex", "Regular expression"),
+            ("not_regex", "Does not match regex"),
+            ("equals", "Exact match (rarely needed for email)"),
+            ("not_equals", "Not exact match (rarely needed)"),
+        ]
+    else:
+        match_types = [
+            ("contains", "Contains substring"),
+            ("not_contains", "Does not contain substring"),
+            ("equals", "Exact match"),
+            ("not_equals", "Does not match exactly"),
+            ("regex", "Regular expression"),
+            ("not_regex", "Does not match regex"),
+        ]
 
     while True:
-        print("\nMatch type:")
+        print("Match type:")
         for idx, (type_key, description) in enumerate(match_types, start=1):
-            print(f"  {idx}. {description} ({type_key})")
+            print(f"  {idx}. {description}")
 
         raw = input("Select match type (1-6): ").strip()
         if not raw:
@@ -438,9 +582,9 @@ def _get_match_type_menu() -> str:
 
         try:
             choice = int(raw)
-            if 1 <= choice <= 6:
+            if 1 <= choice <= len(match_types):
                 return match_types[choice - 1][0]
-            print("⚠️  Please enter a number between 1 and 6.")
+            print(f"⚠️  Please enter a number between 1 and {len(match_types)}.")
         except ValueError:
             print("⚠️  Please enter a valid number.")
 
@@ -504,9 +648,110 @@ def make_condition() -> dict[str, Any]:
     """Create a new match condition using prompts."""
 
     header = select_header_field()
-    match_field = _get_match_type_menu()
+    match_field = _get_match_type_menu(header=header)
     value = prompt("  Match value: ")
     return {"header": header, match_field: value}
+
+
+def _parse_number_selection(text: str, max_num: int) -> list[int] | None:
+    """Parse number selection like '1,3,5' or '1-3' and return list of indices.
+
+    Args:
+        text: User input (e.g., '1,3,5' or '1-3')
+        max_num: Maximum valid number
+
+    Returns:
+        List of valid 0-based indices, or None if invalid
+    """
+    if not text.strip():
+        return None
+
+    indices = set()
+    try:
+        for part in text.split(","):
+            part = part.strip()
+            if "-" in part:
+                # Handle range (e.g., '2-5')
+                range_parts = part.split("-")
+                if len(range_parts) != 2:
+                    return None
+                start = int(range_parts[0].strip())
+                end = int(range_parts[1].strip())
+                if start < 1 or end < 1 or start > max_num or end > max_num or start > end:
+                    return None
+                indices.update(range(start - 1, end))  # Convert to 0-based
+            else:
+                # Handle single number
+                num = int(part)
+                if num < 1 or num > max_num:
+                    return None
+                indices.add(num - 1)  # Convert to 0-based
+
+        return sorted(list(indices))
+    except ValueError:
+        return None
+
+
+def _quick_group_conditions(
+    children: list[Any], node: dict[str, Any]
+) -> tuple[bool, Any | None]:
+    """Interactive quick grouping of multiple conditions.
+
+    Args:
+        children: List of current conditions
+        node: The parent group node
+
+    Returns:
+        Tuple of (success, new_group_to_add)
+    """
+    if len(children) < 2:
+        print("⚠️  Need at least 2 conditions to group.")
+        return False, None
+
+    print("\nAvailable conditions to group:")
+    for i, child in enumerate(children, 1):
+        summary = summarise_condition(child)
+        print(f"  {i}. {summary}")
+
+    text = input("\nEnter numbers to group (e.g., 1,3,5 or 1-3): ").strip()
+    indices = _parse_number_selection(text, len(children))
+
+    if not indices or len(indices) < 2:
+        print("⚠️  Please select at least 2 conditions.")
+        return False, None
+
+    print("\nGroup these conditions with:")
+    print("  1. ALL (AND) - all must match")
+    print("  2. ANY (OR) - any can match")
+    logic_choice = input("  > ").strip()
+
+    if logic_choice == "1":
+        logic = "all"
+    elif logic_choice == "2":
+        logic = "any"
+    else:
+        print("⚠️  Please enter 1 or 2.")
+        return False, None
+
+    # Create new group with selected conditions
+    selected_children = [children[i] for i in indices]
+    new_group = {logic: selected_children}
+
+    # Show preview
+    print("\n" + "=" * 60)
+    print("Group preview:")
+    print("=" * 60)
+    print(_format_condition_tree(new_group))
+    print("=" * 60)
+
+    if not confirm("Create this group?", default=True):
+        return False, None
+
+    # Remove selected conditions from parent (in reverse order to avoid index shifting)
+    for i in sorted(indices, reverse=True):
+        children.pop(i)
+
+    return True, new_group
 
 
 def edit_condition_group(node: dict[str, Any]) -> dict[str, Any]:
@@ -517,12 +762,26 @@ def edit_condition_group(node: dict[str, Any]) -> dict[str, Any]:
         key = "all" if "all" in node else "any"
         children = node.setdefault(key, [])
         mode_label = "ALL (AND)" if key == "all" else "ANY (OR)"
+
+        # Display current tree structure
+        if children:
+            print("\n" + "=" * 60)
+            print("Current conditions:")
+            print("=" * 60)
+            tree_display = _format_condition_tree(node)
+            print(tree_display)
+            print("=" * 60 + "\n")
+
         options: list[tuple[str, str]] = [
             ("a", "Add condition"),
             ("g", "Add group"),
         ]
         if children:
-            options.extend([("e", "Edit existing entry"), ("r", "Remove entry")])
+            options.extend([
+                ("q", "Quick group (select multiple)"),
+                ("e", "Edit existing entry"),
+                ("r", "Remove entry"),
+            ])
         options.extend([("t", f"Toggle mode (currently {mode_label})"), ("b", "Back")])
 
         action = choose_menu_option("Condition group editor", options)
@@ -536,7 +795,21 @@ def edit_condition_group(node: dict[str, Any]) -> dict[str, Any]:
             children.append(make_condition())
             continue
         if action == "g":
-            children.append(edit_condition_group({"all": []}))
+            new_group = edit_condition_group({"all": []})
+            # Show preview of the created group before adding it
+            if new_group.get("all") or new_group.get("any"):
+                print("\n" + "=" * 60)
+                print("Group preview:")
+                print("=" * 60)
+                print(_format_condition_tree(new_group))
+                print("=" * 60)
+                if confirm("Add this group?", default=True):
+                    children.append(new_group)
+            continue
+        if action == "q":
+            success, new_group = _quick_group_conditions(children, node)
+            if success and new_group:
+                children.append(new_group)
             continue
         if not children:
             print("⚠️  No entries to operate on.")
@@ -557,8 +830,56 @@ def edit_condition_group(node: dict[str, Any]) -> dict[str, Any]:
             children[index] = edit_simple_condition(dict(child))
 
 
-def edit_action_block(action: dict[str, Any]) -> dict[str, Any]:
-    """Interactive editor for the rule's action block."""
+def edit_action_block(actions: Any) -> list[dict[str, Any]]:
+    """Interactive editor for the rule's action block (list of actions)."""
+
+    # Normalize to list
+    if isinstance(actions, dict):
+        actions = [actions]
+    elif not isinstance(actions, list):
+        actions = []
+
+    if not actions:
+        actions = [{"type": "move", "target": ""}]
+
+    while True:
+        labels = []
+        for i, action in enumerate(actions, 1):
+            summary = summarise_action(action)
+            labels.append(f"{i}. {summary}")
+
+        add_index = len(labels)
+        back_index = add_index + 1
+        labels.append("➕ Add action")
+        labels.append("⬅ Back")
+
+        choice = choose_from_list("Actions editor", labels)
+        if choice is None or choice == back_index:
+            return actions
+        if choice == add_index:
+            # Add new action
+            new_action = {"type": "move", "target": ""}
+            actions.append(new_action)
+            continue
+
+        # Edit existing action
+        action = actions[choice]
+        edit_menu_options = [("e", "Edit"), ("r", "Remove"), ("b", "Back")]
+        action_choice = choose_menu_option(f"Action {choice + 1}: {summarise_action(action)}", edit_menu_options)
+
+        if action_choice in {None, "b"}:
+            continue
+        if action_choice == "r":
+            actions.pop(choice)
+            continue
+        if action_choice == "e":
+            actions[choice] = _edit_single_action(dict(action))
+
+    return actions
+
+
+def _edit_single_action(action: dict[str, Any]) -> dict[str, Any]:
+    """Interactive editor for a single action within an action list."""
 
     if not action:
         action = {"type": "move", "target": ""}
@@ -732,16 +1053,46 @@ class RuleManager:
     def save_rule(self, rule: RuleRecord) -> None:
         data = dict(rule.data)
         data.pop("_file", None)
+
+        # Validate rule before saving
+        validator = RuleValidator()
+        is_valid, warnings = validator.validate_rule(data)
+
+        if warnings:
+            print("\n" + "=" * 60)
+            print("⚠️ RULE VALIDATION WARNINGS")
+            print("=" * 60)
+            for warning in warnings:
+                print(f"  • {warning}")
+            print("=" * 60)
+
+            if not confirm("\nSave rule anyway?", default=False):
+                print("❌ Rule not saved.")
+                return
+
+            # Check for Hollister pattern and offer suggestion
+            suggestion = validator.suggest_fix_for_rule(data)
+            if suggestion:
+                print("\n" + "=" * 60)
+                print(f"💡 SUGGESTION FOR: {suggestion['name']}")
+                print("=" * 60)
+                print(f"Issue: {suggestion['issue']}")
+                print(f"\nDescription: {suggestion['description']}")
+                print(f"\nSuggestion: {suggestion['suggestion']}")
+                print("=" * 60)
+
         with rule.file.open("w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=2, ensure_ascii=False)
             handle.write("\n")
+        print("✓ Rule saved.")
+
 
     def select_rule(self) -> RuleRecord | None:
         if not self.rules:
             print("No rules are available yet.")
             return None
         rule_labels = [
-            f"[{rule.priority:>4}] {rule.name} — {summarise_action(rule.data.get('action'))}"
+            f"[{rule.priority:>4}] {rule.name} — {summarise_action(rule.data.get('actions', rule.data.get('action')))}"
             for rule in self.rules
         ]
         selection = choose_from_list("Available rules (sorted by priority):", rule_labels)
@@ -787,7 +1138,7 @@ class RuleManager:
                 "name": name,
                 "priority": priority,
                 "conditions": {"all": []},
-                "action": {"type": "move", "target": ""},
+                "actions": [{"type": "move", "target": ""}],
             },
         )
         self.rules.append(record)
@@ -797,11 +1148,13 @@ class RuleManager:
     def edit_rule(self, rule: RuleRecord, *, new_rule: bool = False) -> None:
         while True:
             comments = rule.data.get("comments") or []
+            # Support both 'actions' (new) and 'action' (legacy) fields
+            actions_field = rule.data.get('actions', rule.data.get('action'))
             options = [
                 ("n", f"Name      : {rule.data.get('name', '<unnamed>')}"),
                 ("p", f"Priority  : {rule.priority}"),
                 ("c", f"Conditions: {summarise_condition(rule.data.get('conditions'))}"),
-                ("a", f"Action    : {summarise_action(rule.data.get('action'))}"),
+                ("a", f"Actions   : {summarise_action(actions_field)}"),
                 ("o", f"Comments ({len(comments)})" if comments else "Comments (none)"),
                 ("x", "Edit extra fields"),
                 ("t", "Dry-run test"),
@@ -833,7 +1186,9 @@ class RuleManager:
                 existing = rule.data.get("conditions")
                 rule.data["conditions"] = edit_condition_group(existing or {"all": []})
             elif action == "a":
-                rule.data["action"] = edit_action_block(dict(rule.data.get("action") or {}))
+                rule.data["actions"] = edit_action_block(rule.data.get("actions", rule.data.get("action") or []))
+                # Remove legacy 'action' field if present
+                rule.data.pop("action", None)
             elif action == "o":
                 items = list(rule.data.get("comments") or [])
                 rule.data["comments"] = edit_comments_list(items)
@@ -841,11 +1196,11 @@ class RuleManager:
                 extras = {
                     key: value
                     for key, value in rule.data.items()
-                    if key not in {"name", "priority", "conditions", "action", "comments"}
+                    if key not in {"name", "priority", "conditions", "actions", "action", "comments"}
                 }
                 edit_generic_dict(extras)
                 for key in list(rule.data):
-                    if key not in {"name", "priority", "conditions", "action", "comments"}:
+                    if key not in {"name", "priority", "conditions", "actions", "action", "comments"}:
                         rule.data.pop(key)
                 rule.data.update(extras)
             elif action == "t":
@@ -875,7 +1230,7 @@ class RuleManager:
         # Display all rules
         print("\n📋 Available rules (for batch deletion):")
         for i, rule in enumerate(self.rules, 1):
-            action_summary = summarise_action(rule.data.get('action'))
+            action_summary = summarise_action(rule.data.get('actions', rule.data.get('action')))
             print(f"  {i:>3}. [{rule.priority:>4}] {rule.name} — {action_summary}")
 
         # Get rule numbers to delete

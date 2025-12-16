@@ -8,28 +8,39 @@ A helper CLI that orchestrates cache building, rule evaluation, and action execu
 .
 ├── core/                      # Core modules and the CLI entrypoints
 │   ├── cli.py                 # Command parser and handlers
-│   ├── cache_builder.py        # Header fetching and caching
+│   ├── cache_builder.py        # Header fetching and caching (supports parallel per-folder)
 │   ├── rule_engine.py          # Rule loading and evaluation
-│   ├── executor.py             # Action execution against IMAP
+│   ├── executor.py             # Action execution against IMAP (parallelized with threading)
+│   ├── stream_executor.py      # Stream-based execution for memory efficiency
+│   ├── stream_processor.py     # Message streaming utilities
+│   ├── rule_validator.py       # Rule JSON validation and schema checking
 │   ├── imap_client.py          # IMAP protocol wrapper
 │   ├── database.py             # SQLite schema and migrations
-│   ├── backup.py               # Message backup utilities
+│   ├── backup.py               # Message backup utilities (mbox format)
+│   ├── keywords.py             # IMAP keywords and flag management (with batching)
+│   ├── connection_pool.py      # Connection pooling for performance
 │   ├── config.py               # Configuration management
 │   ├── logging_utils.py        # JSON logging and performance tracking
+│   ├── ui_components.py        # TUI helper components
+│   ├── wizard_cache.py         # 6-hour persistent cache for wizard operations
 │   └── tools/                  # Utilities and helpers
 │       ├── rule_wizard_core.py # Rule wizard core logic
+│       ├── cache_viewer.py     # Interactive cache browser with sorting/filtering
+│       ├── coverage_analyzer.py# Pattern coverage analysis for rules
 │       ├── sample_messages.py  # Copy test messages for inspection
-│       └── move_diagnostics.py # Test IMAP move operations
+│       └── move_diagnostics.py # Test IMAP move operations and verify success
 ├── data/                       # Generated artifacts (auto-created)
 │   ├── secrets.json            # IMAP credentials (user-created from .example)
 │   ├── cache.db                # SQLite cache database
-│   ├── imapfilter-helper.log   # JSON-formatted logs
+│   ├── imapfilter-helper.log   # JSON-formatted logs (JSON-structured)
+│   ├── wizard_cache.json       # Persistent cache for rule wizard suggestions
+│   ├── keywords.json           # Predefined keywords list
 │   └── backups/                # Message backup mbox files
 ├── rules/                      # JSON rule files (user-managed)
 ├── imapfilter_helper.py        # Main entry point script
-├── rule_manager.py             # Interactive rule editor console
+├── rule_manager.py             # Interactive rule editor console (TUI)
 ├── rule_wizard.py              # Cache-assisted guided rule creator
-└── tests/                      # Test suite
+└── tests/                      # Test suite (20+ test files, 228+ test functions)
 ```
 
 The CLI parser and command implementations live in `core/cli.py`. The top-level `imapfilter_helper.py` is now a thin wrapper that simply calls `core.cli.main()`.
@@ -310,7 +321,48 @@ Common headers: `from`, `to`, `cc`, `subject`, `date`, `message-id`
 
 **Priority:** Lower numbers execute first. Use priorities 1-1000 for flexibility.
 
-**Action types:** Currently `"move"` is supported, specifying the target folder.
+**Action types:**
+
+- **`"move"`** – Move the message to a target folder. Specifies `"target"` field with folder name.
+- **`"set_keywords"`** – Set IMAP keywords/flags on the message. Specifies `"keywords"` field with array of keyword names.
+  - Common keywords: `"\\Seen"`, `"\\Answered"`, `"\\Flagged"`, `"\\Draft"`, `"\\Deleted"`, or custom keywords like `"receipts"`, `"important"`, etc.
+  - Keywords are processed efficiently in batch operations to minimize IMAP server round trips.
+
+**Example with keyword action:**
+
+```json
+{
+  "name": "Mark important emails",
+  "conditions": {
+    "all": [
+      {"header": "from", "regex": "@company\\.com"},
+      {"header": "subject", "contains": "urgent"}
+    ]
+  },
+  "action": {
+    "type": "set_keywords",
+    "keywords": ["\\Flagged", "important"]
+  }
+}
+```
+
+**Example with multiple keywords in condition:**
+
+```json
+{
+  "name": "Process unread messages",
+  "conditions": {
+    "all": [
+      {"has_keyword": "\\Seen", "not": true},
+      {"has_keyword": "important", "equals": true}
+    ]
+  },
+  "action": {
+    "type": "set_keywords",
+    "keywords": ["\\Flagged"]
+  }
+}
+```
 
 ### Rule management console
 
@@ -399,6 +451,31 @@ Save? (yes/no/edit): yes
 - **Want confidence** – Preview match counts before committing
 
 See `RULE_WIZARD_USAGE.md` for comprehensive documentation, real-world examples, and troubleshooting.
+
+### Interactive Cache Viewer
+
+A tool for visually exploring and analyzing your cached email messages:
+
+```bash
+python -c "from core.tools.cache_viewer import main; main()"
+```
+
+**Key features:**
+
+* **Interactive browser** – Navigate cached messages with arrow keys and keyboard shortcuts
+* **Sorting options** – Sort by sender, subject, date, or message count
+* **Real-time filtering** – Instantly filter emails by sender, subject, or any text
+* **Message counts** – See how many emails match each pattern (useful for testing rule patterns)
+* **Scrolling** – Smooth navigation through large lists with page-up/page-down support
+* **Pattern matching** – Identify patterns in your emails to craft more effective rules
+
+**Use cases:**
+
+- Explore what emails are available in your cache
+- Test pattern matching for new rules before creating them
+- Identify top senders and subjects for rule creation
+- Verify that your cache building worked correctly
+- Debug why a rule might or might not be matching
 
 ### Configuration and data locations
 
@@ -523,6 +600,8 @@ This builds the cache for INBOX, evaluates all rules, and executes matched actio
 
 ## Development
 
+### Setup and Testing
+
 Install the dependencies and run the tests:
 
 ```bash
@@ -530,17 +609,54 @@ pip install -r requirements.txt  # if available
 pytest
 ```
 
+### Key Development Modules
+
+**Performance & Optimization:**
+* `core/stream_executor.py` – Memory-efficient message processing for large mailboxes using streaming approach
+* `core/stream_processor.py` – Message streaming utilities for batch processing
+* `core/connection_pool.py` – IMAP connection pooling to reduce connection overhead during parallel operations
+* `core/keywords.py` – Batched keyword/flag operations for efficient IMAP interactions
+
+**Validation & Quality:**
+* `core/rule_validator.py` – Validates rule JSON structure, schemas, and condition logic before execution
+* `core/wizard_cache.py` – 6-hour persistent cache for wizard operations to avoid repeated IMAP queries
+
+**User Experience:**
+* `core/ui_components.py` – Reusable TUI components for interactive tools
+* `core/tools/cache_viewer.py` – Interactive browser for cached emails (NEW)
+* `core/tools/coverage_analyzer.py` – Pattern coverage analysis for rule optimization (NEW)
+
+### Recent Optimizations
+
+**Parallel Processing:**
+- Cache building now processes multiple folders in parallel for 3-5x speedup
+- Action execution uses threading with per-thread database isolation for safe concurrent operations
+
+**Batch Operations:**
+- Keyword operations batch process to reduce IMAP server round trips
+- Connection pooling reuses IMAP connections across parallel tasks
+
+**Smart Caching:**
+- Wizard caches email metadata for 6 hours to avoid repeated IMAP queries
+- Cache compaction removes completed actions to keep database lean
+- SQLite index optimization for fast header lookups
+
 ### Diagnostic helpers
 
 Several standalone scripts and test suites assist with troubleshooting and development:
 
 **Diagnostic tools:**
-* `python -m core.tools.sample_messages` – interactively copies random messages from `INBOX` into the `Test` folder for manual inspection.
-* `python -m core.tools.move_diagnostics [--destination MAILBOX] [--ensure-destination]` – appends fresh test messages to `INBOX` and exercises the `UID MOVE` and fallback copy/delete flows, logging the IMAP server responses and verifying that each message arrives in the destination folder.
+* `python -m core.tools.sample_messages` – Interactively copies random messages from `INBOX` into the `Test` folder for manual inspection.
+* `python -m core.tools.move_diagnostics [--destination MAILBOX] [--ensure-destination]` – Appends fresh test messages to `INBOX` and exercises the `UID MOVE` and fallback copy/delete flows, logging IMAP server responses and verifying message arrival.
+* `python -c "from core.tools.cache_viewer import main; main()"` – Interactive cache browser for exploring cached emails with sorting, filtering, and message counts. Useful for understanding your mailbox structure and testing rule patterns.
+* `python -m core.tools.coverage_analyzer` – Analyzes rule patterns and shows coverage statistics to identify gaps in your filtering rules.
 
-Both tools reuse the credentials and logging configuration from `data/secrets.json` and `data/log.json` respectively.
+All tools reuse the credentials and logging configuration from `data/secrets.json`.
 
-**Rule wizard tests:**
-* `python test_integration_wizard.py` – Comprehensive integration test suite (39 tests) verifying all rule wizard components work together
-* `python test_wizard_smoke.py` – Smoke test suite (23 tests) verifying entry point initialization and error handling
+**Testing infrastructure:**
+* `pytest` – Run the full test suite (228+ test functions across 20+ test files)
+* `python test_integration_wizard.py` – Comprehensive integration test suite verifying all rule wizard components
+* `python test_wizard_smoke.py` – Smoke test suite verifying entry point initialization and error handling
+* `python test_rule_builder_nested.py` – Tests for nested rule condition evaluation
+* `python test_match_type_selection.py` – Tests for pattern matching and suggestion logic
 * `RULE_WIZARD_USAGE.md` – Complete user guide with step-by-step examples and troubleshooting
