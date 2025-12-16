@@ -2726,8 +2726,8 @@ class RuleWizard:
             choice = input("  > ").strip()
 
             if choice == "1":
-                # Recursively call to select again
-                return self._select_field_value(field)
+                # Recursively call to select again, preserving the intent
+                return self._select_field_value(field, intent=intent)
             elif choice == "2":
                 # Manual entry
                 manual = input(f"Enter new {field} value: ").strip()
@@ -2804,7 +2804,7 @@ class RuleWizard:
             print("\nDomain selection cancelled.")
             retry_response = prompt_yes_no("Would you like to try again?", default=True)
             if retry_response:
-                return self._select_email_address_two_step(field)
+                return self._select_email_address_two_step(field, intent=intent)
             return None
 
         # Step 4: Second selector - select email from domain
@@ -2848,7 +2848,7 @@ class RuleWizard:
                 print("\nEmail option selection cancelled.")
                 retry_response = prompt_yes_no("Would you like to try again?", default=True)
                 if retry_response:
-                    return self._select_email_address_two_step(field)
+                    return self._select_email_address_two_step(field, intent=intent)
                 return None
 
             # If user selected domain-wide format, return it
@@ -2873,7 +2873,7 @@ class RuleWizard:
             if retry_response:
                 # Go back to domain selection for full retry
                 print("\nRestarting from domain selection...")
-                return self._select_email_address_two_step(field)
+                return self._select_email_address_two_step(field, intent=intent)
 
             # Offer alternative: continue with domain-wide match
             # ISSUE #5 FIX: Use helper method for consistent format
