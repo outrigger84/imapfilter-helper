@@ -43,10 +43,29 @@ def imap_login(secrets_path: Path, logger: JsonLogger) -> imaplib.IMAP4_SSL:
     return mail
 
 
-def list_all_folders(client: imaplib.IMAP4) -> List[str]:
-    typ, data = client.list()
+def list_all_folders(client: imaplib.IMAP4, parent: str | None = None) -> List[str]:
+    """
+    List folders from IMAP server.
+
+    Args:
+        client: IMAP connection
+        parent: If provided, list only direct children of this folder (non-recursive)
+               If None, list all folders at top level
+
+    Returns:
+        List of folder names
+    """
+    if parent is None:
+        mailbox_name = "*"
+    else:
+        # List direct children of parent: "INBOX/*" lists all direct children
+        # Quote parent name if it contains spaces or special characters
+        escaped_parent = parent.replace('\\', '\\\\').replace('"', '\\"')
+        mailbox_name = f'"{escaped_parent}/*"'
+
+    typ, data = client.list(directory='""', pattern=mailbox_name)
     if typ != "OK":
-        raise RuntimeError("Unable to list folders")
+        raise RuntimeError(f"Unable to list folders: {mailbox_name}")
     folders: List[str] = []
     for line in data or []:
         if not line:
@@ -55,6 +74,44 @@ def list_all_folders(client: imaplib.IMAP4) -> List[str]:
         if len(parts) == 2:
             folders.append(parts[1].strip('"'))
     return folders
+
+
+def expand_folders_recursive(client: imaplib.IMAP4, folders: List[str], show_progress: bool = False) -> List[str]:
+    """
+    Expand a list of folders to include all their descendants.
+
+    For each folder in the input list, recursively finds all subfolders and returns
+    the complete flattened list. Useful for cache building with --folder-recursive.
+
+    Args:
+        client: IMAP connection
+        folders: List of base folder names to expand
+        show_progress: If True, display progress bar
+
+    Returns:
+        Flattened list of all folders and their descendants (deduplicated)
+    """
+    result = set()
+    iterator = tqdm(folders, desc="📂 Expanding folders recursively", unit="folder", disable=not show_progress)
+
+    def _expand_recursive(folder_name: str) -> None:
+        """Recursively expand a folder and add it and all descendants."""
+        if folder_name in result:
+            return  # Already processed
+        result.add(folder_name)
+
+        try:
+            children = list_all_folders(client, parent=folder_name)
+            for child in children:
+                _expand_recursive(child)
+        except Exception:
+            # If we can't list children, just continue with current folder
+            pass
+
+    for folder in iterator:
+        _expand_recursive(folder)
+
+    return sorted(list(result))
 
 
 def get_folder_sizes(client: imaplib.IMAP4, folders: List[str], show_progress: bool = True) -> dict[str, int]:
