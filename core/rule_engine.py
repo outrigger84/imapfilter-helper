@@ -577,6 +577,11 @@ def evaluate_rules(
                                 },
                                 console=f"⊘ {rule_name}: {folder}/{uid} already in target folder {target}",
                             )
+                            # Remove from cache since the email is already in the target location
+                            db.execute(
+                                "DELETE FROM headers WHERE folder=? AND uid=?",
+                                (folder, uid),
+                            )
                             continue
 
                         # Calculate effective priority to ensure execution order:
