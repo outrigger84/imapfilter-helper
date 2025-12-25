@@ -25,6 +25,47 @@ from core.imap_client import safe_search_all
 VALID_LIMIT_ORDERS = {"newest", "oldest", "random"}
 
 
+def distribute_folders_for_load_balancing(
+    folders: Sequence[str],
+    folder_sizes: dict[str, int] | None,
+    num_workers: int,
+) -> list[str]:
+    """
+    Distribute folders across workers using greedy load balancing.
+
+    Sorts folders by size (largest first). The ThreadPoolExecutor will assign
+    the first N tasks to N workers. As workers complete tasks, they pick up
+    subsequent tasks in order. This ensures large folders are distributed
+    across multiple workers initially, with smaller folders assigned later,
+    minimizing idle time.
+
+    Args:
+        folders: List of folder names
+        folder_sizes: Dict mapping folder names to message counts
+        num_workers: Number of parallel workers
+
+    Returns:
+        Reordered list of folders (largest first) for optimal distribution
+    """
+    if not folders or num_workers <= 1:
+        return list(folders)
+
+    if folder_sizes is None:
+        folder_sizes = {}
+
+    # Sort by size (largest first)
+    # When submitted to ThreadPoolExecutor, the first N tasks will be assigned
+    # to N workers. As workers finish, they pick up subsequent tasks in order.
+    # This pattern keeps all workers busy longer than smallest-first ordering.
+    sorted_folders = sorted(
+        folders,
+        key=lambda f: folder_sizes.get(f, -1),
+        reverse=True  # Largest first
+    )
+
+    return sorted_folders
+
+
 def _select_uids(
     uids: Sequence[bytes], limit: int | None, order: str
 ) -> tuple[list[bytes], str]:
@@ -378,7 +419,7 @@ def build_cache_parallel(
     Args:
         secrets_path: Path to IMAP secrets file
         db_path: Path to cache database
-        folders: List of folders to process (should be sorted by size)
+        folders: List of folders to process (should be load-balanced across workers)
         show_progress: Whether to show progress bars
         logger: JsonLogger for logging
         limit: Limit messages per folder
@@ -658,8 +699,21 @@ def build_cache_parallel(
     import gc
     gc.collect()
 
-    # Delay to ensure all OS file locks are released by worker threads
-    time.sleep(1.0)
+    # Checkpoint any WAL files to release locks
+    # Longer delay to ensure all OS file locks are released by worker threads
+    for _ in range(3):
+        time.sleep(0.5)
+        try:
+            for temp_db_path in temp_dir.glob("thread_*.db"):
+                try:
+                    temp_conn = sqlite3.connect(str(temp_db_path), timeout=1.0)
+                    temp_conn.execute("PRAGMA journal_mode=WAL")
+                    temp_conn.execute("PRAGMA wal_checkpoint(RESTART)")
+                    temp_conn.close()
+                except Exception:
+                    pass  # Best effort cleanup
+        except Exception:
+            pass
 
     # Ensure main database is initialized with correct schema
     init_conn = init_db(db_path, logger=logger)
@@ -679,26 +733,39 @@ def build_cache_parallel(
         disable=not show_progress,
     )
 
-    # Open main database for merge
-    main_db = sqlite3.connect(str(db_path), timeout=5.0)
+    # Open main database for merge with better timeout
+    main_db = sqlite3.connect(str(db_path), timeout=30.0)
     main_db.execute("PRAGMA journal_mode=WAL")
+    main_db.execute("PRAGMA busy_timeout=30000")  # 30 second busy timeout
+
+    merge_successful = True
+    failed_merges = []
 
     for temp_idx, temp_db_path in enumerate(thread_temp_dbs):
+        db_merge_successful = False
         try:
-            # Attach temp database with retry for lock issues
-            max_attach_retries = 3
+            # Attach temp database with exponential backoff retry
+            max_attach_retries = 5
+            attach_error = None
             for attach_attempt in range(max_attach_retries):
                 try:
                     main_db.execute(f"ATTACH DATABASE '{temp_db_path}' AS temp_{temp_idx}")
+                    db_merge_successful = True  # At least attached successfully
                     break
                 except sqlite3.OperationalError as lock_error:
+                    attach_error = lock_error
                     if "database is locked" in str(lock_error) and attach_attempt < max_attach_retries - 1:
-                        time.sleep(0.5)  # Small delay before retry
+                        # Exponential backoff: 0.1s, 0.2s, 0.4s, 0.8s
+                        delay = 0.1 * (2 ** attach_attempt)
+                        time.sleep(delay)
                         continue
                     raise
 
-            # Copy headers with retry for lock issues
-            max_insert_retries = 3
+            if not db_merge_successful:
+                raise attach_error or Exception("Failed to attach temp database")
+
+            # Copy headers with exponential backoff retry
+            max_insert_retries = 5
             for insert_attempt in range(max_insert_retries):
                 try:
                     main_db.execute(f"""
@@ -708,11 +775,12 @@ def build_cache_parallel(
                     break
                 except sqlite3.OperationalError as lock_error:
                     if "database is locked" in str(lock_error) and insert_attempt < max_insert_retries - 1:
-                        time.sleep(0.5)
+                        delay = 0.1 * (2 ** insert_attempt)
+                        time.sleep(delay)
                         continue
                     raise
 
-            # Copy folders with retry for lock issues
+            # Copy folders with exponential backoff retry
             for insert_attempt in range(max_insert_retries):
                 try:
                     main_db.execute(f"""
@@ -722,24 +790,67 @@ def build_cache_parallel(
                     break
                 except sqlite3.OperationalError as lock_error:
                     if "database is locked" in str(lock_error) and insert_attempt < max_insert_retries - 1:
-                        time.sleep(0.5)
+                        delay = 0.1 * (2 ** insert_attempt)
+                        time.sleep(delay)
                         continue
                     raise
 
             main_db.execute(f"DETACH DATABASE temp_{temp_idx}")
+            logger.log(
+                "INFO",
+                "merge_successful",
+                {"thread_db": str(temp_db_path)},
+            )
+
         except Exception as merge_error:
+            merge_successful = False
+            failed_merges.append((temp_db_path.name, str(merge_error)))
             logger.log(
                 "ERROR",
                 "merge_failed",
                 {"thread_db": str(temp_db_path), "error": str(merge_error)},
                 console=f"⚠️  Merge error for {temp_db_path.name}: {merge_error}",
             )
+            # Try to detach if attached
+            try:
+                main_db.execute(f"DETACH DATABASE temp_{temp_idx}")
+            except Exception:
+                pass
 
         merge_bar.update(1)
 
-    main_db.commit()
+    # Commit all changes before closing
+    try:
+        main_db.commit()
+    except Exception as commit_error:
+        logger.log(
+            "ERROR",
+            "merge_commit_failed",
+            {"error": str(commit_error)},
+            console=f"❌ Failed to commit merged data: {commit_error}",
+        )
+        merge_successful = False
+
     main_db.close()
     merge_bar.close()
+
+    # Report merge results
+    if not merge_successful:
+        if failed_merges:
+            logger.log(
+                "ERROR",
+                "merge_partial",
+                {"failed_count": len(failed_merges), "failed_dbs": failed_merges},
+                console=f"❌ Merge partially failed - {len(failed_merges)} database(s) not merged",
+            )
+        logger.log(
+            "WARNING",
+            "merge_incomplete",
+            {},
+            console="⚠️  Cache merge incomplete - some data may be missing",
+        )
+    else:
+        logger.log("INFO", "merge_complete", {}, console="✅ Merge complete")
 
     # Cleanup temp files and directory
     for temp_db_path in thread_temp_dbs:
@@ -828,27 +939,34 @@ def build_cache_parallel(
             disable=not show_progress,
         )
 
-        main_db = sqlite3.connect(str(db_path), timeout=5.0)
+        main_db = sqlite3.connect(str(db_path), timeout=30.0)
+        main_db.execute("PRAGMA journal_mode=WAL")
+        main_db.execute("PRAGMA busy_timeout=30000")
+
+        retry_merge_successful = True
         for temp_idx, temp_db_path in enumerate(retry_thread_temp_dbs):
             if not temp_db_path.exists():
                 retry_merge_bar.update(1)
                 continue
 
             try:
-                # Attach temp database with retry for lock issues
-                max_attach_retries = 3
+                # Attach temp database with exponential backoff retry
+                max_attach_retries = 5
+                attach_error = None
                 for attach_attempt in range(max_attach_retries):
                     try:
                         main_db.execute(f"ATTACH DATABASE '{temp_db_path}' AS temp_{temp_idx}")
                         break
                     except sqlite3.OperationalError as lock_error:
+                        attach_error = lock_error
                         if "database is locked" in str(lock_error) and attach_attempt < max_attach_retries - 1:
-                            time.sleep(0.5)  # Small delay before retry
+                            delay = 0.1 * (2 ** attach_attempt)
+                            time.sleep(delay)
                             continue
                         raise
 
-                # Copy headers with retry for lock issues
-                max_insert_retries = 3
+                # Copy headers with exponential backoff retry
+                max_insert_retries = 5
                 for insert_attempt in range(max_insert_retries):
                     try:
                         main_db.execute(f"""
@@ -858,11 +976,12 @@ def build_cache_parallel(
                         break
                     except sqlite3.OperationalError as lock_error:
                         if "database is locked" in str(lock_error) and insert_attempt < max_insert_retries - 1:
-                            time.sleep(0.5)
+                            delay = 0.1 * (2 ** insert_attempt)
+                            time.sleep(delay)
                             continue
                         raise
 
-                # Copy folders with retry for lock issues
+                # Copy folders with exponential backoff retry
                 for insert_attempt in range(max_insert_retries):
                     try:
                         main_db.execute(f"""
@@ -872,24 +991,54 @@ def build_cache_parallel(
                         break
                     except sqlite3.OperationalError as lock_error:
                         if "database is locked" in str(lock_error) and insert_attempt < max_insert_retries - 1:
-                            time.sleep(0.5)
+                            delay = 0.1 * (2 ** insert_attempt)
+                            time.sleep(delay)
                             continue
                         raise
 
                 main_db.execute(f"DETACH DATABASE temp_{temp_idx}")
+                logger.log(
+                    "INFO",
+                    "retry_merge_successful",
+                    {"thread_db": str(temp_db_path)},
+                )
             except Exception as merge_error:
+                retry_merge_successful = False
                 logger.log(
                     "WARNING",
                     "retry_merge_failed",
                     {"thread_db": str(temp_db_path), "error": str(merge_error)},
                     console=f"⚠️  Retry merge error for {temp_db_path.name}: {merge_error}",
                 )
+                # Try to detach if attached
+                try:
+                    main_db.execute(f"DETACH DATABASE temp_{temp_idx}")
+                except Exception:
+                    pass
 
             retry_merge_bar.update(1)
 
-        main_db.commit()
+        try:
+            main_db.commit()
+        except Exception as commit_error:
+            logger.log(
+                "ERROR",
+                "retry_merge_commit_failed",
+                {"error": str(commit_error)},
+                console=f"❌ Failed to commit retry merged data: {commit_error}",
+            )
+            retry_merge_successful = False
+
         main_db.close()
         retry_merge_bar.close()
+
+        if not retry_merge_successful:
+            logger.log(
+                "WARNING",
+                "retry_merge_incomplete",
+                {},
+                console="⚠️  Retry merge incomplete - some data may be missing",
+            )
         retry_bar.close()
 
         # Cleanup temp DBs from retry phase

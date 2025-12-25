@@ -7,11 +7,11 @@ import sqlite3
 from pathlib import Path
 from typing import Callable, Sequence
 
-from core.cache_builder import build_cache, build_cache_parallel, compact_cache
+from core.cache_builder import build_cache, build_cache_parallel, compact_cache, distribute_folders_for_load_balancing
 from core.config import AppConfig, build_default_config
 from core.database import init_db
 from core.executor import execute_actions, execute_actions_parallel, should_use_parallel_mode
-from core.imap_client import imap_login, list_all_folders, get_folder_sizes
+from core.imap_client import imap_login, list_all_folders, get_folder_sizes, expand_folders_recursive
 from core.keywords import KeywordManager
 from core.logging_utils import JsonLogger, PhaseTimer
 from core.rule_engine import evaluate_rules, load_rules
@@ -36,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--folder",
         action="append",
         help="Scan only the specified folder (can be repeated)",
+    )
+    build_scope.add_argument(
+        "--folder-recursive",
+        action="append",
+        help="Scan the specified folder and all its subfolders recursively (can be repeated)",
     )
     p_build.add_argument(
         "--limit",
@@ -76,6 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Evaluate rules only for the specified folder(s)",
     )
+    eval_scope.add_argument(
+        "--folder-recursive",
+        action="append",
+        help="Evaluate rules for the specified folder and all its subfolders recursively",
+    )
 
     p_exec = sub.add_parser("execute", help="Execute queued actions")
     p_exec.add_argument("--dry-run", action="store_true", help="Simulate execution only (no IMAP writes)")
@@ -106,6 +116,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Execute only the pending actions for the specified folder(s)",
     )
+    exec_scope.add_argument(
+        "--folder-recursive",
+        action="append",
+        help="Execute pending actions for the specified folder and all its subfolders recursively",
+    )
     p_exec.add_argument(
         "--backup-moved",
         action="store_true",
@@ -135,6 +150,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--folder",
         action="append",
         help="Process only the specified folder(s) during cache build",
+    )
+    run_scope.add_argument(
+        "--folder-recursive",
+        action="append",
+        help="Process the specified folder and all its subfolders recursively",
     )
     p_run.add_argument("--strict", action="store_true", help="Abort on missing/failed IMAP ops during execute")
     p_run.add_argument(
@@ -205,6 +225,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--folder",
         action="append",
         help="Process only the specified folder(s)",
+    )
+    stream_scope.add_argument(
+        "--folder-recursive",
+        action="append",
+        help="Process the specified folder and all its subfolders recursively",
     )
     p_stream.add_argument(
         "--verbose",
@@ -307,6 +332,50 @@ def _resolve_scope_selection(
     return None, normalized
 
 
+def _resolve_folders_with_recursion(
+    *,
+    client: imaplib.IMAP4,
+    all_folders: bool,
+    folders: list[str] | None,
+    folders_recursive: list[str] | None,
+    logger: JsonLogger,
+) -> list[str] | None:
+    """
+    Resolve folder selection with recursive expansion support.
+
+    Args:
+        client: IMAP connection
+        all_folders: If True, return None (use all folders from IMAP)
+        folders: List of specific folder names
+        folders_recursive: List of folder names to expand recursively
+        logger: Logger for progress messages
+
+    Returns:
+        List of resolved folder names, or None if all_folders is True
+    """
+    if all_folders:
+        return None
+
+    # Start with explicitly specified folders
+    resolved = set()
+    if folders:
+        resolved.update(folders)
+
+    # Expand recursive folders
+    if folders_recursive:
+        expanded = expand_folders_recursive(client, folders_recursive, show_progress=True)
+        resolved.update(expanded)
+        if folders_recursive:
+            logger.log(
+                "INFO",
+                "folders_expanded_recursively",
+                {"requested": len(folders_recursive), "expanded": len(expanded)},
+                console=f"📂 Expanded {len(folders_recursive)} folder(s) recursively to {len(expanded)} total folder(s)",
+            )
+
+    return sorted(list(resolved)) if resolved else None
+
+
 def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
     """Handle the ``build-cache`` command."""
     client = imap_login(cfg.paths.secrets_file, logger)
@@ -317,21 +386,28 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
 
         # Get folders and sizes
         folder_sizes = None
+
+        # Resolve folder selection (handles --all-folders, --folder, and --folder-recursive)
+        selected = _normalize_folder_list(args.folder)
+        recursive = _normalize_folder_list(args.folder_recursive)
+        resolved_folders = _resolve_folders_with_recursion(
+            client=client,
+            all_folders=args.all_folders,
+            folders=selected,
+            folders_recursive=recursive,
+            logger=logger,
+        )
+
         if args.all_folders:
             folders = list_all_folders(client)
             # Get folder sizes for sorting and progress display
             folder_sizes = get_folder_sizes(client, folders)
-            # Sort folders by message count (smallest to largest)
-            folders = sorted(folders, key=lambda f: folder_sizes.get(f, -1))
-            logger.log(
-                "INFO",
-                "folders_sorted_by_size",
-                {"total": len(folders), "method": "IMAP STATUS"},
-                console=f"📂 Sorted {len(folders)} folders by size (smallest to largest)"
-            )
+        elif resolved_folders:
+            folders = resolved_folders
+            folder_sizes = None
         else:
-            selected = _normalize_folder_list(args.folder)
-            folders = selected if selected else [DEFAULT_INBOX]
+            folders = [DEFAULT_INBOX]
+            folder_sizes = None
 
         # Smart auto-detection: parallelize if 5+ folders
         # User can override with --parallel-workers
@@ -342,6 +418,18 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
 
         # Choose implementation based on worker count
         if parallel_workers > 1:
+            # Distribute folders using load balancing for optimal worker utilization
+            folders = distribute_folders_for_load_balancing(
+                folders,
+                folder_sizes,
+                parallel_workers
+            )
+            logger.log(
+                "INFO",
+                "folders_distributed_for_load_balancing",
+                {"total": len(folders), "workers": parallel_workers},
+                console=f"📂 Distributed {len(folders)} folders across {parallel_workers} workers for load balancing",
+            )
             logger.log(
                 "INFO",
                 "cache_parallel_enabled",
@@ -386,14 +474,53 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
     return 0
 
 
+def _expand_folders_from_db(db: sqlite3.Connection, recursive_folders: list[str]) -> list[str]:
+    """
+    Expand recursive folder patterns using the database.
+
+    Args:
+        db: Database connection
+        recursive_folders: List of folder patterns to expand
+
+    Returns:
+        List of all matching folders
+    """
+    if not recursive_folders:
+        return []
+
+    cursor = db.cursor()
+    expanded = set()
+
+    for pattern in recursive_folders:
+        # Find all folders that match exactly or start with pattern/
+        cursor.execute(
+            "SELECT DISTINCT name FROM folders WHERE name = ? OR name LIKE ? ESCAPE '\\'",
+            (pattern, f"{pattern}/%"),
+        )
+        for (folder_name,) in cursor.fetchall():
+            expanded.add(folder_name)
+
+    return sorted(list(expanded))
+
+
 def handle_evaluate(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
     """Handle the ``evaluate`` command."""
     cfg.executor.dry_run = args.dry_run
     cfg.logging.verbose = args.verbose
     selected = _normalize_folder_list(args.folder)
+    recursive = _normalize_folder_list(args.folder_recursive)
+
+    # Expand recursive folders using database
+    expanded_recursive = _expand_folders_from_db(db, recursive) if recursive else []
+
+    # Combine exact and recursive folders
+    final_folders = None
+    if selected or expanded_recursive:
+        final_folders = list(set((selected or []) + expanded_recursive))
+
     eval_folders, scope = _resolve_scope_selection(
         all_folders=args.all_folders,
-        folders=selected,
+        folders=final_folders,
         default_scope=cfg.executor.default_run_scope,
     )
     rules = load_rules(cfg.paths.rules_dir, logger)
@@ -419,9 +546,19 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     cfg.executor.verify_moves = getattr(args, "verify_moves", False)
     cfg.logging.verbose = args.verbose
     selected = _normalize_folder_list(args.folder)
+    recursive = _normalize_folder_list(args.folder_recursive)
+
+    # Expand recursive folders using database
+    expanded_recursive = _expand_folders_from_db(db, recursive) if recursive else []
+
+    # Combine exact and recursive folders
+    final_folders = None
+    if selected or expanded_recursive:
+        final_folders = list(set((selected or []) + expanded_recursive))
+
     exec_folders, _ = _resolve_scope_selection(
         all_folders=args.all_folders,
-        folders=selected,
+        folders=final_folders,
         default_scope=cfg.executor.default_run_scope,
     )
 
@@ -491,13 +628,26 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     client = None if args.dry_run else imap_login(cfg.paths.secrets_file, logger)
     try:
         selected = _normalize_folder_list(args.folder)
+        recursive = _normalize_folder_list(args.folder_recursive)
+
+        # For build-cache phase, expand folders using IMAP
         if args.all_folders and client is not None:
             folders = list_all_folders(client)
+        elif recursive and client is not None:
+            expanded_recursive = expand_folders_recursive(client, recursive, show_progress=True)
+            folders = list(set((selected or []) + expanded_recursive))
         else:
             folders = selected if selected else [DEFAULT_INBOX]
+
+        # For evaluation phase, combine exact and recursive
+        expanded_recursive_db = _expand_folders_from_db(db, recursive) if recursive else []
+        final_eval_folders = None
+        if selected or expanded_recursive_db:
+            final_eval_folders = list(set((selected or []) + expanded_recursive_db))
+
         eval_folders, scope = _resolve_scope_selection(
             all_folders=args.all_folders,
-            folders=selected,
+            folders=final_eval_folders,
             default_scope=cfg.executor.default_run_scope,
         )
         _cache_timer, folders_count, msg_count = build_cache(
@@ -606,10 +756,19 @@ def handle_stream(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogg
 
     # Determine which folders to process
     selected = _normalize_folder_list(args.folder)
+    recursive = _normalize_folder_list(args.folder_recursive)
+
     if args.all_folders:
         client_init = imap_login(cfg.paths.secrets_file, logger)
         try:
             folders = list_all_folders(client_init)
+        finally:
+            client_init.logout()
+    elif recursive:
+        client_init = imap_login(cfg.paths.secrets_file, logger)
+        try:
+            expanded_recursive = expand_folders_recursive(client_init, recursive, show_progress=True)
+            folders = list(set((selected or []) + expanded_recursive))
         finally:
             client_init.logout()
     elif selected:
