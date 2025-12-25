@@ -35,8 +35,11 @@ def split_mega_folders(
     Split large folders into multiple tasks for parallel processing.
 
     Folders with more messages than the threshold are split into chunks,
-    allowing multiple workers to process different UID ranges of the same folder.
+    allowing multiple workers to process different parts of the same folder.
     This prevents a single mega-folder from bottlenecking the entire cache build.
+
+    For now, we return (folder, chunk_index, num_chunks) to indicate splits.
+    The actual UID splitting will be done at fetch time based on actual UID positions.
 
     Args:
         folders: List of folder names
@@ -44,9 +47,9 @@ def split_mega_folders(
         threshold: Minimum messages per folder to trigger splitting
 
     Returns:
-        List of (folder_name, uid_start, uid_end) tuples.
+        List of (folder_name, chunk_idx, num_chunks) tuples.
         For unsplit folders: (folder_name, None, None)
-        For split folders: (folder_name, 1, chunk_size), (folder_name, chunk_size+1, chunk_size*2), etc.
+        For split folders: (folder_name, 0, 6), (folder_name, 1, 6), etc.
     """
     if folder_sizes is None:
         folder_sizes = {}
@@ -63,14 +66,11 @@ def split_mega_folders(
         # Split into roughly equal chunks across ideal worker count (4-5)
         # This ensures mega-folder is distributed across multiple workers
         num_chunks = max(2, (size // threshold) + 1)
-        chunk_size = (size + num_chunks - 1) // num_chunks  # Ceiling division
 
-        # UIDs are 1-indexed in IMAP, so we use UID ranges
-        # We'll use simple numeric ranges: 1, chunk_size+1, chunk_size*2+1, etc.
+        # Create a task for each chunk
+        # We'll filter UIDs at fetch time based on position in the list
         for chunk_idx in range(num_chunks):
-            uid_start = chunk_idx * chunk_size + 1
-            uid_end = min((chunk_idx + 1) * chunk_size, size)
-            tasks.append((folder, uid_start, uid_end))
+            tasks.append((folder, chunk_idx, num_chunks))
 
     return tasks
 
@@ -469,7 +469,7 @@ def build_cache_parallel(
 
     Uses ThreadPoolExecutor with IMAP connection pool for concurrent task processing.
     Supports mega-folder splitting: folders with >10k messages are split into
-    multiple UID-range tasks for parallel processing across workers.
+    multiple chunk tasks for parallel processing across workers.
     Each worker writes to its own temporary database to eliminate contention.
     Databases are merged at the end.
     Thread-safe progress tracking with locks.
@@ -478,9 +478,10 @@ def build_cache_parallel(
     Args:
         secrets_path: Path to IMAP secrets file
         db_path: Path to cache database
-        folders: List of (folder_name, uid_start, uid_end) tuples.
+        folders: List of (folder_name, chunk_idx, num_chunks) tuples.
                  For unsplit folders: (folder_name, None, None)
-                 For split folders: (folder_name, start_uid, end_uid)
+                 For split folders: (folder_name, 0, 6), (folder_name, 1, 6), etc.
+                 Chunk filtering divides the UID list by position (not UID value)
         show_progress: Whether to show progress bars
         logger: JsonLogger for logging
         limit: Limit messages per folder
@@ -539,15 +540,19 @@ def build_cache_parallel(
                 )
             return worker_bars[worker_id]
 
-    def process_single_folder(folder: str, uid_start: int | None, uid_end: int | None, worker_id: int) -> tuple[str, int, Exception | None]:
+    def process_single_folder(folder: str, chunk_idx: int | None, num_chunks: int | None, worker_id: int) -> tuple[str, int, Exception | None]:
         """
-        Process a single folder or UID range within a folder (runs in worker thread).
+        Process a single folder or chunk of a mega-folder (runs in worker thread).
 
         Args:
             folder: Folder name to process
-            uid_start: Start UID for range processing (None = all UIDs)
-            uid_end: End UID for range processing (None = all UIDs)
+            chunk_idx: Chunk index (0, 1, 2, ...) for mega-folder splitting (None = process all)
+            num_chunks: Total number of chunks for this folder (None = no splitting)
             worker_id: Worker ID for progress bar display
+
+        For mega-folders:
+        - chunk_idx and num_chunks divide the UID list into equal parts by position
+        - Example: chunk_idx=0, num_chunks=6 means process first 1/6 of UIDs
 
         Each actual thread gets its own temporary database file (true isolation, no contention).
         worker_id is only used for progress bar display.
@@ -592,10 +597,13 @@ def build_cache_parallel(
             # Get undeleted messages
             uids = safe_search_all(client, undeleted_only=True)
 
-            # Filter by UID range if processing a mega-folder split
-            if uid_start is not None and uid_end is not None:
-                uids = [uid for uid in uids
-                        if uid_start <= int(uid) <= uid_end]
+            # Filter by chunk if processing a mega-folder split
+            if chunk_idx is not None and num_chunks is not None and num_chunks > 1:
+                # Split UID list into equal chunks based on position
+                chunk_size = (len(uids) + num_chunks - 1) // num_chunks  # Ceiling division
+                chunk_start = chunk_idx * chunk_size
+                chunk_end = min((chunk_idx + 1) * chunk_size, len(uids))
+                uids = uids[chunk_start:chunk_end]
 
             if not uids:
                 logger.log(
@@ -635,10 +643,10 @@ def build_cache_parallel(
             # Set up worker progress bar for this folder
             worker_bar = get_worker_bar(worker_id)
             worker_bar.reset(total=len(limited_uids))
-            # Show UID range in description if processing a split mega-folder
+            # Show chunk info in description if processing a split mega-folder
             desc = f"   Worker {worker_id}: {folder[:40]}"
-            if uid_start is not None and uid_end is not None:
-                desc += f" [{uid_start}-{uid_end}]"
+            if chunk_idx is not None and num_chunks is not None and num_chunks > 1:
+                desc += f" [chunk {chunk_idx + 1}/{num_chunks}]"
             worker_bar.set_description(desc)
 
             # Fetch and cache headers for each message
@@ -750,12 +758,12 @@ def build_cache_parallel(
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all folder processing tasks with round-robin worker_id assignment (for display only)
         # Each thread will generate its own temp database path based on thread ID
-        # Note: folders is now a list of (folder, uid_start, uid_end) tuples
+        # Note: folders is now a list of (folder, chunk_idx, num_chunks) tuples
         futures = {}
         for idx, task in enumerate(folders):
-            folder, uid_start, uid_end = task
+            folder, chunk_idx, num_chunks = task
             worker_id = idx % max_workers  # Round-robin assignment for progress bar display only
-            future = executor.submit(process_single_folder, folder, uid_start, uid_end, worker_id)
+            future = executor.submit(process_single_folder, folder, chunk_idx, num_chunks, worker_id)
             futures[future] = folder
 
         # Process results as they complete
@@ -766,7 +774,7 @@ def build_cache_parallel(
             # Track failures for retry logic
             if error is not None:
                 with failed_folders_lock:
-                    # Find the task to get uid_start/uid_end
+                    # Find the task to get chunk info
                     task = next((t for t in folders if t[0] == folder), (folder, None, None))
                     failed_folders.append((*task, error))
 
@@ -992,9 +1000,9 @@ def build_cache_parallel(
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as retry_executor:
             retry_futures = {}
             for idx, task in enumerate(to_retry):
-                folder, uid_start, uid_end, _ = task  # Unpack task, ignore old error
+                folder, chunk_idx, num_chunks, _ = task  # Unpack task, ignore old error
                 worker_id = idx % max_workers  # For progress bar display only
-                retry_future = retry_executor.submit(process_single_folder, folder, uid_start, uid_end, worker_id)
+                retry_future = retry_executor.submit(process_single_folder, folder, chunk_idx, num_chunks, worker_id)
                 retry_futures[retry_future] = folder
 
             # Process retry results
@@ -1004,7 +1012,7 @@ def build_cache_parallel(
                     total_msgs_count += msg_count
                 if error is not None:
                     with failed_folders_lock:
-                        # Find the task to get uid_start/uid_end
+                        # Find the task to get chunk info
                         task = next((t for t in to_retry if t[0] == folder), (folder, None, None, error))
                         failed_folders.append(task)
                 retry_bar.update(1)
@@ -1144,14 +1152,14 @@ def build_cache_parallel(
             {"count": len(failed_folders), "folders": failed_folder_names},
             console=f"\n⚠️  {len(failed_folders)} tasks failed after {MAX_RETRIES} retry attempts:",
         )
-        for folder, uid_start, uid_end, error in failed_folders:
+        for folder, chunk_idx, num_chunks, error in failed_folders:
             task_desc = folder
-            if uid_start is not None and uid_end is not None:
-                task_desc += f" [{uid_start}-{uid_end}]"
+            if chunk_idx is not None and num_chunks is not None and num_chunks > 1:
+                task_desc += f" [chunk {chunk_idx + 1}/{num_chunks}]"
             logger.log(
                 "WARNING",
                 "failed_folder",
-                {"folder": folder, "uid_range": (uid_start, uid_end), "error": str(error)},
+                {"folder": folder, "chunk": (chunk_idx, num_chunks), "error": str(error)},
                 console=f"   ❌ {task_desc}: {error}",
             )
 
