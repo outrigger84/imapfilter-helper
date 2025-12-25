@@ -419,27 +419,32 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
         # Choose implementation based on worker count
         if parallel_workers > 1:
             # Distribute folders using load balancing for optimal worker utilization
-            folders = distribute_folders_for_load_balancing(
+            # This also splits mega-folders (>10k messages) across workers
+            tasks = distribute_folders_for_load_balancing(
                 folders,
                 folder_sizes,
                 parallel_workers
             )
+
+            # Count how many tasks are splits vs regular
+            num_splits = sum(1 for t in tasks if t[1] is not None)
+
             logger.log(
                 "INFO",
                 "folders_distributed_for_load_balancing",
-                {"total": len(folders), "workers": parallel_workers},
-                console=f"📂 Distributed {len(folders)} folders across {parallel_workers} workers for load balancing",
+                {"total_tasks": len(tasks), "mega_splits": num_splits, "workers": parallel_workers},
+                console=f"📂 Distributed {len(folders)} folders into {len(tasks)} tasks (with {num_splits} mega-folder splits) across {parallel_workers} workers",
             )
             logger.log(
                 "INFO",
                 "cache_parallel_enabled",
-                {"workers": parallel_workers, "folders": len(folders)},
-                console=f"🚀 Parallel cache building: {parallel_workers} workers for {len(folders)} folders",
+                {"workers": parallel_workers, "original_folders": len(folders), "total_tasks": len(tasks)},
+                console=f"🚀 Parallel cache building: {parallel_workers} workers for {len(tasks)} tasks",
             )
             build_cache_parallel(
                 cfg.paths.secrets_file,
                 cfg.paths.cache_db,
-                folders,
+                tasks,
                 show_progress=cfg.logging.show_progress,
                 logger=logger,
                 limit=cfg.cache.limit,

@@ -23,21 +23,74 @@ from core.imap_client import safe_search_all
 
 
 VALID_LIMIT_ORDERS = {"newest", "oldest", "random"}
+MEGA_FOLDER_THRESHOLD = 10000  # Messages per folder before splitting
+
+
+def split_mega_folders(
+    folders: Sequence[str],
+    folder_sizes: dict[str, int] | None,
+    threshold: int = MEGA_FOLDER_THRESHOLD,
+) -> list[tuple[str, int | None, int | None]]:
+    """
+    Split large folders into multiple tasks for parallel processing.
+
+    Folders with more messages than the threshold are split into chunks,
+    allowing multiple workers to process different UID ranges of the same folder.
+    This prevents a single mega-folder from bottlenecking the entire cache build.
+
+    Args:
+        folders: List of folder names
+        folder_sizes: Dict mapping folder names to message counts
+        threshold: Minimum messages per folder to trigger splitting
+
+    Returns:
+        List of (folder_name, uid_start, uid_end) tuples.
+        For unsplit folders: (folder_name, None, None)
+        For split folders: (folder_name, 1, chunk_size), (folder_name, chunk_size+1, chunk_size*2), etc.
+    """
+    if folder_sizes is None:
+        folder_sizes = {}
+
+    tasks = []
+    for folder in folders:
+        size = folder_sizes.get(folder, -1)
+
+        # Don't split if size unknown or below threshold
+        if size < threshold:
+            tasks.append((folder, None, None))
+            continue
+
+        # Split into roughly equal chunks across ideal worker count (4-5)
+        # This ensures mega-folder is distributed across multiple workers
+        num_chunks = max(2, (size // threshold) + 1)
+        chunk_size = (size + num_chunks - 1) // num_chunks  # Ceiling division
+
+        # UIDs are 1-indexed in IMAP, so we use UID ranges
+        # We'll use simple numeric ranges: 1, chunk_size+1, chunk_size*2+1, etc.
+        for chunk_idx in range(num_chunks):
+            uid_start = chunk_idx * chunk_size + 1
+            uid_end = min((chunk_idx + 1) * chunk_size, size)
+            tasks.append((folder, uid_start, uid_end))
+
+    return tasks
 
 
 def distribute_folders_for_load_balancing(
     folders: Sequence[str],
     folder_sizes: dict[str, int] | None,
     num_workers: int,
-) -> list[str]:
+) -> list[tuple[str, int | None, int | None]]:
     """
     Distribute folders across workers using greedy load balancing.
 
-    Sorts folders by size (largest first). The ThreadPoolExecutor will assign
-    the first N tasks to N workers. As workers complete tasks, they pick up
-    subsequent tasks in order. This ensures large folders are distributed
-    across multiple workers initially, with smaller folders assigned later,
-    minimizing idle time.
+    1. Splits mega-folders (>10k messages) into chunks for parallel processing
+    2. Sorts all tasks by folder size (largest first)
+    3. The ThreadPoolExecutor will assign the first N tasks to N workers
+
+    This ensures:
+    - Large folders (like INBOX) are distributed across multiple workers
+    - The first N tasks are the largest, keeping all workers busy initially
+    - Smaller tasks are assigned later, minimizing idle time
 
     Args:
         folders: List of folder names
@@ -45,25 +98,29 @@ def distribute_folders_for_load_balancing(
         num_workers: Number of parallel workers
 
     Returns:
-        Reordered list of folders (largest first) for optimal distribution
+        List of (folder_name, uid_start, uid_end) tuples sorted by size
+        - For unsplit folders: (folder_name, None, None)
+        - For split folders: (folder_name, 1, chunk_size), etc.
     """
     if not folders or num_workers <= 1:
-        return list(folders)
+        # Return as (folder, None, None) tuples for consistency
+        return [(f, None, None) for f in folders]
 
     if folder_sizes is None:
         folder_sizes = {}
 
-    # Sort by size (largest first)
-    # When submitted to ThreadPoolExecutor, the first N tasks will be assigned
-    # to N workers. As workers finish, they pick up subsequent tasks in order.
-    # This pattern keeps all workers busy longer than smallest-first ordering.
-    sorted_folders = sorted(
-        folders,
-        key=lambda f: folder_sizes.get(f, -1),
+    # Step 1: Split mega-folders into multiple tasks
+    tasks = split_mega_folders(folders, folder_sizes, MEGA_FOLDER_THRESHOLD)
+
+    # Step 2: Sort tasks by folder size (largest first)
+    # This ensures the largest folders' chunks are processed first
+    sorted_tasks = sorted(
+        tasks,
+        key=lambda task: folder_sizes.get(task[0], -1),
         reverse=True  # Largest first
     )
 
-    return sorted_folders
+    return sorted_tasks
 
 
 def _select_uids(
@@ -398,7 +455,7 @@ def compact_cache(db, *, logger: JsonLogger) -> tuple[PhaseTimer, int, int]:
 def build_cache_parallel(
     secrets_path: Path,
     db_path: Path,
-    folders: Sequence[str],
+    folders: Sequence[tuple[str, int | None, int | None]],
     *,
     show_progress: bool,
     logger: JsonLogger,
@@ -410,16 +467,20 @@ def build_cache_parallel(
     """
     Build cache with parallel folder processing.
 
-    Uses ThreadPoolExecutor with IMAP connection pool for concurrent folder processing.
+    Uses ThreadPoolExecutor with IMAP connection pool for concurrent task processing.
+    Supports mega-folder splitting: folders with >10k messages are split into
+    multiple UID-range tasks for parallel processing across workers.
     Each worker writes to its own temporary database to eliminate contention.
     Databases are merged at the end.
     Thread-safe progress tracking with locks.
-    Soft error handling: continues on folder failures, with automatic retry.
+    Soft error handling: continues on task failures, with automatic retry.
 
     Args:
         secrets_path: Path to IMAP secrets file
         db_path: Path to cache database
-        folders: List of folders to process (should be load-balanced across workers)
+        folders: List of (folder_name, uid_start, uid_end) tuples.
+                 For unsplit folders: (folder_name, None, None)
+                 For split folders: (folder_name, start_uid, end_uid)
         show_progress: Whether to show progress bars
         logger: JsonLogger for logging
         limit: Limit messages per folder
@@ -444,8 +505,8 @@ def build_cache_parallel(
     total_msgs_lock = threading.Lock()
     total_msgs_count = 0
 
-    # Track failed folders for retry logic
-    failed_folders: list[tuple[str, Exception]] = []
+    # Track failed tasks for retry logic (folder, uid_start, uid_end, error)
+    failed_folders: list[tuple[str, int | None, int | None, Exception]] = []
     failed_folders_lock = threading.Lock()
 
     # Thread-safe progress bar (tqdm is thread-safe for updates)
@@ -478,9 +539,15 @@ def build_cache_parallel(
                 )
             return worker_bars[worker_id]
 
-    def process_single_folder(folder: str, worker_id: int) -> tuple[str, int, Exception | None]:
+    def process_single_folder(folder: str, uid_start: int | None, uid_end: int | None, worker_id: int) -> tuple[str, int, Exception | None]:
         """
-        Process a single folder (runs in worker thread).
+        Process a single folder or UID range within a folder (runs in worker thread).
+
+        Args:
+            folder: Folder name to process
+            uid_start: Start UID for range processing (None = all UIDs)
+            uid_end: End UID for range processing (None = all UIDs)
+            worker_id: Worker ID for progress bar display
 
         Each actual thread gets its own temporary database file (true isolation, no contention).
         worker_id is only used for progress bar display.
@@ -524,6 +591,12 @@ def build_cache_parallel(
 
             # Get undeleted messages
             uids = safe_search_all(client, undeleted_only=True)
+
+            # Filter by UID range if processing a mega-folder split
+            if uid_start is not None and uid_end is not None:
+                uids = [uid for uid in uids
+                        if uid_start <= int(uid) <= uid_end]
+
             if not uids:
                 logger.log(
                     "INFO",
@@ -562,7 +635,11 @@ def build_cache_parallel(
             # Set up worker progress bar for this folder
             worker_bar = get_worker_bar(worker_id)
             worker_bar.reset(total=len(limited_uids))
-            worker_bar.set_description(f"   Worker {worker_id}: {folder[:40]}")
+            # Show UID range in description if processing a split mega-folder
+            desc = f"   Worker {worker_id}: {folder[:40]}"
+            if uid_start is not None and uid_end is not None:
+                desc += f" [{uid_start}-{uid_end}]"
+            worker_bar.set_description(desc)
 
             # Fetch and cache headers for each message
             # Batch commits every 50 messages to reduce transaction scope and lock contention
@@ -673,10 +750,12 @@ def build_cache_parallel(
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all folder processing tasks with round-robin worker_id assignment (for display only)
         # Each thread will generate its own temp database path based on thread ID
+        # Note: folders is now a list of (folder, uid_start, uid_end) tuples
         futures = {}
-        for idx, folder in enumerate(folders):
+        for idx, task in enumerate(folders):
+            folder, uid_start, uid_end = task
             worker_id = idx % max_workers  # Round-robin assignment for progress bar display only
-            future = executor.submit(process_single_folder, folder, worker_id)
+            future = executor.submit(process_single_folder, folder, uid_start, uid_end, worker_id)
             futures[future] = folder
 
         # Process results as they complete
@@ -687,7 +766,9 @@ def build_cache_parallel(
             # Track failures for retry logic
             if error is not None:
                 with failed_folders_lock:
-                    failed_folders.append((folder, error))
+                    # Find the task to get uid_start/uid_end
+                    task = next((t for t in folders if t[0] == folder), (folder, None, None))
+                    failed_folders.append((*task, error))
 
     # Clean up connection pool and worker progress bars
     pool.shutdown()
@@ -910,9 +991,10 @@ def build_cache_parallel(
         # Submit retry tasks
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as retry_executor:
             retry_futures = {}
-            for idx, (folder, _) in enumerate(to_retry):
+            for idx, task in enumerate(to_retry):
+                folder, uid_start, uid_end, _ = task  # Unpack task, ignore old error
                 worker_id = idx % max_workers  # For progress bar display only
-                retry_future = retry_executor.submit(process_single_folder, folder, worker_id)
+                retry_future = retry_executor.submit(process_single_folder, folder, uid_start, uid_end, worker_id)
                 retry_futures[retry_future] = folder
 
             # Process retry results
@@ -922,7 +1004,9 @@ def build_cache_parallel(
                     total_msgs_count += msg_count
                 if error is not None:
                     with failed_folders_lock:
-                        failed_folders.append((folder, error))
+                        # Find the task to get uid_start/uid_end
+                        task = next((t for t in to_retry if t[0] == folder), (folder, None, None, error))
+                        failed_folders.append(task)
                 retry_bar.update(1)
 
         # Merge retry results
@@ -1053,18 +1137,22 @@ def build_cache_parallel(
 
     # Report permanently failed folders
     if failed_folders:
+        failed_folder_names = [f[0] for f in failed_folders]
         logger.log(
             "WARNING",
             "permanent_failures",
-            {"count": len(failed_folders), "folders": [f for f, _ in failed_folders]},
-            console=f"\n⚠️  {len(failed_folders)} folders failed after {MAX_RETRIES} retry attempts:",
+            {"count": len(failed_folders), "folders": failed_folder_names},
+            console=f"\n⚠️  {len(failed_folders)} tasks failed after {MAX_RETRIES} retry attempts:",
         )
-        for folder, error in failed_folders:
+        for folder, uid_start, uid_end, error in failed_folders:
+            task_desc = folder
+            if uid_start is not None and uid_end is not None:
+                task_desc += f" [{uid_start}-{uid_end}]"
             logger.log(
                 "WARNING",
                 "failed_folder",
-                {"folder": folder, "error": str(error)},
-                console=f"   ❌ {folder}: {error}",
+                {"folder": folder, "uid_range": (uid_start, uid_end), "error": str(error)},
+                console=f"   ❌ {task_desc}: {error}",
             )
 
     # Log summary
