@@ -790,23 +790,30 @@ def build_cache_parallel(
 
     # Aggressive cleanup of stale lock files before merge
     # This prevents SQLite from trying to use old WAL/SHM files
+    # IMPORTANT: Only delete .db-wal and .db-shm files, NOT the .db files themselves!
     logger.log("INFO", "cleanup_locks", {}, console="🧹 Cleaning up database locks...")
     for _ in range(2):
         time.sleep(0.5)
-        for temp_db_path in temp_dir.glob("thread_*.db*"):  # Matches .db, .db-wal, .db-shm
+        # Only delete WAL and SHM files, preserve the actual .db files
+        for temp_db_path in temp_dir.glob("thread_*.db-wal"):
+            try:
+                temp_db_path.unlink()
+            except Exception:
+                pass  # Files may be in use
+        for temp_db_path in temp_dir.glob("thread_*.db-shm"):
             try:
                 temp_db_path.unlink()
             except Exception:
                 pass  # Files may be in use
 
-    # Also clean up main database lock files
+    # Also clean up main database lock files (but NOT the main .db file!)
     for lock_file in [db_path.with_suffix(".db-wal"), db_path.with_suffix(".db-shm")]:
         try:
             lock_file.unlink()
         except Exception:
             pass
 
-    # Re-glob just the main database files (WAL cleanup above removed -wal and -shm)
+    # Glob the main database files (WAL cleanup above removed -wal and -shm, .db files remain)
     thread_temp_dbs = sorted(temp_dir.glob("thread_*.db"))
 
     # Give filesystem time to settle
