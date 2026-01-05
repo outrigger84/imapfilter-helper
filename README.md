@@ -93,7 +93,7 @@ python -m core.cli <command> [flags]
 
 | Command | Purpose | Key flags |
 | --- | --- | --- |
-| `build-cache` | Fetches mail headers from the IMAP server and stores a local cache in `data/cache.db`. **Fast** – headers only, no message bodies. | `--all-folders` – scan every folder instead of just `INBOX`.<br>`--folder NAME` – cache only the specified folder **(can be repeated for multiple folders)**.<br>`--folder-recursive NAME` – cache folder and all subfolders recursively **(can be repeated)**.<br>`--limit N` – cache at most N messages per folder.<br>`--order newest\|oldest\|random` – which messages to cache when limiting. |
+| `build-cache` | Fetches mail headers from the IMAP server and stores a local cache in `data/cache.db`. **Fast** – headers only, no message bodies. | `--all-folders` – scan every folder instead of just `INBOX`.<br>`--folder NAME` – cache only the specified folder **(can be repeated for multiple folders)**.<br>`--folder-recursive NAME` – cache folder and all subfolders recursively **(can be repeated)**.<br>`--limit N` – cache at most N messages per folder.<br>`--order newest\|oldest\|random` – which messages to cache when limiting.<br>`--parallel-workers N` – number of parallel IMAP connections (default: auto-detect, use 1 to force sequential). |
 | `evaluate` | Loads rules from `rules/` and evaluates them against the cached messages, enqueueing matching actions. | `--dry-run` – report matches without mutating the database.<br>`--all-folders` – consider every cached folder.<br>`--folder NAME` – evaluate only the selected folder(s).<br>`--verbose` – show detailed match information.<br>`--debug-headers` – log message headers for troubleshooting. |
 | `execute` | Executes any queued actions against the IMAP server. **Can backup messages before moving them.** | `--dry-run` – preview without performing IMAP writes.<br>`--backup-moved` – backup messages before moving (recommended).<br>`--backup-all` – backup all cached messages after moves complete.<br>`--strict` – abort if required IMAP operations are missing or fail.<br>`--verify-moves` – confirm moves by searching for Message-ID.<br>`--verbose` – log IMAP server replies and per-message progress.<br>`--limit` – process at most this many pending actions.<br>`--all-folders` / `--folder` – limit execution to particular folders. |
 | `run-all` | Convenience command that runs `build-cache`, `evaluate`, and `execute` sequentially. **Optimized** – much faster than old --backup approach. | `--dry-run` – perform a full simulation without IMAP writes.<br>`--all-folders` – include every folder.<br>`--folder NAME` – restrict all three phases to the specified folder(s).<br>`--cache-limit` / `--cache-order` – cache-limiting flags.<br>`--backup-moved` – backup messages before moving them (recommended).<br>`--backup-all` – create full mbox archive after all moves complete.<br>`--debug-headers` – log message headers while evaluating rules.<br>`--strict` / `--verify-moves` – execute integrity checks.<br>`--verbose` – detailed progress and IMAP replies.<br>`--action-limit` – cap pending actions executed. |
@@ -563,6 +563,58 @@ The `--folder` flag can be repeated to cache multiple specific folders, making i
 - **Testing** – Cache a small set of folders to test rules before running on all folders
 - **Staged processing** – Cache folders in one step, then evaluate and execute later
 - **Large mailboxes** – Combine with `--limit` and `--order newest` to cache recent messages first
+
+**Parallel cache building (speeding up large mailboxes):**
+
+The `--parallel-workers` flag controls how many IMAP connections are used simultaneously to fetch messages. This dramatically speeds up cache building for mailboxes with many folders:
+
+```bash
+# Auto-detect optimal worker count (default behavior)
+./imapfilter_helper.py build-cache --all-folders
+
+# Force sequential processing (1 worker, slower but uses minimal bandwidth)
+./imapfilter_helper.py build-cache --all-folders --parallel-workers 1
+
+# Use 3 parallel workers (medium speed, moderate resource usage)
+./imapfilter_helper.py build-cache --all-folders --parallel-workers 3
+
+# Use 5 parallel workers (faster for large mailboxes with many folders)
+./imapfilter_helper.py build-cache --all-folders --parallel-workers 5
+
+# Combine with folder selection and limits
+./imapfilter_helper.py build-cache --folder INBOX --folder-recursive Work --parallel-workers 4 --limit 1000
+```
+
+**Performance impact:**
+
+- **Auto-detect (default)**: System automatically chooses based on folder count
+  - 1-4 folders → sequential (1 worker)
+  - 5+ folders → parallel (auto-detected worker count)
+- **Sequential (--parallel-workers 1)**: ~1x speed, minimal CPU/bandwidth
+- **Parallel (3-5 workers)**: **3-5x faster** for multi-folder mailboxes, balanced resource usage
+- **High concurrency (6+ workers)**: Fastest but may hit IMAP server rate limits
+
+**Choosing the right worker count:**
+
+| Scenario | Recommendation | Reason |
+|----------|---|---|
+| Single folder (INBOX only) | 1 (default sequential) | No parallelism benefit |
+| 2-5 folders | 2-3 workers | Good balance of speed vs. resource usage |
+| 10+ folders, fast IMAP server | 4-5 workers | Maximizes parallelization |
+| Large mailboxes (100K+ messages) | 3 workers + `--limit` | Reduce time per folder with limits |
+| Network-limited (slow connection) | 1-2 workers | Reduce concurrent bandwidth |
+| Rate-limited by IMAP server | 1 worker | Respect server throttling |
+
+**Example: Fast caching workflow for large mailbox:**
+
+```bash
+# Cache all folders in parallel with a message limit
+./imapfilter_helper.py build-cache --all-folders --limit 5000 --order newest --parallel-workers 5
+
+# Then evaluate and execute
+./imapfilter_helper.py evaluate --verbose
+./imapfilter_helper.py execute --backup-moved
+```
 
 **Caching large mailboxes efficiently:**
 
