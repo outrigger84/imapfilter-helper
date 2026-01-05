@@ -659,7 +659,8 @@ class ConflictDetector:
                 )
 
                 # Only care if rule2 is subset of rule1 (or equal)
-                if rel not in (OverlapRelationship.EQUAL, OverlapRelationship.SUBSET):
+                # SUPERSET means rule1's conditions are a superset of rule2's (rule1 is broader)
+                if rel not in (OverlapRelationship.EQUAL, OverlapRelationship.SUBSET, OverlapRelationship.SUPERSET):
                     continue
 
                 # Count affected messages

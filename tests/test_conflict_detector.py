@@ -192,13 +192,13 @@ class TestConflictDetector:
         rules = [
             {
                 "name": "All Gmail",
-                "priority": 50,
+                "priority": 100,
                 "conditions": {"all": [{"header": "from", "contains": "@gmail.com"}]},
                 "actions": [{"type": "move", "target": "Gmail"}],
             },
             {
                 "name": "Gmail Newsletters",
-                "priority": 100,
+                "priority": 50,
                 "conditions": {
                     "all": [
                         {"header": "from", "contains": "@gmail.com"},
@@ -213,6 +213,7 @@ class TestConflictDetector:
         conflicts = detector.detect_unreachable_rules()
 
         # Gmail Newsletters rule is more specific but lower priority, so unreachable
+        # (shadowed by higher-priority All Gmail rule)
         assert any(
             c.type == ConflictType.UNREACHABLE and c.rule2_name == "Gmail Newsletters"
             for c in conflicts
