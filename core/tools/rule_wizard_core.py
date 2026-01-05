@@ -19,6 +19,7 @@ from typing import Any, List, Optional, Tuple
 
 from tqdm import tqdm
 
+from core.config import DEFAULT_DATA_DIR
 from core.imap_client import imap_login, list_all_folders
 from core.logging_utils import JsonLogger
 from core.keywords import KeywordManager
@@ -1528,7 +1529,16 @@ class RuleWizard:
 
         # NEW: Initialize wizard cache
         from core.wizard_cache import WizardCache
-        cache_path = self.config.paths.data_dir / "wizard_cache.json"
+        # Derive wizard cache path from database location
+        # If using custom cache, place wizard cache alongside it
+        if self.config.paths.db_file == (self.config.paths.base_dir / DEFAULT_DATA_DIR / "cache.db"):
+            # Using default cache - use standard wizard cache location
+            cache_path = self.config.paths.data_dir / "wizard_cache.json"
+        else:
+            # Using custom cache - place wizard cache alongside it
+            db_dir = self.config.paths.db_file.parent
+            db_name = self.config.paths.db_file.stem
+            cache_path = db_dir / f"wizard_cache_{db_name}.json"
         self.wizard_cache = WizardCache(cache_path)
 
         # Batch mode context for consistency across condition selection
@@ -1650,6 +1660,378 @@ class RuleWizard:
             result = input("  New (or press Enter to keep): ").strip()
             return result if result else prefill
 
+    # ====== JSON Import Methods ======
+
+    def _run_json_import_mode(self) -> int:
+        """Run JSON import mode for importing rule(s) from JSON.
+
+        Returns:
+            Exit code: 0 on success, 1 on error, 130 on cancelled
+        """
+        while True:
+            # Collect multi-line JSON input
+            json_str = self._collect_multiline_json_input()
+            if json_str is None:
+                print("\nJSON import cancelled.")
+                return 130
+
+            # Parse and normalize JSON
+            rules, error_msg = self._parse_and_normalize_json(json_str)
+            if rules is None:
+                print(f"\n❌ {error_msg}\n")
+                retry = prompt_yes_no("Try again?", default=True)
+                if not retry:
+                    return 130
+                continue
+
+            print(f"\n✓ JSON parsed successfully ({len(rules)} rule(s))")
+
+            # Validate and fix errors interactively
+            fixed_rules = []
+            for i, rule in enumerate(rules):
+                is_valid, errors, warnings = self._validate_imported_rule(rule, i)
+
+                if errors:
+                    print(f"\n❌ Validation failed for rule {i + 1}: \"{rule.get('name', 'Unknown')}\"")
+                    print("\nErrors:")
+                    for j, error in enumerate(errors, 1):
+                        print(f"  {j}. {error}")
+
+                    fixed_rule = self._interactive_fix_errors(rule, errors, i)
+                    if fixed_rule is None:
+                        print("\nCannot proceed without fixing errors.")
+                        retry = prompt_yes_no("Try again?", default=True)
+                        if not retry:
+                            return 130
+                        break
+                    fixed_rules.append(fixed_rule)
+                elif warnings:
+                    print(f"\n⚠️  Warnings for rule {i + 1}: \"{rule.get('name', 'Unknown')}\"")
+                    for warning in warnings:
+                        print(f"  - {warning}")
+                    proceed = prompt_yes_no("Proceed anyway?", default=True)
+                    if proceed:
+                        fixed_rules.append(rule)
+                    else:
+                        retry = prompt_yes_no("Try again?", default=True)
+                        if not retry:
+                            return 130
+                        break
+                else:
+                    print(f"✓ Rule {i + 1}: \"{rule.get('name', 'Unknown')}\" - validation passed")
+                    fixed_rules.append(rule)
+
+            # If any rule failed validation and user didn't fix it, retry
+            if len(fixed_rules) != len(rules):
+                continue
+
+            # Preview and confirm save
+            if not self._preview_imported_rules(fixed_rules):
+                retry = prompt_yes_no("Try again?", default=False)
+                if not retry:
+                    return 130
+                continue
+
+            # Save rules
+            success_count, saved_files = self._save_imported_rules(fixed_rules)
+
+            # Summary
+            print("\n" + "=" * 60)
+            print("Summary")
+            print("=" * 60)
+            print(f"✓ Saved {success_count}/{len(fixed_rules)} rule(s)")
+            for filename in saved_files:
+                print(f"  • {filename}")
+
+            # Ask what to do next
+            print("\n" + "=" * 60)
+            print("What next?")
+            print("=" * 60)
+            print("  1. Import another rule")
+            print("  2. Create rule with wizard")
+            print("  3. Exit")
+            print("=" * 60)
+
+            next_choice = input("\nChoice (1-3) [default: 3]: ").strip()
+            if next_choice == "1":
+                continue
+            elif next_choice == "2":
+                return self._run_normal_wizard()
+            else:
+                return 0
+
+    def _collect_multiline_json_input(self) -> Optional[str]:
+        """Collect multi-line JSON input from user.
+
+        Returns:
+            JSON string if collected, None if cancelled
+        """
+        print("\n" + "=" * 60)
+        print("JSON Import Mode")
+        print("=" * 60)
+        print("\nPaste your rule JSON below:")
+        print("- Single rule: Paste the JSON object")
+        print("- Multiple rules: Paste an array of rule objects")
+        print("- End input: Press Enter twice or Ctrl+D")
+        print("- Cancel: Press Ctrl+C\n")
+
+        lines = []
+        empty_count = 0
+        print("Paste JSON now:")
+
+        try:
+            while True:
+                line = input()
+                if not line.strip():
+                    empty_count += 1
+                    if empty_count >= 2:  # Two empty lines = done
+                        break
+                else:
+                    empty_count = 0
+                    lines.append(line)
+        except EOFError:  # Ctrl+D
+            pass
+        except KeyboardInterrupt:  # Ctrl+C
+            return None
+
+        json_str = "\n".join(lines)
+        if json_str.strip():
+            print(f"\n✓ Received {len(json_str)} characters")
+            return json_str
+        return None
+
+    def _parse_and_normalize_json(self, json_str: str) -> Tuple[Optional[List[dict]], str]:
+        """Parse JSON string and normalize to list of rules.
+
+        Returns:
+            Tuple of (rules_list, error_message)
+        """
+        try:
+            parsed = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            return None, f"Invalid JSON syntax at line {e.lineno}, column {e.colno}: {e.msg}"
+
+        # Normalize to list
+        if isinstance(parsed, dict):
+            return [parsed], ""
+        elif isinstance(parsed, list):
+            # Validate each element is a dict
+            for i, item in enumerate(parsed):
+                if not isinstance(item, dict):
+                    return None, f"Item {i + 1} in array is not a rule object (got {type(item).__name__})"
+            return parsed, ""
+        else:
+            return None, f"Expected rule object or array, got {type(parsed).__name__}"
+
+    def _validate_imported_rule(self, rule: dict, index: int = 0) -> Tuple[bool, List[str], List[str]]:
+        """Validate imported rule structure.
+
+        Returns:
+            Tuple of (is_valid, errors, warnings)
+        """
+        errors = []
+        warnings = []
+
+        # Check required fields
+        for field in ["name", "priority", "conditions"]:
+            if field not in rule:
+                errors.append(f"Missing required field: {field}")
+
+        # Validate conditions structure
+        conditions = rule.get("conditions", {})
+        if conditions:
+            if not isinstance(conditions, dict):
+                errors.append("Conditions must be a dictionary")
+            elif "all" not in conditions and "any" not in conditions:
+                errors.append("Conditions must have 'all' or 'any' at root level")
+
+        # Validate actions
+        if "action" in rule and "actions" in rule:
+            errors.append("Cannot have both 'action' and 'actions' fields")
+        elif "action" not in rule and "actions" not in rule:
+            errors.append("Must have either 'action' or 'actions' field")
+        else:
+            # Validate action-specific requirements
+            actions = []
+            if "action" in rule:
+                actions = [rule.get("action")]
+            elif "actions" in rule:
+                actions = rule.get("actions", [])
+
+            for i, action in enumerate(actions):
+                if not isinstance(action, dict):
+                    errors.append(f"Action {i + 1}: Must be a dictionary")
+                    continue
+
+                action_type = action.get("type", "")
+                if not action_type:
+                    errors.append(f"Action {i + 1}: Missing 'type' field")
+                elif action_type == "move":
+                    if not action.get("target"):
+                        errors.append(f"Action {i + 1}: Move action missing target folder")
+                elif action_type in ("set_keywords", "remove_keywords"):
+                    if not action.get("keywords"):
+                        errors.append(f"Action {i + 1}: {action_type} action missing keywords array")
+
+        # Use RuleValidator for soft warnings (only if no hard errors)
+        if not errors:
+            try:
+                from core.rule_validator import RuleValidator
+                validator = RuleValidator()
+                is_valid, validation_warnings = validator.validate_rule(rule)
+                warnings.extend(validation_warnings)
+            except Exception:
+                # If validator fails, continue anyway
+                pass
+
+        return (len(errors) == 0, errors, warnings)
+
+    def _interactive_fix_errors(self, rule: dict, errors: List[str], index: int = 0) -> Optional[dict]:
+        """Guide user through fixing validation errors.
+
+        Returns:
+            Fixed rule dict or None if cancelled
+        """
+        print(f"\nThis rule cannot be saved without fixes.")
+        fix_response = prompt_yes_no("Fix interactively?", default=True)
+
+        if not fix_response:
+            return None
+
+        # Fix errors one by one
+        for error in errors:
+            if "Missing required field: name" in error:
+                name = input("Enter rule name: ").strip()
+                if not name:
+                    print("❌ Name cannot be empty")
+                    return None
+                rule["name"] = name
+                print(f"✓ Name set to \"{name}\"")
+
+            elif "Missing required field: priority" in error:
+                priority_str = input("Enter priority [default: 100]: ").strip()
+                try:
+                    priority = int(priority_str) if priority_str else 100
+                    rule["priority"] = priority
+                    print(f"✓ Priority set to {priority}")
+                except ValueError:
+                    print("❌ Invalid priority, must be an integer")
+                    return None
+
+            elif "Missing required field: conditions" in error:
+                print("❌ Cannot automatically fix missing conditions.")
+                print("    Conditions define when the rule matches.")
+                return None
+
+            elif "Conditions must have 'all' or 'any'" in error:
+                print("\n⚠️  Conditions structure is invalid.")
+                print("    Current structure: " + json.dumps(rule.get("conditions", {})))
+                print("    Must have 'all' or 'any' at root level")
+                print("\n    Example correct structure:")
+                print('    {"conditions": {"any": [...]}}')
+                return None
+
+            elif "Move action missing target" in error:
+                target = input("Enter target folder (e.g., INBOX/Archive): ").strip()
+                if not target:
+                    print("❌ Target folder cannot be empty")
+                    return None
+                # Find and fix the move action
+                if "action" in rule and rule["action"].get("type") == "move":
+                    rule["action"]["target"] = target
+                elif "actions" in rule:
+                    for action in rule["actions"]:
+                        if action.get("type") == "move" and not action.get("target"):
+                            action["target"] = target
+                            break
+                print(f"✓ Target set to \"{target}\"")
+
+            elif "keywords action missing keywords" in error or "action missing keywords array" in error:
+                keywords_str = input("Enter keywords (comma-separated): ").strip()
+                if not keywords_str:
+                    print("❌ Keywords cannot be empty")
+                    return None
+                keywords = [k.strip() for k in keywords_str.split(",")]
+                # Find and fix the keywords action
+                if "action" in rule and rule["action"].get("type") in ("set_keywords", "remove_keywords"):
+                    rule["action"]["keywords"] = keywords
+                elif "actions" in rule:
+                    for action in rule["actions"]:
+                        if action.get("type") in ("set_keywords", "remove_keywords") and not action.get("keywords"):
+                            action["keywords"] = keywords
+                            break
+                print(f"✓ Keywords set to {keywords}")
+
+        # Re-validate
+        print("\nRe-validating...")
+        is_valid, new_errors, new_warnings = self._validate_imported_rule(rule, index)
+
+        if new_errors:
+            print("❌ Still has errors:")
+            for error in new_errors:
+                print(f"  - {error}")
+            return self._interactive_fix_errors(rule, new_errors, index)  # Recurse
+
+        print("✓ Validation passed!")
+        return rule
+
+    def _preview_imported_rules(self, rules: List[dict]) -> bool:
+        """Show preview of imported rules with dry-run match counts.
+
+        Returns:
+            True if user confirms save, False to cancel
+        """
+        print("\n" + "=" * 60)
+        print(f"Preview: {len(rules)} Rule(s)")
+        print("=" * 60)
+
+        total_matches = 0
+        for i, rule in enumerate(rules, 1):
+            print(f"\n--- Rule {i}/{len(rules)} ---")
+            print(json.dumps(rule, indent=2))
+
+            # Run dry-run preview using existing method
+            matches, folder_matches, stats = self._preview_rule(rule)
+            total_matches += matches
+
+            print(f"\n✓ Preview complete for \"{rule.get('name', 'Unknown')}\"")
+            if folder_matches:
+                print(f"\nMatches by folder:")
+                for folder, count in sorted(folder_matches.items()):
+                    print(f"  {folder}: {format_count(count)} messages")
+            print(f"Total: {format_count(matches)} messages would be affected")
+
+        # Summary
+        print("\n" + "=" * 60)
+        print("Summary")
+        print("=" * 60)
+        print(f"  • {len(rules)} rule(s) ready to save")
+        print(f"  • {format_count(total_matches)} total messages will be affected")
+
+        return prompt_yes_no("\nSave these rule(s)?", default=True)
+
+    def _save_imported_rules(self, rules: List[dict]) -> Tuple[int, List[str]]:
+        """Save imported rules to rules directory.
+
+        Returns:
+            Tuple of (success_count, saved_files)
+        """
+        success_count = 0
+        saved_files = []
+
+        for i, rule in enumerate(rules, 1):
+            success, message = save_rule(rule, self.config.paths.rules_dir)
+
+            if success:
+                # Extract filename from message
+                print(f"✓ Rule {i}: {message}")
+                success_count += 1
+                saved_files.append(message)
+            else:
+                print(f"❌ Rule {i} failed: {message}")
+
+        return success_count, saved_files
+
     def run(self) -> int:
         """Run the complete rule wizard workflow.
 
@@ -1721,6 +2103,19 @@ class RuleWizard:
             Exit code: 0 on success, 1 on error, 130 on user cancellation
         """
         self._display_welcome()
+
+        # Mode selection
+        print("\n" + "=" * 60)
+        print("Choose Mode:")
+        print("=" * 60)
+        print("  1. Create rule with guided wizard (interactive)")
+        print("  2. Import rule from JSON (paste)")
+        print("=" * 60)
+
+        choice = input("\nChoice (1/2) [default: 1]: ").strip()
+
+        if choice == "2":
+            return self._run_json_import_mode()
 
         # Main workflow loop
         while True:

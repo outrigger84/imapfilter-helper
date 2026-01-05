@@ -7,13 +7,16 @@ and actions.
 
 Usage:
     python3 wizard.py                                  # Start the wizard
+    python3 wizard.py --cache-file partial.db          # Use specific cache file
+    python3 wizard.py --cache-file /tmp/test.db        # Use absolute path
     python3 wizard.py --add-keyword Important           # Add a predefined keyword
     python3 wizard.py --remove-keyword Old              # Remove a predefined keyword
     python3 wizard.py --list-keywords                   # List predefined keywords
 
 Prerequisites:
     - Cache must be built first: python3 main.py build-cache
-    - The wizard will validate cache exists before starting
+    - For custom cache: python3 main.py build-cache --limit 100
+      (creates a small cache you can use while building the full one)
 
 Exit codes:
     0   - Rule created successfully or keyword operation succeeded
@@ -33,6 +36,58 @@ from core.config import build_default_config
 from core.keywords import KeywordManager
 from core.logging_utils import JsonLogger
 from core.tools.rule_wizard_core import RuleWizard
+
+
+def validate_cache_file(cache_path: Path) -> Path:
+    """Validate cache file exists and is a valid SQLite database.
+
+    Args:
+        cache_path: Path to cache database file
+
+    Returns:
+        Resolved absolute path
+
+    Raises:
+        SystemExit: If validation fails
+    """
+    import sqlite3
+
+    resolved = cache_path.resolve()
+
+    # Check file exists
+    if not resolved.exists():
+        print(f"Error: Cache file not found: {resolved}")
+        print("Build a cache first: python3 main.py build-cache --limit 100")
+        sys.exit(1)
+
+    # Check it's a file
+    if not resolved.is_file():
+        print(f"Error: Cache path is not a file: {resolved}")
+        sys.exit(1)
+
+    # Validate SQLite database with required schema
+    try:
+        conn = sqlite3.connect(str(resolved))
+        cursor = conn.cursor()
+
+        # Check for required tables
+        cursor.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name IN ('headers', 'folders', 'actions')"
+        )
+        tables = {row[0] for row in cursor.fetchall()}
+
+        if 'headers' not in tables:
+            print(f"Error: Not a valid cache database (missing 'headers' table): {resolved}")
+            conn.close()
+            sys.exit(1)
+
+        conn.close()
+    except sqlite3.Error as e:
+        print(f"Error: Cannot open cache database: {e}")
+        sys.exit(1)
+
+    return resolved
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -76,6 +131,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         metavar="HOURS",
         help="Override cache TTL in hours (default: 6)",
+    )
+    cache_group.add_argument(
+        "--cache-file",
+        type=Path,
+        metavar="PATH",
+        help="Use specified cache database instead of default (data/cache.db). "
+             "Useful for working from a partial cache while building the full cache.",
     )
 
     return parser
@@ -152,6 +214,12 @@ def main() -> int:
     try:
         # Build configuration
         config = build_default_config()
+
+        # Override cache path if specified
+        if args.cache_file:
+            validated_path = validate_cache_file(args.cache_file)
+            config.paths.db_file = validated_path
+            print(f"Using cache file: {validated_path}")
 
         # Create logger for IMAP operations
         logger = JsonLogger(config.paths.log_file)
