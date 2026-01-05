@@ -93,7 +93,7 @@ python -m core.cli <command> [flags]
 
 | Command | Purpose | Key flags |
 | --- | --- | --- |
-| `build-cache` | Fetches mail headers from the IMAP server and stores a local cache in `data/cache.db`. **Fast** – headers only, no message bodies. | `--all-folders` – scan every folder instead of just `INBOX`.<br>`--folder NAME` – cache only the specified folder (repeatable).<br>`--limit N` – cache at most N messages per folder.<br>`--order newest\|oldest\|random` – which messages to cache when limiting. |
+| `build-cache` | Fetches mail headers from the IMAP server and stores a local cache in `data/cache.db`. **Fast** – headers only, no message bodies. | `--all-folders` – scan every folder instead of just `INBOX`.<br>`--folder NAME` – cache only the specified folder **(can be repeated for multiple folders)**.<br>`--folder-recursive NAME` – cache folder and all subfolders recursively **(can be repeated)**.<br>`--limit N` – cache at most N messages per folder.<br>`--order newest\|oldest\|random` – which messages to cache when limiting. |
 | `evaluate` | Loads rules from `rules/` and evaluates them against the cached messages, enqueueing matching actions. | `--dry-run` – report matches without mutating the database.<br>`--all-folders` – consider every cached folder.<br>`--folder NAME` – evaluate only the selected folder(s).<br>`--verbose` – show detailed match information.<br>`--debug-headers` – log message headers for troubleshooting. |
 | `execute` | Executes any queued actions against the IMAP server. **Can backup messages before moving them.** | `--dry-run` – preview without performing IMAP writes.<br>`--backup-moved` – backup messages before moving (recommended).<br>`--backup-all` – backup all cached messages after moves complete.<br>`--strict` – abort if required IMAP operations are missing or fail.<br>`--verify-moves` – confirm moves by searching for Message-ID.<br>`--verbose` – log IMAP server replies and per-message progress.<br>`--limit` – process at most this many pending actions.<br>`--all-folders` / `--folder` – limit execution to particular folders. |
 | `run-all` | Convenience command that runs `build-cache`, `evaluate`, and `execute` sequentially. **Optimized** – much faster than old --backup approach. | `--dry-run` – perform a full simulation without IMAP writes.<br>`--all-folders` – include every folder.<br>`--folder NAME` – restrict all three phases to the specified folder(s).<br>`--cache-limit` / `--cache-order` – cache-limiting flags.<br>`--backup-moved` – backup messages before moving them (recommended).<br>`--backup-all` – create full mbox archive after all moves complete.<br>`--debug-headers` – log message headers while evaluating rules.<br>`--strict` / `--verify-moves` – execute integrity checks.<br>`--verbose` – detailed progress and IMAP replies.<br>`--action-limit` – cap pending actions executed. |
@@ -101,7 +101,13 @@ python -m core.cli <command> [flags]
 | `clear-cache` | Deletes cached message headers, folder metadata, and any queued actions. | *(no flags)* |
 | `compact-cache` | Removes cached headers for messages whose actions have already been executed so future evaluations skip them. | *(no flags)* |
 
-When no folder flags are supplied the `evaluate` and `execute` commands operate on every cached message by default. This makes it easy to build the cache for several folders (either in one run with repeated `--folder` flags or by invoking `build-cache` multiple times) and then apply the rules to the aggregated cache in a later step.
+**Folder selection note:** When using `build-cache`, choose one of these mutually exclusive options:
+- **`--all-folders`** – Cache every folder on the server (fastest for small mailboxes, slower for large ones)
+- **`--folder NAME`** – Cache only specific folders, repeatable for multiple: `--folder INBOX --folder Sent`
+- **`--folder-recursive NAME`** – Cache a folder and all subfolders, repeatable: `--folder-recursive Work`
+- ***(default)*** – If no folder flags supplied, caches only `INBOX`
+
+When no folder flags are supplied to the `evaluate` and `execute` commands, they operate on every cached message by default. This makes it easy to build the cache for several folders (either in one run with repeated `--folder` flags or by invoking `build-cache` multiple times) and then apply the rules to the aggregated cache in a later step.
 
 Use `clear-cache` whenever you need to discard the existing cache database and start again.
 
@@ -514,17 +520,49 @@ This builds the cache for INBOX, evaluates all rules, and executes matched actio
 
 **Multi-folder processing:**
 
-```bash
-# Cache multiple specific folders
-./imapfilter_helper.py build-cache --folder INBOX --folder Archive --folder Sent
+The `--folder` flag can be repeated to cache multiple specific folders, making it easy to target exactly the folders you want:
 
-# Evaluate and execute for all cached folders
+```bash
+# Cache multiple specific folders in one command
+./imapfilter_helper.py build-cache --folder INBOX --folder Sent --folder Archive
+
+# Then evaluate and execute for all cached folders
 ./imapfilter_helper.py evaluate
 ./imapfilter_helper.py execute --backup-moved
 
-# Or in one step
-./imapfilter_helper.py run-all --all-folders --backup-moved
+# Or combine everything in one step
+./imapfilter_helper.py run-all --folder INBOX --folder Sent --folder Archive --backup-moved
 ```
+
+**Combining folder selection with other options:**
+
+```bash
+# Cache multiple folders with a message limit
+./imapfilter_helper.py build-cache --folder INBOX --folder Sent --limit 100
+
+# Cache specific folders in newest-first order (useful for large mailboxes)
+./imapfilter_helper.py build-cache --folder INBOX --folder Work --order newest
+
+# Cache multiple folders with parallel processing for speed
+./imapfilter_helper.py build-cache --folder INBOX --folder Sent --folder Archive --parallel-workers 3
+```
+
+**Combining regular and recursive folders:**
+
+```bash
+# Cache INBOX plus all subfolders under "Work"
+./imapfilter_helper.py build-cache --folder INBOX --folder-recursive Work
+
+# Cache INBOX, all of Work/, and all of Projects/
+./imapfilter_helper.py build-cache --folder INBOX --folder-recursive Work --folder-recursive Projects
+```
+
+**Why use multiple `--folder` flags?**
+
+- **Selective caching** – Only cache folders you need, reducing cache size and build time
+- **Testing** – Cache a small set of folders to test rules before running on all folders
+- **Staged processing** – Cache folders in one step, then evaluate and execute later
+- **Large mailboxes** – Combine with `--limit` and `--order newest` to cache recent messages first
 
 **Caching large mailboxes efficiently:**
 
