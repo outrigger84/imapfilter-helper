@@ -272,6 +272,47 @@ def build_parser() -> argparse.ArgumentParser:
 
     kw_sub.add_parser("edit", help="Edit keywords in default editor")
 
+    p_conflicts = sub.add_parser("check-conflicts", help="Detect and resolve rule conflicts")
+    p_conflicts.add_argument(
+        "--validation-mode",
+        choices=["cache", "static", "prompt"],
+        default="prompt",
+        help=(
+            "Validation approach: "
+            "'cache' uses real message counts (requires cache), "
+            "'static' uses pattern analysis only, "
+            "'prompt' asks user to choose (default)"
+        ),
+    )
+    p_conflicts.add_argument(
+        "--output",
+        choices=["detailed", "summary", "json"],
+        default="detailed",
+        help="Output format (default: detailed)",
+    )
+    p_conflicts.add_argument(
+        "--conflict-types",
+        choices=["priority", "unreachable", "redundant", "all"],
+        default="all",
+        help="Types of conflicts to detect (default: all)",
+    )
+    p_conflicts.add_argument(
+        "--severity",
+        choices=["high", "medium", "low", "all"],
+        default="all",
+        help="Minimum severity to report (default: all)",
+    )
+    p_conflicts.add_argument(
+        "--auto-fix",
+        action="store_true",
+        help="Enable interactive resolution workflow",
+    )
+    p_conflicts.add_argument(
+        "--export",
+        type=Path,
+        help="Export conflict report to JSON file",
+    )
+
     p_view_cache = sub.add_parser("view-cache", help="View email cache in interactive table")
     p_view_cache.add_argument(
         "--limit",
@@ -1020,6 +1061,199 @@ def handle_view_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Json
     return launch_cache_viewer(cfg, limit=args.limit, folder=args.folder)
 
 
+def handle_check_conflicts(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
+    """Handle the ``check-conflicts`` command for conflict detection and resolution."""
+
+    del db  # Unused – kept for consistent handler signature
+
+    import json
+
+    from core.conflict_detector import ConflictDetector, ConflictSeverity, ConflictType
+
+    # Load rules
+    rules = load_rules(cfg.paths.rules_dir, logger)
+
+    if not rules:
+        logger.log(
+            "WARN",
+            "no_rules_found",
+            {},
+            console="⚠️  No rules found to check",
+        )
+        return 1
+
+    # Determine validation mode
+    validation_mode = args.validation_mode
+    if validation_mode == "prompt":
+        cache_exists = cfg.paths.db_file.exists()
+        if cache_exists:
+            use_cache = input(
+                "\n📦 Cache database found. Use real message counts for validation? [Y/n]: "
+            ).lower()
+            use_cache = use_cache != "n" and use_cache != "no"
+            validation_mode = "cache" if use_cache else "static"
+        else:
+            logger.log(
+                "INFO",
+                "cache_not_found",
+                {},
+                console="ℹ️  Cache not found. Using static analysis.",
+            )
+            validation_mode = "static"
+
+    # Initialize detector
+    cache_db = cfg.paths.db_file if validation_mode == "cache" else None
+    detector = ConflictDetector(rules, cache_db, logger)
+
+    # Detect conflicts
+    logger.log(
+        "INFO",
+        "conflict_detection_start",
+        {"rule_count": len(rules), "mode": validation_mode},
+        console=f"🔍 Analyzing {len(rules)} rules (mode: {validation_mode})...",
+    )
+
+    all_conflicts = detector.detect_all_conflicts()
+
+    # Filter by conflict type
+    if args.conflict_types != "all":
+        type_map = {
+            "priority": ConflictType.PRIORITY_CONFLICT,
+            "unreachable": ConflictType.UNREACHABLE,
+            "redundant": ConflictType.REDUNDANT,
+        }
+        target_type = type_map.get(args.conflict_types)
+        conflicts = [c for c in all_conflicts if c.type == target_type]
+    else:
+        conflicts = all_conflicts
+
+    # Filter by severity
+    if args.severity != "all":
+        severity_map = {
+            "high": ConflictSeverity.HIGH,
+            "medium": ConflictSeverity.MEDIUM,
+            "low": ConflictSeverity.LOW,
+        }
+        min_severity = severity_map.get(args.severity, ConflictSeverity.LOW)
+        severity_order = {ConflictSeverity.HIGH: 0, ConflictSeverity.MEDIUM: 1, ConflictSeverity.LOW: 2}
+        conflicts = [c for c in conflicts if severity_order[c.severity] <= severity_order[min_severity]]
+
+    # Display results
+    if not conflicts:
+        logger.log(
+            "INFO",
+            "no_conflicts_found",
+            {},
+            console="✅ No conflicts detected! Rules look good.",
+        )
+        return 0
+
+    # Output based on format
+    if args.output == "json":
+        json_data = [c.to_dict() for c in conflicts]
+        output = json.dumps(json_data, indent=2)
+
+        if args.export:
+            args.export.write_text(output)
+            logger.log(
+                "INFO",
+                "conflicts_exported",
+                {"file": str(args.export), "count": len(conflicts)},
+                console=f"✓ Exported {len(conflicts)} conflicts to {args.export}",
+            )
+        else:
+            print(output)
+
+    elif args.output == "summary":
+        print(f"\n📊 Conflict Summary ({len(conflicts)} found):")
+        by_type = {}
+        for c in conflicts:
+            type_name = c.type.value
+            if type_name not in by_type:
+                by_type[type_name] = []
+            by_type[type_name].append(c)
+
+        for type_name, type_conflicts in by_type.items():
+            print(f"\n  {type_name.replace('_', ' ').title()} ({len(type_conflicts)}):")
+            for c in type_conflicts:
+                severity_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}[c.severity.value]
+                print(f"    {severity_icon} {c.rule1_name} ↔ {c.rule2_name}")
+
+    else:  # detailed
+        _output_detailed_conflicts(conflicts, validation_mode == "cache")
+
+    # Interactive resolution
+    if args.auto_fix and conflicts:
+        from core.conflict_detector import ConflictResolver
+
+        resolver = ConflictResolver(conflicts, cfg.paths.rules_dir, logger)
+        resolver.interactive_resolve()
+
+        # Log applied fixes
+        if resolver.applied_fixes:
+            logger.log(
+                "INFO",
+                "conflicts_resolved",
+                {"count": len(resolver.applied_fixes)},
+                console=f"✓ Applied {len(resolver.applied_fixes)} fix{'es' if len(resolver.applied_fixes) != 1 else ''}",
+            )
+
+    logger.log(
+        "INFO",
+        "conflict_detection_complete",
+        {"count": len(conflicts), "mode": validation_mode},
+        console=f"⚠️  Found {len(conflicts)} conflict{'s' if len(conflicts) != 1 else ''}",
+    )
+
+    return 0 if not conflicts else 1
+
+
+def _output_detailed_conflicts(conflicts, cache_available):
+    """Output detailed conflict report.
+
+    Args:
+        conflicts: List of ConflictResult objects
+        cache_available: Whether cache data was used
+    """
+    print("\n" + "=" * 80)
+    print("RULE CONFLICT ANALYSIS REPORT")
+    print("=" * 80)
+
+    # Count by severity
+    high = sum(1 for c in conflicts if c.severity.value == "high")
+    medium = sum(1 for c in conflicts if c.severity.value == "medium")
+    low = sum(1 for c in conflicts if c.severity.value == "low")
+
+    print(f"\n📊 Summary:")
+    print(f"   Total Conflicts: {len(conflicts)}")
+    print(f"   Validation: {'cache (real message counts)' if cache_available else 'static analysis'}")
+    if high > 0:
+        print(f"   🔴 High Severity: {high}")
+    if medium > 0:
+        print(f"   🟡 Medium Severity: {medium}")
+    if low > 0:
+        print(f"   🟢 Low Severity: {low}")
+
+    # Display each conflict
+    for i, conflict in enumerate(conflicts, 1):
+        severity_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}[conflict.severity.value]
+        type_display = conflict.type.value.replace("_", " ").title()
+
+        print(f"\n{severity_icon} CONFLICT #{i} — {type_display} ({conflict.severity.value.upper()})")
+        print(f"\n   Rules:")
+        print(f"      [{conflict.rule1_priority}] {conflict.rule1_name}")
+        print(f"      [{conflict.rule2_priority}] {conflict.rule2_name}")
+        print(f"\n   Overlap: {conflict.overlap_percent:.0%} ({conflict.overlap_relationship.value})")
+
+        if conflict.affected_count is not None:
+            print(f"   Affected Messages: {conflict.affected_count}")
+
+        print(f"\n   Issue: {conflict.explanation}")
+        print(f"\n   💡 Suggestion: {conflict.suggestion}")
+
+    print("\n" + "=" * 80)
+
+
 COMMAND_HANDLERS: dict[str, Handler] = {
     "build-cache": handle_build_cache,
     "evaluate": handle_evaluate,
@@ -1030,6 +1264,7 @@ COMMAND_HANDLERS: dict[str, Handler] = {
     "clear-cache": handle_clear_cache,
     "compact-cache": handle_compact_cache,
     "keywords": handle_keywords,
+    "check-conflicts": handle_check_conflicts,
     "view-cache": handle_view_cache,
 }
 
@@ -1068,5 +1303,6 @@ __all__ = [
     "handle_clear_cache",
     "handle_compact_cache",
     "handle_keywords",
+    "handle_check_conflicts",
     "handle_view_cache",
 ]

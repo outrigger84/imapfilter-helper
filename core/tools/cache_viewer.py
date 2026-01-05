@@ -296,42 +296,57 @@ def _convert_wizard_condition_to_rule_engine_format(condition: dict) -> dict:
 
 
 def _matches_conditions(
-    header_dict: dict[str, str], conditions: Optional[List[dict]]
+    header_dict: dict[str, str], conditions: Optional[List[dict] | dict] = None
 ) -> bool:
     """Check if header matches rule conditions.
 
     Uses the rule engine to match emails against conditions.
     Handles both wizard-format and rule engine-format conditions.
+    Supports both "all" (AND) and "any" (OR) logic.
 
     Args:
         header_dict: Parsed email headers
-        conditions: Rule conditions to match (wizard format)
+        conditions: Rule conditions to match. Can be:
+                   - None or empty list: matches everything
+                   - List of conditions: uses AND logic (legacy format)
+                   - Dict with "all" or "any" key: uses specified logic
 
     Returns:
-        True if header matches all conditions, False otherwise
+        True if header matches conditions according to logic, False otherwise
     """
     if not conditions:
         return True
 
     try:
-        from core.rule_engine import find_matching_rule
+        from core.rule_engine import rule_match
 
-        # Convert wizard conditions to rule engine format
-        converted_conditions = [
-            _convert_wizard_condition_to_rule_engine_format(cond)
-            for cond in conditions
-        ]
+        # Handle conditions in dict format with "all"/"any" keys
+        if isinstance(conditions, dict):
+            if "all" in conditions:
+                # AND logic: all conditions must match
+                conds = conditions["all"]
+                return all(rule_match(header_dict, _convert_wizard_condition_to_rule_engine_format(cond)) for cond in conds)
+            elif "any" in conditions:
+                # OR logic: any condition can match
+                conds = conditions["any"]
+                return any(rule_match(header_dict, _convert_wizard_condition_to_rule_engine_format(cond)) for cond in conds)
+            else:
+                # Empty dict or unrecognized format
+                return True
 
-        # Build a temporary rule with the converted conditions
-        temp_rule = {
-            "name": "filter_rule",
-            "conditions": {"all": converted_conditions},  # Match ALL conditions (AND logic)
-            "actions": [],
-        }
+        # Handle conditions as a simple list (legacy format)
+        if isinstance(conditions, list):
+            # Convert wizard conditions to rule engine format
+            converted_conditions = [
+                _convert_wizard_condition_to_rule_engine_format(cond)
+                for cond in conditions
+            ]
 
-        # Use rule engine to check if header matches
-        matches = find_matching_rule(header_dict, [temp_rule])
-        return bool(matches)
+            # Use AND logic for list format (matching original behavior)
+            return all(rule_match(header_dict, cond) for cond in converted_conditions)
+
+        # Unrecognized format
+        return True
 
     except Exception as e:
         # If rule engine fails, skip filtering

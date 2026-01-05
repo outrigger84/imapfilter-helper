@@ -3773,7 +3773,7 @@ class RuleWizard:
                     continue
 
             print(f"  Checked {checked_count:,} messages total")
-            result = counter.most_common(limit=999999)
+            result = counter.most_common(999999)
             print(f"  Found {len(result)} unique values matching criteria")
             return result
 
@@ -4646,14 +4646,8 @@ class RuleWizard:
 
             # Extract conditions from current rule builder
             # Note: rule_builder.conditions is a dict like {"all": [...]} or {"any": [...]}
-            # We need to extract the list of conditions from it
-            conditions = None
-            if self.rule_builder.conditions:
-                # Get the list of conditions from either "all" or "any" key
-                if "all" in self.rule_builder.conditions:
-                    conditions = self.rule_builder.conditions["all"]
-                elif "any" in self.rule_builder.conditions:
-                    conditions = self.rule_builder.conditions["any"]
+            # Pass the full conditions dict to preserve the all/any logic
+            conditions = self.rule_builder.conditions if self.rule_builder.conditions else None
 
             # Extract emails from cache
             emails = extract_emails_from_cache(
