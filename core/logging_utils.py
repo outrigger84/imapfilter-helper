@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.notifications import NotificationDispatcher
 
 
 def now_iso() -> str:
@@ -72,6 +75,7 @@ class JsonLogger:
     """Simple JSONL logger used by the helper."""
 
     log_file: Path
+    notifier: Optional[Any] = None  # NotificationDispatcher, using Any to avoid circular imports
 
     def __post_init__(self) -> None:
         self.log_file = Path(self.log_file)
@@ -85,3 +89,7 @@ class JsonLogger:
         console: Optional[str] = None,
     ) -> None:
         log(self.log_file, level, message, context, console=console)
+
+        # Dispatch notification if configured
+        if self.notifier:
+            self.notifier.dispatch(level, message, context)

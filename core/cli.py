@@ -1178,6 +1178,8 @@ def handle_check_conflicts(args: argparse.Namespace, cfg: AppConfig, db, logger:
             for c in type_conflicts:
                 severity_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}[c.severity.value]
                 print(f"    {severity_icon} {c.rule1_name} ↔ {c.rule2_name}")
+                if c.reason:
+                    print(f"       → {c.reason}")
 
     else:  # detailed
         _output_detailed_conflicts(conflicts, validation_mode == "cache")
@@ -1248,6 +1250,9 @@ def _output_detailed_conflicts(conflicts, cache_available):
         if conflict.affected_count is not None:
             print(f"   Affected Messages: {conflict.affected_count}")
 
+        if conflict.reason:
+            print(f"\n   Why: {conflict.reason}")
+
         print(f"\n   Issue: {conflict.explanation}")
         print(f"\n   💡 Suggestion: {conflict.suggestion}")
 
@@ -1271,13 +1276,34 @@ COMMAND_HANDLERS: dict[str, Handler] = {
 
 def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> int:
     """Entry point for the CLI."""
+    import json
+    from core.notifications import GotifyNotifier, NotificationDispatcher
+
     parser = build_parser()
     args = parser.parse_args(argv)
 
     cfg = build_default_config(base_dir)
     _ensure_layout(cfg)
 
-    logger = JsonLogger(cfg.paths.log_file)
+    # Initialize notification dispatcher with GOTIFY if configured
+    notifier = None
+    try:
+        secrets_path = cfg.paths.secrets_file
+        if secrets_path.exists():
+            with open(secrets_path, encoding="utf-8") as f:
+                secrets = json.load(f)
+                gotify_cfg = secrets.get("notifications", {}).get("gotify", {})
+                if gotify_cfg.get("enabled"):
+                    gotify = GotifyNotifier(
+                        base_url=gotify_cfg.get("base_url", ""),
+                        token=gotify_cfg.get("token", ""),
+                    )
+                    notifier = NotificationDispatcher(gotify_notifier=gotify)
+    except Exception as e:
+        # Silently ignore notification setup errors - don't let them break mail processing
+        pass
+
+    logger = JsonLogger(cfg.paths.log_file, notifier=notifier)
     db = init_db(cfg.paths.db_file, logger=logger)
 
     try:
