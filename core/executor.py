@@ -3075,7 +3075,7 @@ def execute_actions_parallel(
             SELECT
                 id, uid, folder, target, rule_name, priority, action_type, action_data,
                 ROW_NUMBER() OVER (
-                    PARTITION BY uid
+                    PARTITION BY uid, folder, rule_name, action_type, target, action_data
                     ORDER BY priority DESC, created_at ASC, id ASC
                 ) AS rn
             FROM actions
