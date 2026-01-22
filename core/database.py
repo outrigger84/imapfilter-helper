@@ -39,6 +39,7 @@ def init_db(path: Path, *, logger: Optional[JsonLogger] = None) -> sqlite3.Conne
     _ensure_column(db, "actions", "executed_at", "TEXT", default=None, logger=logger)
     _ensure_column(db, "actions", "action_type", "TEXT", default="move", logger=logger)
     _ensure_column(db, "actions", "action_data", "TEXT", default=None, logger=logger)
+    _ensure_column(db, "actions", "error_message", "TEXT", default=None, logger=logger)
     db.commit()
     return db
 
