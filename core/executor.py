@@ -427,7 +427,7 @@ def _backup_message(
 
 def _perform_move_operation(
     client: imaplib.IMAP4,
-    temp_db: sqlite3.Connection,
+    main_db: sqlite3.Connection,
     action: dict,
     *,
     verify_moves: bool = False,
@@ -443,7 +443,7 @@ def _perform_move_operation(
 
     Args:
         client: IMAP client connection
-        temp_db: Per-worker temporary database connection
+        main_db: Main database connection with 30-second busy timeout
         action: Action dict with {id, uid, folder, target, rule_name, ...}
         verify_moves: Whether to verify moves by Message-ID search
         backup_moved: Whether to backup before moving
@@ -464,11 +464,11 @@ def _perform_move_operation(
 
     # Guard: Skip if email is already in target folder
     if target and folder == target:
-        temp_db.execute(
+        main_db.execute(
             "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
             ('skipped', now_iso(), 'Already in target folder', action_id)
         )
-        temp_db.commit()
+        main_db.commit()
         if logger and verbose:
             logger.log(
                 "INFO",
@@ -491,11 +491,11 @@ def _perform_move_operation(
                 )
 
         # Simulate move operation - just mark as done
-        temp_db.execute(
+        main_db.execute(
             "UPDATE actions SET status = ?, executed_at = ? WHERE id = ?",
             ('done', now_iso(), action_id)
         )
-        temp_db.commit()
+        main_db.commit()
         if logger and verbose:
             logger.log(
                 "INFO",
@@ -533,11 +533,11 @@ def _perform_move_operation(
             )
             if not backup_success:
                 error_msg = f"Backup failed: {backup_error}"
-                temp_db.execute(
+                main_db.execute(
                     "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
                     ('failed', now_iso(), error_msg, action_id)
                 )
-                temp_db.commit()
+                main_db.commit()
                 if logger:
                     logger.log(
                         "ERROR",
@@ -553,15 +553,15 @@ def _perform_move_operation(
                 move_typ, move_resp = client.uid("MOVE", uid, f'"{target}"')
                 if move_typ == "OK":
                     # Success - mark as done and track deleted message
-                    temp_db.execute(
+                    main_db.execute(
                         "UPDATE actions SET status = ?, executed_at = ? WHERE id = ?",
                         ('done', now_iso(), action_id)
                     )
-                    temp_db.execute(
-                        "INSERT OR IGNORE INTO deleted_headers (folder, uid) VALUES (?, ?)",
+                    main_db.execute(
+                        "DELETE FROM headers WHERE folder = ? AND uid = ?",
                         (folder, uid)
                     )
-                    temp_db.commit()
+                    main_db.commit()
 
                     # Verify move if requested
                     if verify_moves and target and message_id:
@@ -575,11 +575,11 @@ def _perform_move_operation(
                         )
                         if not verified:
                             # Update action to failed status
-                            temp_db.execute(
+                            main_db.execute(
                                 "UPDATE actions SET status = ?, error_message = ? WHERE id = ?",
                                 ('failed', verify_error, action_id)
                             )
-                            temp_db.commit()
+                            main_db.commit()
                             if logger:
                                 logger.log(
                                     "ERROR",
@@ -613,34 +613,48 @@ def _perform_move_operation(
 
         if copy_typ != "OK":
             error_msg = f"COPY failed: {_format_imap_details(copy_resp)}"
-            temp_db.execute(
+            main_db.execute(
                 "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
                 ('failed', now_iso(), error_msg, action_id)
             )
-            temp_db.commit()
+            main_db.commit()
+            # Log failure for GOTIFY notification
+            if logger:
+                logger.log(
+                    "WARN",
+                    "imap_move_failed",
+                    {"folder": folder, "target": target, "uid": uid, "error": error_msg}
+                )
             return ('failed', error_msg)
 
         # Mark as deleted
         store_typ, store_resp = client.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
         if store_typ != "OK":
             error_msg = f"STORE failed: {_format_imap_details(store_resp)}"
-            temp_db.execute(
+            main_db.execute(
                 "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
                 ('failed', now_iso(), error_msg, action_id)
             )
-            temp_db.commit()
+            main_db.commit()
+            # Log failure for GOTIFY notification
+            if logger:
+                logger.log(
+                    "WARN",
+                    "imap_move_failed",
+                    {"folder": folder, "target": target, "uid": uid, "error": error_msg}
+                )
             return ('failed', error_msg)
 
         # Success - mark as done and track deleted message
-        temp_db.execute(
+        main_db.execute(
             "UPDATE actions SET status = ?, executed_at = ? WHERE id = ?",
             ('done', now_iso(), action_id)
         )
-        temp_db.execute(
-            "INSERT OR IGNORE INTO deleted_headers (folder, uid) VALUES (?, ?)",
+        main_db.execute(
+            "DELETE FROM headers WHERE folder = ? AND uid = ?",
             (folder, uid)
         )
-        temp_db.commit()
+        main_db.commit()
 
         if logger and verbose:
             logger.log(
@@ -662,17 +676,23 @@ def _perform_move_operation(
             )
             if not verified:
                 # Update action to failed status
-                temp_db.execute(
+                main_db.execute(
                     "UPDATE actions SET status = ?, error_message = ? WHERE id = ?",
                     ('failed', verify_error, action_id)
                 )
-                temp_db.commit()
+                main_db.commit()
                 if logger:
                     logger.log(
                         "ERROR",
                         "parallel_verify_failed",
                         {"folder": folder, "uid": uid, "target": target, "error": verify_error},
                         console=f"      ⚠️  Verification failed: {folder}/{uid} → {target}",
+                    )
+                    # Log failure for GOTIFY notification
+                    logger.log(
+                        "WARN",
+                        "imap_move_failed",
+                        {"folder": folder, "target": target, "uid": uid, "error": verify_error}
                     )
                 return ('failed', verify_error or 'Verification failed')
 
@@ -683,15 +703,15 @@ def _perform_move_operation(
         # Check for missing message errors
         if any(keyword in message for keyword in ["no such message", "uid command error", "failed"]):
             # Message likely already moved or doesn't exist - skip it
-            temp_db.execute(
+            main_db.execute(
                 "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
                 ('skipped', now_iso(), str(exc), action_id)
             )
-            temp_db.execute(
-                "INSERT OR IGNORE INTO deleted_headers (folder, uid) VALUES (?, ?)",
+            main_db.execute(
+                "DELETE FROM headers WHERE folder = ? AND uid = ?",
                 (folder, uid)
             )
-            temp_db.commit()
+            main_db.commit()
             if logger:
                 logger.log(
                     "WARN",
@@ -701,27 +721,27 @@ def _perform_move_operation(
             return ('skipped', str(exc))
         else:
             # Other IMAP error - mark as failed
-            temp_db.execute(
+            main_db.execute(
                 "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
                 ('failed', now_iso(), str(exc), action_id)
             )
-            temp_db.commit()
+            main_db.commit()
             return ('failed', str(exc))
 
     except Exception as exc:
         # Unexpected error - mark as failed
         error_msg = str(exc)
-        temp_db.execute(
+        main_db.execute(
             "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
             ('failed', now_iso(), error_msg, action_id)
         )
-        temp_db.commit()
+        main_db.commit()
         return ('failed', error_msg)
 
 
 def _perform_batch_keyword_operations(
     client: imaplib.IMAP4,
-    temp_db: sqlite3.Connection,
+    main_db: sqlite3.Connection,
     folder: str,
     actions: list[dict],
     action_type: str,
@@ -736,7 +756,7 @@ def _perform_batch_keyword_operations(
 
     Args:
         client: IMAP client connection
-        temp_db: Per-worker temporary database connection
+        main_db: Main database connection with 30-second busy timeout
         folder: Source folder containing messages
         actions: List of action dicts with {id, uid, action_type, action_data, ...}
         action_type: Either 'set_keywords' or 'remove_keywords'
@@ -755,22 +775,22 @@ def _perform_batch_keyword_operations(
         if sel_typ != "OK":
             error_msg = f"Cannot open folder: {_imap_response_text(sel_resp)}"
             for action in actions:
-                temp_db.execute(
-                    "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
-                    (action["id"], "failed", now_iso(), error_msg),
+                main_db.execute(
+                    "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                    ("failed", now_iso(), error_msg, action["id"]),
                 )
                 actions_failed += 1
-            temp_db.commit()
+            main_db.commit()
             return actions_done, actions_failed
     except Exception as exc:
         error_msg = str(exc)
         for action in actions:
-            temp_db.execute(
-                "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
-                (action["id"], "failed", now_iso(), error_msg),
+            main_db.execute(
+                "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                ("failed", now_iso(), error_msg, action["id"]),
             )
             actions_failed += 1
-        temp_db.commit()
+        main_db.commit()
         return actions_done, actions_failed
 
     # Parse and group actions by keyword set
@@ -799,9 +819,9 @@ def _perform_batch_keyword_operations(
 
     # Handle invalid actions
     for action_id, reason in invalid_actions:
-        temp_db.execute(
-            "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
-            (action_id, "skipped", now_iso(), reason),
+        main_db.execute(
+            "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+            ("skipped", now_iso(), reason, action_id),
         )
         actions_failed += 1
 
@@ -830,29 +850,29 @@ def _perform_batch_keyword_operations(
                 # Record result for each UID
                 for uid, action_id in uid_action_pairs:
                     if typ == "OK":
-                        temp_db.execute(
-                            "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
-                            (action_id, "done", now_iso(), None),
+                        main_db.execute(
+                            "UPDATE actions SET status = ?, executed_at = ? WHERE id = ?",
+                            ("done", now_iso(), action_id),
                         )
                         actions_done += 1
                     else:
                         error_msg = f"STORE {action_type} failed: {_format_imap_details(resp)}"
-                        temp_db.execute(
-                            "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
-                            (action_id, "failed", now_iso(), error_msg),
+                        main_db.execute(
+                            "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                            ("failed", now_iso(), error_msg, action_id),
                         )
                         actions_failed += 1
 
             except Exception as exc:
                 error_msg = str(exc)
                 for uid, action_id in uid_action_pairs:
-                    temp_db.execute(
-                        "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
-                        (action_id, "failed", now_iso(), error_msg),
+                    main_db.execute(
+                        "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                        ("failed", now_iso(), error_msg, action_id),
                     )
                     actions_failed += 1
 
-    temp_db.commit()
+    main_db.commit()
     return actions_done, actions_failed
 
 
@@ -1023,7 +1043,7 @@ def _perform_keyword_operation(
 
 def _verify_move_operation(
     client: imaplib.IMAP4,
-    temp_db: sqlite3.Connection,
+    main_db: sqlite3.Connection,
     action: dict,
     message_id: str | None,
     *,
@@ -1035,7 +1055,7 @@ def _verify_move_operation(
 
     Args:
         client: IMAP client connection
-        temp_db: Per-worker temporary database connection
+        main_db: Main database connection with 30-second busy timeout
         action: Action dict with {id, uid, folder, target, ...}
         message_id: Message-ID header value for verification
         logger: Optional logger for detailed logging
@@ -1067,11 +1087,11 @@ def _verify_move_operation(
             search_typ, search_resp = client.uid("SEARCH", None, criteria)
             if search_typ == "OK" and search_resp and search_resp[0]:
                 # Message still in source - verification failed
-                temp_db.execute(
+                main_db.execute(
                     "UPDATE actions SET status = ?, error_message = ? WHERE id = ?",
                     ('failed', 'Verification failed: message still in source', action_id)
                 )
-                temp_db.commit()
+                main_db.commit()
                 if logger and verbose:
                     logger.log(
                         "WARN",
@@ -1087,11 +1107,11 @@ def _verify_move_operation(
             search_typ, search_resp = client.uid("SEARCH", None, criteria)
             if search_typ != "OK" or not search_resp or not search_resp[0]:
                 # Message not in target - verification failed
-                temp_db.execute(
+                main_db.execute(
                     "UPDATE actions SET status = ?, error_message = ? WHERE id = ?",
                     ('failed', 'Verification failed: message not in target', action_id)
                 )
-                temp_db.commit()
+                main_db.commit()
                 if logger and verbose:
                     logger.log(
                         "WARN",
@@ -2353,6 +2373,12 @@ def execute_actions(
                                     },
                                     console=f"💥 STRICT: missing UID {uid} in {folder} — aborting",
                                 )
+                                # Log failure for GOTIFY notification
+                                logger.log(
+                                    "WARN",
+                                    "imap_move_failed",
+                                    {"folder": folder, "target": target, "uid": uid, "error": str(exc)}
+                                )
                                 raise
                             db.execute(
                                 "UPDATE actions SET status='skipped', executed_at=? WHERE id=?",
@@ -2398,6 +2424,12 @@ def execute_actions(
                             "execute_failed",
                             {"uid": uid, "folder": folder, "target": target, "error": str(exc)},
                             console=f"❌ {folder}/{uid}: {exc}",
+                        )
+                        # Log failure for GOTIFY notification
+                        logger.log(
+                            "WARN",
+                            "imap_move_failed",
+                            {"folder": folder, "target": target, "uid": uid, "error": str(exc)}
                         )
                     except Exception:
                         if deleted_flagged:
@@ -2668,150 +2700,9 @@ def _precreate_target_folders(
     )
 
 
-def _merge_worker_databases(
-    db_path: Path,
-    temp_dir: Path,
-    show_progress: bool = True,
-    logger: JsonLogger | None = None,
-) -> tuple[int, int]:
-    """
-    Merge per-worker temp databases into the main database.
-
-    After all workers complete, this function:
-    1. Discovers all temp databases (thread_*.db)
-    2. For each temp DB:
-       - ATTACH with retry logic
-       - UPDATE main actions table with status/executed_at
-       - DELETE from headers cache for moved messages
-       - DETACH
-    3. Single COMMIT after all merges
-    4. Clean up temp files
-
-    Args:
-        db_path: Path to main SQLite database
-        temp_dir: Directory containing temp databases
-        show_progress: Show progress bar
-        logger: JsonLogger for logging
-
-    Returns:
-        Tuple of (total_done, total_failed)
-    """
-    if logger is None:
-        logger = JsonLogger(Path("imapfilter.log"))
-
-    # Discover all temp databases
-    thread_temp_dbs = sorted(temp_dir.glob("thread_*.db"))
-
-    if not thread_temp_dbs:
-        logger.log("INFO", "merge_no_databases", console="⚠️ No worker databases to merge")
-        return 0, 0
-
-    logger.log(
-        "INFO",
-        "merge_start",
-        {"count": len(thread_temp_dbs)},
-        console=f"🔄 Merging {len(thread_temp_dbs)} worker databases...",
-    )
-
-    merge_bar = tqdm(
-        total=len(thread_temp_dbs),
-        desc="🔄 Merging databases",
-        position=0,
-        unit="db",
-        disable=not show_progress,
-    )
-
-    # Open main database for merge
-    main_db = sqlite3.connect(str(db_path), timeout=30.0)
-    main_db.execute("PRAGMA journal_mode=WAL")
-
-    total_done = 0
-    total_failed = 0
-
-    for temp_idx, temp_db_path in enumerate(thread_temp_dbs):
-        try:
-            # Attach temp database with retry for lock issues
-            max_attach_retries = 3
-            for attach_attempt in range(max_attach_retries):
-                try:
-                    main_db.execute(f"ATTACH DATABASE '{temp_db_path}' AS temp_{temp_idx}")
-                    break
-                except sqlite3.OperationalError as lock_error:
-                    if "database is locked" in str(lock_error) and attach_attempt < max_attach_retries - 1:
-                        time.sleep(0.5)
-                        continue
-                    raise
-
-            # Count done/failed actions
-            cursor = main_db.execute(f"SELECT status, COUNT(*) FROM temp_{temp_idx}.actions GROUP BY status")
-            for status, count in cursor.fetchall():
-                if status == "done":
-                    total_done += count
-                elif status == "failed":
-                    total_failed += count
-
-            # Update actions table: status → done/failed
-            main_db.execute(f"""
-                UPDATE actions
-                SET status = (
-                    SELECT status FROM temp_{temp_idx}.actions WHERE temp_{temp_idx}.actions.id = actions.id
-                ),
-                executed_at = (
-                    SELECT executed_at FROM temp_{temp_idx}.actions WHERE temp_{temp_idx}.actions.id = actions.id
-                )
-                WHERE id IN (SELECT id FROM temp_{temp_idx}.actions)
-            """)
-
-            # DELETE from headers cache (for moved messages)
-            main_db.execute(f"""
-                DELETE FROM headers
-                WHERE (folder, uid) IN (
-                    SELECT folder, uid FROM temp_{temp_idx}.deleted_headers
-                )
-            """)
-
-            # DETACH DATABASE
-            main_db.execute(f"DETACH DATABASE temp_{temp_idx}")
-
-            merge_bar.update(1)
-
-        except Exception as merge_error:
-            logger.log(
-                "ERROR",
-                "merge_failed",
-                {"thread_db": str(temp_db_path), "error": str(merge_error)},
-                console=f"❌ Merge failed for {temp_db_path.name}: {merge_error}",
-            )
-            merge_bar.update(1)
-            # Continue with other databases
-
-    # Single COMMIT after all merges
-    main_db.commit()
-    main_db.close()
-
-    merge_bar.close()
-
-    # Clean up temp files
-    for temp_db_path in thread_temp_dbs:
-        try:
-            temp_db_path.unlink()
-        except Exception:
-            pass
-
-    logger.log(
-        "INFO",
-        "merge_complete",
-        {"done": total_done, "failed": total_failed},
-        console=f"✅ Merge complete: {total_done} done, {total_failed} failed",
-    )
-
-    return total_done, total_failed
-
-
 def _execute_folder_worker(
     pool: IMAPConnectionPool,
     db_path: Path,
-    temp_dir: Path,
     folder: str,
     actions: list[dict],
     worker_id: int,
@@ -2827,16 +2718,15 @@ def _execute_folder_worker(
     Process all actions for a single source folder (runs in worker thread).
 
     Each worker:
-    1. Creates its own temp SQLite database
+    1. Opens the main SQLite database with 30-second busy timeout
     2. Acquires an IMAP connection from the pool
     3. Processes all actions for this folder
-    4. Updates temp database with results
+    4. Updates main database directly with results
     5. Returns success/failure counts
 
     Args:
         pool: IMAP connection pool
         db_path: Path to main SQLite database
-        temp_dir: Directory for temp databases
         folder: Source folder to process
         actions: List of action dicts for this folder
         worker_id: Worker ID for logging
@@ -2854,34 +2744,15 @@ def _execute_folder_worker(
     if logger is None:
         logger = JsonLogger(Path("imapfilter.log"))
 
-    # Generate thread-based temp DB path
-    thread_id = threading.current_thread().ident
-    temp_db_path = temp_dir / f"thread_{thread_id}.db"
-
-    # Create temp SQLite DB with schema
-    temp_db = None
+    # Open main database with 30-second busy timeout
+    main_db = None
     client = None
     actions_done = 0
     actions_failed = 0
 
     try:
-        temp_db = sqlite3.connect(str(temp_db_path), timeout=5.0)
-        temp_db.execute("""
-            CREATE TABLE IF NOT EXISTS actions (
-                id INTEGER PRIMARY KEY,
-                status TEXT,
-                executed_at TEXT,
-                error_message TEXT
-            )
-        """)
-        temp_db.execute("""
-            CREATE TABLE IF NOT EXISTS deleted_headers (
-                folder TEXT,
-                uid TEXT,
-                PRIMARY KEY (folder, uid)
-            )
-        """)
-        temp_db.commit()
+        main_db = sqlite3.connect(str(db_path), timeout=30.0)
+        main_db.execute("PRAGMA journal_mode=WAL")
 
         # Acquire IMAP connection from pool
         if not dry_run:
@@ -2900,12 +2771,12 @@ def _execute_folder_worker(
             # Handle dry-run mode
             if dry_run:
                 for action in group_actions:
-                    temp_db.execute(
-                        "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
-                        (action["id"], "done", now_iso(), None),
+                    main_db.execute(
+                        "UPDATE actions SET status = ?, executed_at = ? WHERE id = ?",
+                        ("done", now_iso(), action["id"]),
                     )
                     actions_done += 1
-                temp_db.commit()
+                main_db.commit()
                 continue
 
             # Real execution
@@ -2915,12 +2786,12 @@ def _execute_folder_worker(
                 if sel_typ != "OK":
                     error_msg = f"Cannot open folder: {_imap_response_text(sel_resp)}"
                     for action in group_actions:
-                        temp_db.execute(
-                            "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
-                            (action["id"], "failed", now_iso(), error_msg),
+                        main_db.execute(
+                            "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                            ("failed", now_iso(), error_msg, action["id"]),
                         )
                         actions_failed += 1
-                    temp_db.commit()
+                    main_db.commit()
                     if strict:
                         raise imaplib.IMAP4.error(error_msg)
                     continue
@@ -2937,7 +2808,7 @@ def _execute_folder_worker(
                 if keyword_actions_set:
                     batch_done, batch_failed = _perform_batch_keyword_operations(
                         client=client,
-                        temp_db=temp_db,
+                        main_db=main_db,
                         folder=grp_folder,
                         actions=keyword_actions_set,
                         action_type="set_keywords",
@@ -2950,7 +2821,7 @@ def _execute_folder_worker(
                 if keyword_actions_remove:
                     batch_done, batch_failed = _perform_batch_keyword_operations(
                         client=client,
-                        temp_db=temp_db,
+                        main_db=main_db,
                         folder=grp_folder,
                         actions=keyword_actions_remove,
                         action_type="remove_keywords",
@@ -2971,7 +2842,7 @@ def _execute_folder_worker(
                     try:
                         status, error_msg = _perform_move_operation(
                             client=client,
-                            temp_db=temp_db,
+                            main_db=main_db,
                             action=action,
                             verify_moves=False,  # Verification done after EXPUNGE
                             backup_moved=backup_moved,
@@ -2982,12 +2853,6 @@ def _execute_folder_worker(
                             verbose=False,  # Avoid excessive logging in worker
                         )
 
-                        # Update action with INSERT OR REPLACE to ensure it's in temp DB
-                        temp_db.execute(
-                            "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
-                            (action["id"], status, now_iso(), error_msg if error_msg else None),
-                        )
-
                         if status == "done":
                             actions_done += 1
                             # Track for verification if needed
@@ -2995,12 +2860,10 @@ def _execute_folder_worker(
                                 # Get Message-ID from main database if available
                                 message_id = None
                                 try:
-                                    main_db = sqlite3.connect(str(db_path), timeout=5.0)
                                     row = main_db.execute(
                                         "SELECT data FROM headers WHERE folder=? AND uid=?",
                                         (grp_folder, uid)
                                     ).fetchone()
-                                    main_db.close()
                                     if row and row[0]:
                                         data = json.loads(row[0])
                                         header_text = data.get("header", "")
@@ -3020,10 +2883,11 @@ def _execute_folder_worker(
 
                     except Exception as exc:
                         error_msg = str(exc)
-                        temp_db.execute(
-                            "INSERT OR REPLACE INTO actions (id, status, executed_at, error_message) VALUES (?, ?, ?, ?)",
-                            (action["id"], "failed", now_iso(), error_msg),
+                        main_db.execute(
+                            "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                            ("failed", now_iso(), error_msg, action["id"]),
                         )
+                        main_db.commit()
                         actions_failed += 1
                         if strict:
                             raise
@@ -3041,7 +2905,7 @@ def _execute_folder_worker(
                         try:
                             _verify_move_operation(
                                 client=client,
-                                temp_db=temp_db,
+                                main_db=main_db,
                                 action=action,
                                 message_id=message_id,
                                 logger=logger,
@@ -3060,7 +2924,7 @@ def _execute_folder_worker(
                                     },
                                 )
 
-                temp_db.commit()
+                main_db.commit()
 
             except Exception as exc:
                 logger.log(
@@ -3070,8 +2934,6 @@ def _execute_folder_worker(
                 )
                 if strict:
                     raise
-
-        temp_db.commit()
 
     except Exception as exc:
         logger.log(
@@ -3083,9 +2945,9 @@ def _execute_folder_worker(
             raise
 
     finally:
-        if temp_db:
+        if main_db:
             try:
-                temp_db.close()
+                main_db.close()
             except Exception:
                 pass
         if client and not dry_run:
@@ -3121,7 +2983,7 @@ def execute_actions_parallel(
     1. Pre-creating all target folders (eliminates race conditions)
     2. Grouping actions by source folder
     3. Spawning worker threads to process each folder
-    4. Merging per-thread temp databases into the main database
+    4. Workers update the main database directly with 30-second busy timeout
 
     Args:
         secrets_path: Path to IMAP secrets file
@@ -3270,10 +3132,6 @@ def execute_actions_parallel(
         console=f"🔧 Processing {len(sorted_folders)} folders with {max_workers} workers",
     )
 
-    # Create temp directory for worker databases
-    temp_dir = Path(tempfile.gettempdir()) / f"imapfilter_actions_{os.getpid()}"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-
     # Set up progress bar: main folder progress
     folders_bar = tqdm(
         total=len(sorted_folders),
@@ -3302,7 +3160,6 @@ def execute_actions_parallel(
                     _execute_folder_worker,
                     pool=pool,
                     db_path=db_path,
-                    temp_dir=temp_dir,
                     folder=folder,
                     actions=actions,
                     worker_id=worker_id,
@@ -3341,30 +3198,9 @@ def execute_actions_parallel(
 
         folders_bar.close()
 
-        # Garbage collection + delay
-        gc.collect()
-        time.sleep(1.0)
-
-        # Merge worker databases
-        merge_done, merge_failed = _merge_worker_databases(
-            db_path=db_path,
-            temp_dir=temp_dir,
-            show_progress=show_progress,
-            logger=logger,
-        )
-
-        # Update totals from merge (in case counts differ)
-        total_done = merge_done
-        total_failed = merge_failed
-
     finally:
-        # Clean up
+        # Clean up connection pool
         pool.shutdown()
-        try:
-            import shutil
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        except Exception:
-            pass
 
     timer.stop()
     timer.count = total_done

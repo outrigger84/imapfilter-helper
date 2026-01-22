@@ -482,7 +482,7 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
                 {"workers": parallel_workers, "original_folders": len(folders), "total_tasks": len(tasks)},
                 console=f"🚀 Parallel cache building: {parallel_workers} workers for {len(tasks)} tasks",
             )
-            build_cache_parallel(
+            timer, folders_count, msg_count = build_cache_parallel(
                 cfg.paths.secrets_file,
                 cfg.paths.cache_db,
                 tasks,
@@ -493,6 +493,16 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
                 max_workers=parallel_workers,
                 folder_sizes=folder_sizes,
             )
+            # Log cache completion summary notification
+            logger.log(
+                "INFO",
+                "cache_summary",
+                {
+                    "folders": folders_count,
+                    "messages": msg_count,
+                    "elapsed_sec": timer.elapsed,
+                },
+            )
         else:
             logger.log(
                 "INFO",
@@ -500,7 +510,7 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
                 {"folders": len(folders)},
                 console=f"📂 Sequential cache building: {len(folders)} folders",
             )
-            build_cache(
+            timer, folders_count, msg_count = build_cache(
                 client,
                 db,
                 folders,
@@ -509,6 +519,16 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
                 limit=cfg.cache.limit,
                 order=cfg.cache.order,
                 folder_sizes=folder_sizes,
+            )
+            # Log cache completion summary notification
+            logger.log(
+                "INFO",
+                "cache_summary",
+                {
+                    "folders": folders_count,
+                    "messages": msg_count,
+                    "elapsed_sec": timer.elapsed,
+                },
             )
     finally:
         try:
@@ -614,7 +634,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     # Determine which implementation to use
     if should_use_parallel_mode(cfg.paths.db_file, parallel_workers, logger):
         # Use parallel implementation
-        execute_actions_parallel(
+        timer, stats = execute_actions_parallel(
             secrets_path=cfg.paths.secrets_file,
             db_path=cfg.paths.db_file,
             show_progress=cfg.logging.show_progress,
@@ -630,11 +650,21 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             backup_dir=cfg.paths.backup_dir,
             max_workers=parallel_workers if parallel_workers and parallel_workers > 0 else 5,
         )
+        # Log execute completion summary notification
+        logger.log(
+            "INFO",
+            "execute_summary",
+            {
+                "done": stats.get("done", 0),
+                "failed": stats.get("failed", 0),
+                "skipped": stats.get("skipped", 0),
+            },
+        )
     else:
         # Use existing sequential implementation
         client = None if args.dry_run else imap_login(cfg.paths.secrets_file, logger)
         try:
-            execute_actions(
+            timer, stats = execute_actions(
                 client,
                 db,
                 show_progress=cfg.logging.show_progress,
@@ -648,6 +678,16 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                 backup_moved=getattr(args, "backup_moved", False),
                 backup_all=getattr(args, "backup_all", False),
                 backup_dir=cfg.paths.backup_dir,
+            )
+            # Log execute completion summary notification
+            logger.log(
+                "INFO",
+                "execute_summary",
+                {
+                    "done": stats.get("done", 0),
+                    "failed": stats.get("failed", 0),
+                    "skipped": stats.get("skipped", 0),
+                },
             )
         finally:
             if client is not None:
@@ -1297,6 +1337,7 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
                     gotify = GotifyNotifier(
                         base_url=gotify_cfg.get("base_url", ""),
                         token=gotify_cfg.get("token", ""),
+                        max_timeout_failures=gotify_cfg.get("max_timeout_failures", 3),
                     )
                     notifier = NotificationDispatcher(gotify_notifier=gotify)
     except Exception as e:

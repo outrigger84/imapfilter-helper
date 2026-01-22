@@ -10,17 +10,21 @@ from urllib.parse import urljoin
 class GotifyNotifier:
     """Send notifications to a GOTIFY instance."""
 
-    def __init__(self, base_url: str, token: str):
+    def __init__(self, base_url: str, token: str, max_timeout_failures: int = 3):
         """
         Initialize GOTIFY notifier.
 
         Args:
             base_url: GOTIFY instance URL (e.g., http://gotify.example.com)
             token: GOTIFY application token for authentication
+            max_timeout_failures: Number of consecutive timeouts before auto-disabling (default: 3)
         """
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.endpoint = urljoin(self.base_url + "/", "message")
+        self._timeout_count = 0
+        self._max_timeout_failures = max_timeout_failures
+        self._disabled = False
 
     def send(
         self,
@@ -41,6 +45,10 @@ class GotifyNotifier:
         Returns:
             True if notification sent successfully, False otherwise
         """
+        # Skip if GOTIFY has been auto-disabled due to repeated timeouts
+        if self._disabled:
+            return False
+
         try:
             payload = {
                 "title": title,
@@ -60,10 +68,26 @@ class GotifyNotifier:
                 timeout=5,
             )
             response.raise_for_status()
+            # Reset timeout counter on successful notification
+            self._timeout_count = 0
             return True
 
+        except requests.exceptions.Timeout as e:
+            # Count timeout exceptions separately
+            self._timeout_count += 1
+            if self._timeout_count >= self._max_timeout_failures:
+                self._disabled = True
+                print(
+                    f"GOTIFY auto-disabled after {self._timeout_count} consecutive timeouts"
+                )
+            else:
+                print(
+                    f"GOTIFY timeout ({self._timeout_count}/{self._max_timeout_failures}): {e}"
+                )
+            return False
+
         except requests.exceptions.RequestException as e:
-            # Log the error but don't raise to avoid disrupting mail processing
+            # For non-timeout errors, log but don't count toward threshold
             print(f"Failed to send GOTIFY notification: {e}")
             return False
 
@@ -105,6 +129,9 @@ class NotificationDispatcher:
             "execute_pending_count": ("Executing Actions", "info"),
             "run_summary": ("Sync Complete", "success"),
             "stream_summary": ("Stream Complete", "success"),
+            "cache_folder_done": ("Folder Cached", "info"),
+            "cache_summary": ("Cache Complete", "success"),
+            "execute_summary": ("Execute Complete", "success"),
         }
 
         if message not in notify_events:
@@ -151,6 +178,26 @@ class NotificationDispatcher:
             body += f"Matched: {stats.get('matched', 0)} rules\n"
             body += f"Executed: {stats.get('executed', 0)} actions"
             priority = 2
+
+        elif message == "cache_folder_done":
+            folder = context.get("folder", "")
+            messages = context.get("messages", 0)
+            body = f"Folder: {folder}\nMessages: {messages}"
+            priority = 2
+
+        elif message == "cache_summary":
+            folders = context.get("folders", 0)
+            messages = context.get("messages", 0)
+            elapsed = context.get("elapsed_sec", 0)
+            body = f"Folders: {folders}\nMessages: {messages}\nDuration: {elapsed:.1f}s"
+            priority = 2
+
+        elif message == "execute_summary":
+            done = context.get("done", 0)
+            failed = context.get("failed", 0)
+            skipped = context.get("skipped", 0)
+            body = f"Executed: {done}\nFailed: {failed}\nSkipped: {skipped}"
+            priority = 3 if failed > 0 else 2
 
         else:
             return
