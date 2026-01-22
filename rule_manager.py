@@ -249,6 +249,24 @@ def summarise_condition(node: Any) -> str:
             children = node.get(key) or []
             label = "ALL" if key == "all" else "ANY"
             return f"Group {label} ({len(children)} entries)"
+
+        # Handle keyword/flag conditions
+        if "has_keyword" in node or "has_flag" in node:
+            keyword = node.get("has_keyword") or node.get("has_flag")
+            return f"has keyword: {keyword}"
+        if "lacks_keyword" in node or "lacks_flag" in node:
+            keyword = node.get("lacks_keyword") or node.get("lacks_flag")
+            return f"lacks keyword: {keyword}"
+
+        # Handle age conditions
+        if "age_days_gt" in node:
+            return f"age > {node['age_days_gt']} days"
+        if "age_days_lt" in node:
+            return f"age < {node['age_days_lt']} days"
+        if "age_days_eq" in node:
+            return f"age = {node['age_days_eq']} days"
+
+        # Handle header conditions
         header = node.get("header", "<header>")
         # Check all 6 match types
         if "equals" in node:
@@ -395,6 +413,30 @@ def normalise_condition(node: Any) -> Any:
     return node
 
 
+def _detect_condition_type(node: dict[str, Any]) -> str:
+    """Detect the type of a condition node.
+
+    Returns:
+        "group" | "keyword" | "age" | "header" | "unknown"
+    """
+    if "all" in node or "any" in node:
+        return "group"
+
+    # Check for keyword conditions
+    if any(key in node for key in ["has_keyword", "has_flag", "lacks_keyword", "lacks_flag"]):
+        return "keyword"
+
+    # Check for age conditions
+    if any(key in node for key in ["age_days_gt", "age_days_lt", "age_days_eq"]):
+        return "age"
+
+    # Check for header conditions
+    if "header" in node:
+        return "header"
+
+    return "unknown"
+
+
 def edit_generic_dict(data: dict[str, Any], *, protected: Iterable[str] = ()) -> None:
     """Generic key/value editor for dictionaries."""
 
@@ -495,6 +537,151 @@ def edit_simple_condition(node: dict[str, Any]) -> dict[str, Any]:
             node[match_field] = prompt("  Match value: ", allow_empty=True)
         elif action == "x":
             edit_generic_dict(node, protected={"header", "equals", "not_equals", "contains", "not_contains", "regex", "not_regex"})
+
+
+def edit_keyword_condition(node: dict[str, Any]) -> dict[str, Any]:
+    """Interactively edit a keyword-based condition."""
+
+    while True:
+        # Detect which operator is being used
+        operator = None
+        keyword_value = ""
+        for op in ["has_keyword", "has_flag", "lacks_keyword", "lacks_flag"]:
+            if op in node:
+                operator = op
+                keyword_value = node.get(op, "")
+                break
+
+        if not operator:
+            operator = "has_keyword"
+
+        # Build extras (non-protected fields)
+        extras = {k: v for k, v in node.items()
+                  if k not in {"has_keyword", "has_flag", "lacks_keyword", "lacks_flag"}}
+        extras_summary = ", ".join(
+            f"{key}={json.dumps(value, ensure_ascii=False)}"
+            for key, value in extras.items()
+        ) or "(none)"
+
+        # Friendly operator display
+        operator_display = {
+            "has_keyword": "has keyword",
+            "has_flag": "has keyword",
+            "lacks_keyword": "lacks keyword",
+            "lacks_flag": "lacks keyword"
+        }[operator]
+
+        action = choose_menu_option(
+            "Keyword condition editor",
+            [
+                ("o", f"Operator : {operator_display}"),
+                ("v", f"Keyword  : {keyword_value or '<unset>'}"),
+                ("x", f"Extras   : {extras_summary}"),
+                ("b", "Back"),
+            ],
+        )
+
+        if action in {None, "b"}:
+            return node
+
+        if action == "o":
+            print("\n  1. Has keyword")
+            print("  2. Lacks keyword")
+            choice = input("  > ").strip()
+
+            # Determine new operator
+            if choice == "1":
+                new_op = "has_keyword"
+            elif choice == "2":
+                new_op = "lacks_keyword"
+            else:
+                print("⚠️  Please enter 1 or 2.")
+                continue
+
+            # Remove all existing keyword operator keys
+            for op in ["has_keyword", "has_flag", "lacks_keyword", "lacks_flag"]:
+                node.pop(op, None)
+            node[new_op] = keyword_value or ""
+
+        elif action == "v":
+            node[operator] = prompt("  Keyword/Flag: ", allow_empty=True)
+
+        elif action == "x":
+            edit_generic_dict(node, protected={"has_keyword", "has_flag", "lacks_keyword", "lacks_flag"})
+
+
+def edit_age_condition(node: dict[str, Any]) -> dict[str, Any]:
+    """Interactively edit an age-based condition."""
+
+    while True:
+        # Detect which operator is being used
+        operator = None
+        days_value = 0
+        for op in ["age_days_gt", "age_days_lt", "age_days_eq"]:
+            if op in node:
+                operator = op
+                days_value = node.get(op, 0)
+                break
+
+        if not operator:
+            operator = "age_days_gt"
+
+        # Build extras (non-protected fields)
+        extras = {k: v for k, v in node.items()
+                  if k not in {"age_days_gt", "age_days_lt", "age_days_eq"}}
+        extras_summary = ", ".join(
+            f"{key}={json.dumps(value, ensure_ascii=False)}"
+            for key, value in extras.items()
+        ) or "(none)"
+
+        # Friendly operator display
+        operator_display = {
+            "age_days_gt": "older than (>)",
+            "age_days_lt": "younger than (<)",
+            "age_days_eq": "exactly (=)"
+        }[operator]
+
+        action = choose_menu_option(
+            "Age condition editor",
+            [
+                ("o", f"Operator : {operator_display}"),
+                ("d", f"Days     : {days_value}"),
+                ("x", f"Extras   : {extras_summary}"),
+                ("b", "Back"),
+            ],
+        )
+
+        if action in {None, "b"}:
+            return node
+
+        if action == "o":
+            print("\n  1. Older than (>)")
+            print("  2. Younger than (<)")
+            print("  3. Exactly (=)")
+            choice = input("  > ").strip()
+
+            # Determine new operator
+            if choice == "1":
+                new_op = "age_days_gt"
+            elif choice == "2":
+                new_op = "age_days_lt"
+            elif choice == "3":
+                new_op = "age_days_eq"
+            else:
+                print("⚠️  Please enter 1, 2, or 3.")
+                continue
+
+            # Remove all existing age operator keys
+            for op in ["age_days_gt", "age_days_lt", "age_days_eq"]:
+                node.pop(op, None)
+            node[new_op] = days_value
+
+        elif action == "d":
+            days = prompt_int("  Number of days: ", default=days_value)
+            node[operator] = days
+
+        elif action == "x":
+            edit_generic_dict(node, protected={"age_days_gt", "age_days_lt", "age_days_eq"})
 
 
 def _get_field_guidance(header: str | None) -> str:
@@ -617,40 +804,103 @@ def _get_action_type_menu() -> str:
             print("⚠️  Please enter a valid number.")
 
 
-def select_header_field() -> str:
-    """Let user choose a header field from menu."""
-    print("\nSelect header field:")
+def select_condition_field() -> tuple[str, str]:
+    """Let user choose a condition field type.
+
+    Returns:
+        Tuple of (field_type, field_name) where:
+        - field_type: "header" | "keyword" | "age"
+        - field_name: field name for headers, or "" for keyword/age
+    """
+    print("\nSelect condition field:")
     print("  1. From (sender address)")
     print("  2. To (recipient address)")
     print("  3. Subject")
     print("  4. List-ID")
     print("  5. Reply-To")
-    print("  6. Other (enter custom header)")
+    print("  6. Keyword/Flag (IMAP keywords)")
+    print("  7. Age (message age in days)")
+    print("  8. Other (enter custom header)")
 
     while True:
         choice = input("  > ").strip()
         field_map = {
-            "1": "from",
-            "2": "to",
-            "3": "subject",
-            "4": "list-id",
-            "5": "reply-to",
+            "1": ("header", "from"),
+            "2": ("header", "to"),
+            "3": ("header", "subject"),
+            "4": ("header", "list-id"),
+            "5": ("header", "reply-to"),
+            "6": ("keyword", ""),
+            "7": ("age", ""),
         }
         if choice in field_map:
             return field_map[choice]
-        elif choice == "6":
+        elif choice == "8":
             custom = prompt("  Enter header name: ")
-            return custom.lower()
-        print("⚠️  Please enter a number 1-6.")
+            return ("header", custom.lower())
+        print("⚠️  Please enter a number 1-8.")
+
+
+def select_header_field() -> str:
+    """Backward compatibility wrapper for select_condition_field()."""
+    field_type, field_name = select_condition_field()
+    if field_type == "header":
+        return field_name
+    # Fallback if user selects non-header (shouldn't happen in normal usage)
+    return "from"
 
 
 def make_condition() -> dict[str, Any]:
     """Create a new match condition using prompts."""
 
-    header = select_header_field()
-    match_field = _get_match_type_menu(header=header)
-    value = prompt("  Match value: ")
-    return {"header": header, match_field: value}
+    field_type, field_name = select_condition_field()
+
+    if field_type == "header":
+        # Create header condition (existing logic)
+        match_field = _get_match_type_menu(header=field_name)
+        value = prompt("  Match value: ")
+        return {"header": field_name, match_field: value}
+
+    elif field_type == "keyword":
+        # Create keyword condition
+        print("\nKeyword operator:")
+        print("  1. Has keyword (message must have this keyword/flag)")
+        print("  2. Lacks keyword (message must NOT have this keyword/flag)")
+
+        while True:
+            choice = input("  > ").strip()
+            if choice == "1":
+                keyword = prompt("  Keyword/Flag: ")
+                return {"has_keyword": keyword}
+            elif choice == "2":
+                keyword = prompt("  Keyword/Flag: ")
+                return {"lacks_keyword": keyword}
+            else:
+                print("⚠️  Please enter 1 or 2.")
+
+    elif field_type == "age":
+        # Create age condition
+        print("\nAge operator:")
+        print("  1. Older than N days (age > N)")
+        print("  2. Younger than N days (age < N)")
+        print("  3. Exactly N days old (age = N)")
+
+        while True:
+            choice = input("  > ").strip()
+            if choice == "1":
+                days = prompt_int("  Number of days: ", default=0)
+                return {"age_days_gt": days}
+            elif choice == "2":
+                days = prompt_int("  Number of days: ", default=0)
+                return {"age_days_lt": days}
+            elif choice == "3":
+                days = prompt_int("  Number of days: ", default=0)
+                return {"age_days_eq": days}
+            else:
+                print("⚠️  Please enter 1, 2, or 3.")
+
+    # Fallback (shouldn't reach here)
+    return {"header": "from", "contains": ""}
 
 
 def _parse_number_selection(text: str, max_num: int) -> list[int] | None:
@@ -827,7 +1077,16 @@ def edit_condition_group(node: dict[str, Any]) -> dict[str, Any]:
         elif isinstance(child, list):
             children[index] = edit_condition_group({"all": child})
         else:
-            children[index] = edit_simple_condition(dict(child))
+            # Route to appropriate editor based on condition type
+            child_dict = dict(child)
+            cond_type = _detect_condition_type(child_dict)
+
+            if cond_type == "keyword":
+                children[index] = edit_keyword_condition(child_dict)
+            elif cond_type == "age":
+                children[index] = edit_age_condition(child_dict)
+            else:  # header or unknown
+                children[index] = edit_simple_condition(child_dict)
 
 
 def edit_action_block(actions: Any) -> list[dict[str, Any]]:
@@ -1099,6 +1358,88 @@ class RuleManager:
         if selection is None:
             return None
         return self.rules[selection]
+
+    def extract_folders(self) -> dict[str, list[RuleRecord]]:
+        """Extract unique folders and map them to rules.
+
+        Scans all rules for move actions and builds a mapping of destination
+        folders to the rules that move emails to those folders.
+
+        Returns:
+            Dictionary mapping folder paths to lists of RuleRecords that move
+            to that folder, with rules sorted by priority within each folder.
+        """
+        folders: dict[str, list[RuleRecord]] = {}
+
+        for rule in self.rules:
+            # Support both 'actions' (new) and 'action' (legacy) fields
+            actions = rule.data.get('actions', rule.data.get('action', []))
+            if isinstance(actions, dict):
+                actions = [actions]
+
+            for action in actions:
+                if isinstance(action, dict) and action.get('type') == 'move':
+                    target = action.get('target', '')
+                    if target:  # Skip empty targets
+                        if target not in folders:
+                            folders[target] = []
+                        folders[target].append(rule)
+
+        # Sort rules within each folder by priority
+        for folder in folders:
+            folders[folder].sort(key=lambda r: (r.priority, r.name.lower()))
+
+        return folders
+
+    def view_rules_by_folder(self) -> None:
+        """Display rules organized by target folder for troubleshooting.
+
+        Allows users to browse rules grouped by their destination folder
+        (from move actions), making it easier to find and troubleshoot
+        rules affecting a specific folder.
+        """
+        folders = self.extract_folders()
+
+        if not folders:
+            print("No folders found. Rules may not have move actions.")
+            return
+
+        while True:
+            # Display folder list with rule counts
+            folder_list = sorted(folders.keys())
+            folder_labels = [
+                f"{folder} ({len(folders[folder])} rule{'s' if len(folders[folder]) != 1 else ''})"
+                for folder in folder_list
+            ]
+
+            selection = choose_from_list(
+                "📁 View rules by folder — select a folder:",
+                folder_labels,
+            )
+
+            if selection is None:
+                return
+
+            selected_folder = folder_list[selection]
+            rules_for_folder = folders[selected_folder]
+
+            # Display rules for selected folder
+            while True:
+                rule_labels = [
+                    f"[{rule.priority:>4}] {rule.name} — {summarise_action(rule.data.get('actions', rule.data.get('action')))}"
+                    for rule in rules_for_folder
+                ]
+
+                rule_selection = choose_from_list(
+                    f"Rules moving to: {selected_folder}",
+                    rule_labels,
+                )
+
+                if rule_selection is None:
+                    break
+
+                selected_rule = rules_for_folder[rule_selection]
+                self.edit_rule(selected_rule)
 
     def generate_filename(self, name: str) -> Path:
         slug = slugify(name)
@@ -1376,6 +1717,7 @@ class RuleManager:
                 "📬 IMAPFilter Rule Manager",
                 [
                     ("l", "List rules"),
+                    ("f", "View rules by folder"),
                     ("c", "Create rule"),
                     ("e", "Edit rule"),
                     ("d", "Delete rule"),
@@ -1394,6 +1736,9 @@ class RuleManager:
             elif action == "l":
                 self.refresh_rules()
                 self.select_rule()  # Listing happens within select_rule
+            elif action == "f":
+                self.refresh_rules()
+                self.view_rules_by_folder()
             elif action == "c":
                 self.refresh_rules()
                 self.create_rule()

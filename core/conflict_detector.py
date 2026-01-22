@@ -63,6 +63,7 @@ class ConflictResult:
     affected_count: Optional[int]  # From cache if available
     explanation: str
     suggestion: str
+    reason: str = ""  # Why this conflict was detected
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -78,6 +79,7 @@ class ConflictResult:
             "affected_count": self.affected_count,
             "explanation": self.explanation,
             "suggestion": self.suggestion,
+            "reason": self.reason,
         }
 
 
@@ -181,6 +183,9 @@ class ConditionAnalyzer:
     def _operators_overlap(self, op1: str, val1: str, op2: str, val2: str) -> bool:
         """Check if two operators with values can overlap.
 
+        This uses a more careful approach to negations: conditions with different
+        values are assumed to be disjoint unless proven otherwise.
+
         Args:
             op1: First operator
             val1: First value
@@ -209,19 +214,38 @@ class ConditionAnalyzer:
         if op1 == "contains" and op2 == "equals":
             return val1_lower in val2_lower
 
+        # Not_contains vs not_contains
+        if op1 == "not_contains" and op2 == "not_contains":
+            # Two negations can overlap unless they're for the same value
+            return val1_lower != val2_lower
+
+        # Contains vs not_contains (or vice versa)
+        if (op1 == "contains" and op2 == "not_contains") or (op1 == "not_contains" and op2 == "contains"):
+            # A message can contain X and simultaneously not contain Y (if X != Y)
+            # Only contradictory if they're the exact same value
+            # e.g., "contains @aarmy.com" and "not_contains @openrent.co.uk" -> CAN both be true
+            # e.g., "contains @example.com" and "not_contains @example.com" -> CANNOT both be true
+            return val1_lower != val2_lower  # Only contradiction if values are identical
+
         # Regex patterns - conservative (assume overlap unless proven disjoint)
         if op1 == "regex" or op2 == "regex":
-            return True  # Conservative approach
+            return True  # Conservative approach - regex is hard to analyze
 
-        # Negations - assume overlap (complex logic)
+        # If one is negation and the other isn't, be conservative
         if op1.startswith("not_") or op2.startswith("not_"):
+            # Only assume overlap if both are negations or if the non-negation is very general
+            return val1_lower == val2_lower or val1_lower in val2_lower or val2_lower in val1_lower
+
+        # Flag/age conditions - can overlap if not contradictory
+        if op1 in ("has_keyword", "lacks_keyword"):
+            # Same keyword operation might not overlap
+            return val1_lower != val2_lower or op1 == op2
+
+        if op1 in ("age_days_gt", "age_days_lt", "age_days_eq"):
+            # Age conditions can overlap unless they're strict contradictions
             return True  # Conservative approach
 
-        # Flag/age conditions
-        if op1 in ("has_keyword", "lacks_keyword", "age_days_gt", "age_days_lt", "age_days_eq"):
-            return True  # Assume overlap
-
-        return True  # Conservative default
+        return False  # Default to disjoint for unknown combinations
 
 
 class ConditionTreeComparator:
@@ -240,6 +264,9 @@ class ConditionTreeComparator:
     ) -> tuple[OverlapRelationship, float]:
         """Compare two condition trees.
 
+        NOTE: This uses a conservative approach. When trees have different AND/OR
+        structures, they are treated as potentially disjoint unless proven otherwise.
+
         Args:
             tree1: First condition tree
             tree2: Second condition tree
@@ -253,6 +280,11 @@ class ConditionTreeComparator:
 
         if not conds1 or not conds2:
             return (OverlapRelationship.DISJOINT, 0.0)
+
+        # Check if trees have same AND/OR structure
+        # If they differ in structure (e.g., "all" vs "any"), be conservative
+        tree1_logic = self._get_tree_logic(tree1)
+        tree2_logic = self._get_tree_logic(tree2)
 
         # For now, use simple comparison: check if conditions are identical
         # This is a simplified approach; full DNF would be more complex
@@ -268,7 +300,19 @@ class ConditionTreeComparator:
             overlap = len([c for c in conds2 if any(self.analyzer.conditions_overlap(c, c1) for c1 in conds1)]) / max(len(conds2), 1)
             return (OverlapRelationship.SUPERSET, overlap)
 
-        # Check for partial overlap
+        # If trees have very different structures, be conservative and assume disjoint
+        if tree1_logic != tree2_logic:
+            # Different AND/OR structure - very hard to prove overlap without actual evaluation
+            # Be conservative: only flag as overlapping if ALL conditions match exactly
+            if all(any(self.analyzer.conditions_overlap(c1, c2) for c2 in conds2) for c1 in conds1):
+                # Only return INTERSECT if literally all conditions can overlap
+                # This is very conservative
+                overlap_percent = 1.0
+                return (OverlapRelationship.INTERSECT, overlap_percent)
+            else:
+                return (OverlapRelationship.DISJOINT, 0.0)
+
+        # Check for partial overlap (only if same structure)
         overlap_count = sum(1 for c1 in conds1 if any(self.analyzer.conditions_overlap(c1, c2) for c2 in conds2))
         if overlap_count > 0:
             overlap_percent = overlap_count / max(len(conds1), len(conds2), 1)
@@ -340,6 +384,27 @@ class ConditionTreeComparator:
                 return False
 
         return True
+
+    def _get_tree_logic(self, node: Any) -> str:
+        """Determine if a tree uses AND ("all") or OR ("any") logic.
+
+        Args:
+            node: Condition tree node
+
+        Returns:
+            String "all", "any", or "mixed"
+        """
+        if not isinstance(node, dict):
+            return "simple"
+
+        if "all" in node:
+            return "all"
+        elif "any" in node:
+            return "any"
+        elif "not" in node:
+            return self._get_tree_logic(node["not"])
+        else:
+            return "simple"
 
     def _condition_matches_or_is_more_specific(self, c1: dict, c2: dict) -> bool:
         """Check if c1 matches or is more specific than c2.
@@ -593,8 +658,11 @@ class ConflictDetector:
                         rule2.get("conditions", {}),
                     )
 
-                    # Only care about overlapping rules
-                    if rel == OverlapRelationship.DISJOINT:
+                    # Only flag priority conflicts for clear overlap relationships
+                    # INTERSECT relationships (partial overlap) are unreliable without cache data
+                    # because static analysis can't determine actual message overlap
+                    allowed_rels = (OverlapRelationship.EQUAL, OverlapRelationship.SUBSET, OverlapRelationship.SUPERSET)
+                    if rel not in allowed_rels:
                         continue
 
                     # Check if they have conflicting move targets
@@ -612,6 +680,11 @@ class ConflictDetector:
                     # Determine severity
                     severity = self._determine_severity(overlap_pct, affected)
 
+                    # Generate reason
+                    target1 = self._get_primary_target(rule1)
+                    target2 = self._get_primary_target(rule2)
+                    reason = f"Both rules have move actions to different targets: '{target1}' vs '{target2}', with {overlap_pct:.0%} condition overlap"
+
                     conflicts.append(
                         ConflictResult(
                             type=ConflictType.PRIORITY_CONFLICT,
@@ -625,6 +698,7 @@ class ConflictDetector:
                             affected_count=affected,
                             explanation=self._explain_priority_conflict(rule1, rule2, overlap_pct),
                             suggestion=self._suggest_priority_fix(rule1, rule2, rel),
+                            reason=reason,
                         )
                     )
 
@@ -658,8 +732,11 @@ class ConflictDetector:
                     rule1.get("conditions", {}),
                 )
 
-                # Only care if rule2 is subset of rule1 (or equal)
-                # SUPERSET means rule1's conditions are a superset of rule2's (rule1 is broader)
+                # Only care if rule2 is subset of rule1 (or equal, or superset)
+                # SUBSET: rule2's conditions are subset of rule1's
+                # SUPERSET: rule2's conditions are superset of rule1's (but fewer messages match)
+                # EQUAL: identical conditions
+                # This means rule1 (higher priority) either matches more broadly or the same
                 if rel not in (OverlapRelationship.EQUAL, OverlapRelationship.SUBSET, OverlapRelationship.SUPERSET):
                     continue
 
@@ -667,6 +744,9 @@ class ConflictDetector:
                 affected = None
                 if self.cache_engine:
                     affected = self.cache_engine.count_matching_messages(rule2.get("conditions", {}))
+
+                # Generate reason
+                reason = f"Rule with priority {priority2} is shadowed by higher priority rule {priority1}: conditions are {rel.value}"
 
                 conflicts.append(
                     ConflictResult(
@@ -681,6 +761,7 @@ class ConflictDetector:
                         affected_count=affected,
                         explanation=self._explain_unreachable(rule1, rule2),
                         suggestion=self._suggest_unreachable_fix(rule2),
+                        reason=reason,
                     )
                 )
 
@@ -716,6 +797,8 @@ class ConflictDetector:
                 if target1 != target2 or priority1 != priority2:
                     continue
 
+                reason = f"Rules have {overlap_pct:.0%} identical conditions and same priority ({priority1}) with same target '{target1}'"
+
                 conflicts.append(
                     ConflictResult(
                         type=ConflictType.REDUNDANT,
@@ -729,6 +812,7 @@ class ConflictDetector:
                         affected_count=None,
                         explanation=f"Rules '{rule1.get('name')}' and '{rule2.get('name')}' have {overlap_pct:.0%} identical conditions and move to the same target.",
                         suggestion=f"Consider merging these rules into a single rule with combined conditions.",
+                        reason=reason,
                     )
                 )
 
@@ -737,6 +821,9 @@ class ConflictDetector:
     def _has_target_conflict(self, rule1: dict, rule2: dict) -> bool:
         """Check if two rules have conflicting move targets.
 
+        Only rules with move actions can conflict.
+        Rules with only keyword/flag actions don't conflict.
+
         Args:
             rule1: First rule
             rule2: Second rule
@@ -744,6 +831,10 @@ class ConflictDetector:
         Returns:
             True if targets conflict
         """
+        # Both rules must have move actions to conflict
+        if not (self._has_move_action(rule1) and self._has_move_action(rule2)):
+            return False
+
         target1 = self._get_primary_target(rule1)
         target2 = self._get_primary_target(rule2)
 
@@ -772,6 +863,21 @@ class ConflictDetector:
                 return action.get("target")
 
         return None
+
+    def _has_move_action(self, rule: dict) -> bool:
+        """Check if a rule has a move action.
+
+        Args:
+            rule: Rule dictionary
+
+        Returns:
+            True if rule has move action
+        """
+        actions = rule.get("actions", [])
+        for action in actions:
+            if isinstance(action, dict) and action.get("type") == "move":
+                return True
+        return False
 
     def _determine_severity(self, overlap_pct: float, affected_count: Optional[int]) -> ConflictSeverity:
         """Determine conflict severity.

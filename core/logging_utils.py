@@ -32,8 +32,24 @@ def log(
     entry: Dict[str, Any] = {"timestamp": now_iso(), "level": level, "message": message}
     if context:
         entry["context"] = context
+
+    # Check if file needs rotation (max 50MB per file, keep up to 5 backups)
+    max_bytes = 50 * 1024 * 1024  # 50MB
+    if path.exists() and path.stat().st_size > max_bytes:
+        # Rotate files: .log.4 -> .log.5, .log.3 -> .log.4, etc.
+        for i in range(4, 0, -1):
+            old_file = path.parent / f"{path.name}.{i}"
+            new_file = path.parent / f"{path.name}.{i + 1}"
+            if old_file.exists():
+                if new_file.exists():
+                    new_file.unlink()
+                old_file.rename(new_file)
+        # Rename current file to .1
+        path.rename(path.parent / f"{path.name}.1")
+
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
     if console:
         from tqdm import tqdm  # Imported lazily to avoid global side effects
 
