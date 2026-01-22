@@ -3125,6 +3125,28 @@ def execute_actions_parallel(
     # Sort folders by action count (load balance: smallest first)
     sorted_folders = sorted(folder_actions.keys(), key=lambda f: len(folder_actions[f]))
 
+    # Log verbose execution overview (similar to sequential executor)
+    if verbose:
+        # Calculate group totals (folder → target)
+        group_totals = {}
+        for actions in folder_actions.values():
+            for action in actions:
+                key = (action["folder"], action["target"])
+                group_totals[key] = group_totals.get(key, 0) + 1
+
+        groups_context = {
+            f"{folder}→{target or '(no target)'}": count for (folder, target), count in group_totals.items()
+        }
+        lines = "\n".join(
+            f"      • {pair}: {count}" for pair, count in sorted(groups_context.items())
+        )
+        logger.log(
+            "INFO",
+            "execute_overview",
+            {"groups": groups_context, "dry_run": dry_run, "strict": strict},
+            console=("📂 Execution plan:" + (f"\n{lines}" if lines else "")),
+        )
+
     logger.log(
         "INFO",
         "execute_parallel_folders",

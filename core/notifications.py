@@ -121,6 +121,10 @@ class NotificationDispatcher:
         if not self.gotify:
             return
 
+        if self.gotify._disabled:
+            print(f"⚠️  GOTIFY is disabled due to repeated timeouts. Event '{message}' will not be sent.")
+            return
+
         # Only send notifications for important events
         notify_events = {
             "rule_match": ("Rule Matched", "info"),
@@ -138,6 +142,7 @@ class NotificationDispatcher:
             return
 
         title, event_type = notify_events[message]
+        print(f"📤 Sending GOTIFY notification: {title} (event: {message})")
         context = context or {}
 
         # Build notification message and priority
@@ -203,7 +208,7 @@ class NotificationDispatcher:
             return
 
         # Send the notification
-        self.gotify.send(
+        success = self.gotify.send(
             title=title,
             message=body,
             priority=priority,
@@ -212,3 +217,7 @@ class NotificationDispatcher:
                 "level": level,
             },
         )
+        if success:
+            print(f"✅ GOTIFY notification sent: {title}")
+        else:
+            print(f"❌ GOTIFY notification failed: {title}")

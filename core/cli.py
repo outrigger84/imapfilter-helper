@@ -1334,15 +1334,25 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
                 secrets = json.load(f)
                 gotify_cfg = secrets.get("notifications", {}).get("gotify", {})
                 if gotify_cfg.get("enabled"):
-                    gotify = GotifyNotifier(
-                        base_url=gotify_cfg.get("base_url", ""),
-                        token=gotify_cfg.get("token", ""),
-                        max_timeout_failures=gotify_cfg.get("max_timeout_failures", 3),
-                    )
-                    notifier = NotificationDispatcher(gotify_notifier=gotify)
+                    base_url = gotify_cfg.get("base_url", "")
+                    token = gotify_cfg.get("token", "")
+                    if not base_url or not token:
+                        print("⚠️  GOTIFY configured but missing base_url or token")
+                    else:
+                        gotify = GotifyNotifier(
+                            base_url=base_url,
+                            token=token,
+                            max_timeout_failures=gotify_cfg.get("max_timeout_failures", 3),
+                        )
+                        notifier = NotificationDispatcher(gotify_notifier=gotify)
+                        print(f"✅ GOTIFY initialized: {base_url}")
+                else:
+                    print("ℹ️  GOTIFY is disabled in configuration")
+        else:
+            print(f"ℹ️  Secrets file not found: {secrets_path}")
     except Exception as e:
-        # Silently ignore notification setup errors - don't let them break mail processing
-        pass
+        # Log notification setup errors but don't let them break mail processing
+        print(f"⚠️  GOTIFY setup error: {e}")
 
     logger = JsonLogger(cfg.paths.log_file, notifier=notifier)
     db = init_db(cfg.paths.db_file, logger=logger)
