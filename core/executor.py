@@ -2814,8 +2814,17 @@ def _execute_folder_worker(
                 keyword_actions_remove = [a for a in group_actions if a.get("action_type") == "remove_keywords"]
                 move_actions = [a for a in group_actions if a.get("action_type", "move") == "move"]
 
+                logger.log("DEBUG", "worker_actions_separated", {
+                    "worker_id": worker_id,
+                    "folder": grp_folder,
+                    "set_keywords": len(keyword_actions_set),
+                    "remove_keywords": len(keyword_actions_remove),
+                    "moves": len(move_actions)
+                })
+
                 # Process keyword actions in batches
                 if keyword_actions_set:
+                    logger.log("DEBUG", "worker_processing_keywords_set", {"worker_id": worker_id, "folder": grp_folder, "count": len(keyword_actions_set)})
                     batch_done, batch_failed = _perform_batch_keyword_operations(
                         client=client,
                         main_db=main_db,
@@ -2825,10 +2834,12 @@ def _execute_folder_worker(
                         logger=logger,
                         verbose=False,
                     )
+                    logger.log("DEBUG", "worker_keywords_set_done", {"worker_id": worker_id, "folder": grp_folder, "done": batch_done, "failed": batch_failed})
                     actions_done += batch_done
                     actions_failed += batch_failed
 
                 if keyword_actions_remove:
+                    logger.log("DEBUG", "worker_processing_keywords_remove", {"worker_id": worker_id, "folder": grp_folder, "count": len(keyword_actions_remove)})
                     batch_done, batch_failed = _perform_batch_keyword_operations(
                         client=client,
                         main_db=main_db,
@@ -2838,6 +2849,7 @@ def _execute_folder_worker(
                         logger=logger,
                         verbose=False,
                     )
+                    logger.log("DEBUG", "worker_keywords_remove_done", {"worker_id": worker_id, "folder": grp_folder, "done": batch_done, "failed": batch_failed})
                     actions_done += batch_done
                     actions_failed += batch_failed
 
@@ -2845,6 +2857,7 @@ def _execute_folder_worker(
                 successful_moves: list[tuple[dict, str | None]] = []
 
                 # Process move actions individually (they need selective logic)
+                logger.log("DEBUG", "worker_processing_moves_start", {"worker_id": worker_id, "folder": grp_folder, "count": len(move_actions)})
                 for action in move_actions:
                     uid = action["uid"]
                     action_type = action.get("action_type", "move")
