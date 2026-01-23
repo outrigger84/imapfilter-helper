@@ -2752,7 +2752,8 @@ def _execute_folder_worker(
 
     try:
         logger.log("DEBUG", "worker_start", {"worker_id": worker_id, "folder": folder})
-        main_db = sqlite3.connect(str(db_path), timeout=30.0)
+        # Use 60-second timeout to allow time for other workers' transactions to complete
+        main_db = sqlite3.connect(str(db_path), timeout=60.0)
         logger.log("DEBUG", "worker_db_opened", {"worker_id": worker_id, "folder": folder})
 
         # Acquire IMAP connection from pool
