@@ -2763,6 +2763,7 @@ def _execute_folder_worker(
             logger.log("DEBUG", "worker_connection_acquired", {"worker_id": worker_id, "folder": folder})
 
         # Group actions by (folder, target) tuple for batch processing
+        logger.log("DEBUG", "worker_grouping_actions", {"worker_id": worker_id, "folder": folder})
         action_groups: dict[tuple[str, str | None], list[dict]] = {}
         for action in actions:
             key = (action["folder"], action["target"])
@@ -2770,8 +2771,11 @@ def _execute_folder_worker(
                 action_groups[key] = []
             action_groups[key].append(action)
 
+        logger.log("DEBUG", "worker_actions_grouped", {"worker_id": worker_id, "folder": folder, "group_count": len(action_groups)})
+
         # Process each group
         for (grp_folder, target), group_actions in action_groups.items():
+            logger.log("DEBUG", "worker_processing_group", {"worker_id": worker_id, "folder": grp_folder, "target": target, "action_count": len(group_actions)})
             # Handle dry-run mode
             if dry_run:
                 for action in group_actions:
@@ -2786,7 +2790,9 @@ def _execute_folder_worker(
             # Real execution
             try:
                 # SELECT source folder (read-only=False for modifications)
+                logger.log("DEBUG", "worker_selecting_folder", {"worker_id": worker_id, "folder": grp_folder})
                 sel_typ, sel_resp = client.select(f'"{grp_folder}"', readonly=False)
+                logger.log("DEBUG", "worker_folder_selected", {"worker_id": worker_id, "folder": grp_folder, "status": sel_typ})
                 if sel_typ != "OK":
                     error_msg = f"Cannot open folder: {_imap_response_text(sel_resp)}"
                     for action in group_actions:
