@@ -2754,8 +2754,6 @@ def _execute_folder_worker(
         logger.log("DEBUG", "worker_start", {"worker_id": worker_id, "folder": folder})
         main_db = sqlite3.connect(str(db_path), timeout=30.0)
         logger.log("DEBUG", "worker_db_opened", {"worker_id": worker_id, "folder": folder})
-        main_db.execute("PRAGMA journal_mode=WAL")
-        logger.log("DEBUG", "worker_wal_set", {"worker_id": worker_id, "folder": folder})
 
         # Acquire IMAP connection from pool
         if not dry_run:
