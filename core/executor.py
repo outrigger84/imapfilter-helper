@@ -3030,6 +3030,8 @@ def execute_actions_parallel(
 
     # Open database to count pending actions
     db = sqlite3.connect(str(db_path), timeout=30.0)
+    # Set WAL mode once in main thread to avoid contention with worker threads
+    db.execute("PRAGMA journal_mode=WAL")
 
     folder_params = tuple(folders) if folders else ()
     folder_filter = ""
