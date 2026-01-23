@@ -3297,27 +3297,16 @@ def should_use_parallel_mode(
     Returns:
         True if parallel mode should be used, False otherwise
     """
-    if parallel_workers == 0:
-        # Force sequential
-        if logger:
-            logger.log(
-                "INFO",
-                "parallel_disabled",
-                {},
-                console="📂 Using sequential execution (--parallel-workers 0)",
-            )
-        return False
-
-    if parallel_workers and parallel_workers > 0:
-        # Force parallel
-        if logger:
-            logger.log(
-                "INFO",
-                "parallel_forced",
-                {"workers": parallel_workers},
-                console=f"🚀 Using parallel execution ({parallel_workers} workers)",
-            )
-        return True
+    # TEMPORARY: Parallel execution has a deadlock issue - force sequential for reliability
+    # TODO: Debug and fix the parallel executor's database/IMAP contention issues
+    if logger:
+        logger.log(
+            "INFO",
+            "parallel_disabled_temporary",
+            {"reason": "deadlock investigation"},
+            console="📂 Using sequential execution (parallel mode temporarily disabled for debugging)",
+        )
+    return False
 
     # Auto-detect: count unique source folders in pending actions
     count = _count_unique_source_folders(db_path)
