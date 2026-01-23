@@ -2751,12 +2751,17 @@ def _execute_folder_worker(
     actions_failed = 0
 
     try:
+        logger.log("DEBUG", "worker_start", {"worker_id": worker_id, "folder": folder})
         main_db = sqlite3.connect(str(db_path), timeout=30.0)
+        logger.log("DEBUG", "worker_db_opened", {"worker_id": worker_id, "folder": folder})
         main_db.execute("PRAGMA journal_mode=WAL")
+        logger.log("DEBUG", "worker_wal_set", {"worker_id": worker_id, "folder": folder})
 
         # Acquire IMAP connection from pool
         if not dry_run:
+            logger.log("DEBUG", "worker_acquiring_connection", {"worker_id": worker_id, "folder": folder})
             client = pool.acquire()
+            logger.log("DEBUG", "worker_connection_acquired", {"worker_id": worker_id, "folder": folder})
 
         # Group actions by (folder, target) tuple for batch processing
         action_groups: dict[tuple[str, str | None], list[dict]] = {}
@@ -3173,11 +3178,13 @@ def execute_actions_parallel(
 
     try:
         # Create ThreadPoolExecutor and spawn workers
+        logger.log("DEBUG", "executor_creating_pool", {"max_workers": max_workers, "folder_count": len(sorted_folders)})
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {}
             for folder in sorted_folders:
                 actions = folder_actions[folder]
                 worker_id = len(futures) % max_workers
+                logger.log("DEBUG", "executor_submitting_worker", {"worker_id": worker_id, "folder": folder, "action_count": len(actions)})
                 future = executor.submit(
                     _execute_folder_worker,
                     pool=pool,
@@ -3194,8 +3201,10 @@ def execute_actions_parallel(
                     logger=logger,
                 )
                 futures[future] = folder
+                logger.log("DEBUG", "executor_worker_submitted", {"worker_id": worker_id, "folder": folder})
 
             # Track results as they complete
+            logger.log("DEBUG", "executor_waiting_for_results", {"future_count": len(futures)})
             for future in concurrent.futures.as_completed(futures):
                 folder = futures[future]
                 try:
