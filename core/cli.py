@@ -214,6 +214,62 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    p_eval_exec = sub.add_parser("eval-execute", help="Evaluate rules and execute actions (requires existing cache)")
+    p_eval_exec.add_argument("--dry-run", action="store_true", help="Simulate everything (no IMAP writes)")
+    eval_exec_scope = p_eval_exec.add_mutually_exclusive_group()
+    eval_exec_scope.add_argument("--all-folders", action="store_true", help="Process all cached folders")
+    eval_exec_scope.add_argument(
+        "--folder",
+        action="append",
+        help="Process only the specified folder(s)",
+    )
+    eval_exec_scope.add_argument(
+        "--folder-recursive",
+        action="append",
+        help="Process the specified folder and all its subfolders recursively",
+    )
+    p_eval_exec.add_argument("--strict", action="store_true", help="Abort on missing/failed IMAP ops during execute")
+    p_eval_exec.add_argument(
+        "--verify-moves",
+        action="store_true",
+        help="Confirm successful moves by searching for Message-ID in source and destination mailboxes",
+    )
+    p_eval_exec.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed progress and log IMAP replies during evaluate/execute",
+    )
+    p_eval_exec.add_argument(
+        "--debug-headers",
+        action="store_true",
+        help="Log message headers while evaluating rules",
+    )
+    p_eval_exec.add_argument(
+        "--limit",
+        type=int,
+        help="Process at most this many pending actions during the execute phase",
+    )
+    p_eval_exec.add_argument(
+        "--backup-moved",
+        action="store_true",
+        help="Backup messages before moving them during the execute phase (recommended)",
+    )
+    p_eval_exec.add_argument(
+        "--backup-all",
+        action="store_true",
+        help="Backup all cached messages after execution completes (creates full archive)",
+    )
+    p_eval_exec.add_argument(
+        "--parallel-workers",
+        type=int,
+        default=None,
+        help=(
+            "Number of parallel workers for execute phase. "
+            "0=force sequential, N>0=force N workers, None=auto-detect "
+            "(parallel if ≥5 folders, otherwise sequential). Default: None (auto-detect)"
+        ),
+    )
+
     p_stream = sub.add_parser(
         "stream",
         help="Stream-process: read message → evaluate rules → execute action (no cache needed)"
@@ -833,6 +889,120 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     return 0
 
 
+def handle_eval_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
+    """Handle the ``eval-execute`` command (evaluate rules and execute actions without building cache)."""
+    cfg.executor.dry_run = args.dry_run
+    cfg.executor.strict = args.strict
+    cfg.executor.limit = args.limit
+    cfg.executor.verify_moves = getattr(args, "verify_moves", False)
+    cfg.logging.verbose = args.verbose
+    run_timer = PhaseTimer("eval-execute")
+    client = None if args.dry_run else imap_login(cfg.paths.secrets_file, logger)
+    try:
+        selected = _normalize_folder_list(args.folder)
+        recursive = _normalize_folder_list(args.folder_recursive)
+
+        # Expand recursive folders using database
+        expanded_recursive = _expand_folders_from_db(db, recursive) if recursive else []
+
+        # Combine exact and recursive folders
+        final_folders = None
+        if selected or expanded_recursive:
+            final_folders = list(set((selected or []) + expanded_recursive))
+
+        eval_folders, scope = _resolve_scope_selection(
+            all_folders=args.all_folders,
+            folders=final_folders,
+            default_scope=cfg.executor.default_run_scope,
+        )
+
+        # Phase 1: Evaluate rules
+        rules = load_rules(cfg.paths.rules_dir, logger)
+        _eval_timer, rules_count, matches = evaluate_rules(
+            db,
+            rules,
+            scope=scope,
+            dry_run=cfg.executor.dry_run,
+            show_progress=cfg.logging.show_progress,
+            logger=logger,
+            verbose=cfg.logging.verbose,
+            debug_headers=args.debug_headers,
+            folders=eval_folders,
+        )
+
+        # Phase 2: Execute actions
+        parallel_workers = getattr(args, "parallel_workers", None)
+
+        # Determine which implementation to use for execute phase
+        if should_use_parallel_mode(cfg.paths.db_file, parallel_workers, logger):
+            # Use parallel implementation
+            _exec_timer, stats = execute_actions_parallel(
+                secrets_path=cfg.paths.secrets_file,
+                db_path=cfg.paths.db_file,
+                show_progress=cfg.logging.show_progress,
+                dry_run=cfg.executor.dry_run,
+                strict=cfg.executor.strict,
+                logger=logger,
+                verbose=cfg.logging.verbose,
+                limit=cfg.executor.limit,
+                folders=eval_folders,
+                verify_moves=cfg.executor.verify_moves,
+                backup_moved=getattr(args, "backup_moved", False),
+                backup_all=getattr(args, "backup_all", False),
+                backup_dir=cfg.paths.backup_dir,
+                max_workers=parallel_workers if parallel_workers and parallel_workers > 0 else 5,
+            )
+        else:
+            # Use existing sequential implementation
+            _exec_timer, stats = execute_actions(
+                client,
+                db,
+                show_progress=cfg.logging.show_progress,
+                dry_run=cfg.executor.dry_run,
+                strict=cfg.executor.strict,
+                logger=logger,
+                verbose=cfg.logging.verbose,
+                limit=cfg.executor.limit,
+                folders=eval_folders,
+                verify_moves=cfg.executor.verify_moves,
+                backup_moved=getattr(args, "backup_moved", False),
+                backup_all=getattr(args, "backup_all", False),
+                backup_dir=cfg.paths.backup_dir,
+            )
+
+        run_timer.stop()
+        summary_context: dict[str, object] = {
+            "duration_sec": run_timer.elapsed,
+            "rules": rules_count,
+            "matches": matches,
+            **{f"exec_{key}": value for key, value in stats.items()},
+            "strict": cfg.executor.strict,
+            "dry_run": cfg.executor.dry_run,
+        }
+        logger.log(
+            "INFO",
+            "eval_execute_summary",
+            summary_context,
+            console=(
+                "\n🔄 Eval-Execute Summary\n"
+                f"   🕒  Total runtime: {run_timer.fmt()}\n"
+                f"   🧩  Rules: {rules_count}\n"
+                f"   🎯  Matches: {matches}\n"
+                f"   📦  Executed: {stats.get('done', 0)}  |  ⚠️ Skipped: {stats.get('skipped', 0)}  |  🚫 Suppressed: {stats.get('suppressed', 0)}  |  💥 Failed: {stats.get('failed', 0)}\n"
+                f"   {'🔒 STRICT' if cfg.executor.strict else '✅ Completed'} {'(dry-run)' if cfg.executor.dry_run else ''}\n"
+            ),
+        )
+    finally:
+        if client is not None:
+            try:
+                client.logout()
+            except (imaplib.IMAP4.abort, OSError, EOFError):
+                # Server may have closed connection or lost socket
+                # Safe to ignore during exit
+                pass
+    return 0
+
+
 def handle_stream(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
     """Handle the ``stream`` command."""
     cfg.executor.dry_run = args.dry_run
@@ -1304,6 +1474,7 @@ COMMAND_HANDLERS: dict[str, Handler] = {
     "evaluate": handle_evaluate,
     "execute": handle_execute,
     "run-all": handle_run_all,
+    "eval-execute": handle_eval_execute,
     "stream": handle_stream,
     "clear-pending": handle_clear_pending,
     "clear-cache": handle_clear_cache,

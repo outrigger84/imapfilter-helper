@@ -15,7 +15,7 @@ import sqlite3
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, Union
 
 from tqdm import tqdm
 
@@ -33,6 +33,88 @@ from core.tools.coverage_analyzer import (
 )
 
 
+@dataclass
+class DisplayNameVariation:
+    """Represents a single display name variation for an email address.
+
+    This tracks a specific variation of how an email address appears in messages,
+    including the full address with display name and the count of messages using it.
+
+    Attributes:
+        full_address: The complete email address string with display name
+                     (e.g., "ClearScore <marketing@clearscore.com>")
+        display_name: The extracted display name portion (e.g., "ClearScore")
+        count: Number of messages with this exact variation
+    """
+    full_address: str
+    display_name: str
+    count: int
+
+
+@dataclass
+class EmailGroup:
+    """Consolidates a single email address with all its display name variations.
+
+    This groups together an email address and all the different ways it appears
+    in messages (with different display names), tracking the total count and
+    individual variation counts.
+
+    Attributes:
+        email: The normalized email address (e.g., "marketing@clearscore.com")
+        total_count: Total number of messages from this email (sum of all variations)
+        variations: List of DisplayNameVariation objects for this email
+    """
+    email: str
+    total_count: int
+    variations: List[DisplayNameVariation]
+
+    @property
+    def variation_count(self) -> int:
+        """Get the number of different display name variations for this email.
+
+        Returns:
+            Number of distinct variations (len of variations list)
+        """
+        return len(self.variations)
+
+    @property
+    def has_variations(self) -> bool:
+        """Check if this email has multiple display name variations.
+
+        Returns:
+            True if more than one variation exists, False otherwise
+        """
+        return len(self.variations) > 1
+
+
+@dataclass
+class ExpandableItem:
+    """Wrapper for items that can be expanded/collapsed in UI displays.
+
+    This represents a single item in an expandable list, which can have child items
+    that are shown/hidden based on the expanded state. Used by the filterable selector
+    to display hierarchical data like expandable email groups with their variations.
+
+    Attributes:
+        label: Display text for the item
+        count: Number associated with the item (e.g., message count)
+        is_expandable: Whether this item can be expanded to show children
+        is_expanded: Current expanded/collapsed state
+        children: List of child ExpandableItem objects (None if no children)
+        parent_index: Index of parent item in the parent list (None if root level)
+        data: Optional data object associated with this item (e.g., EmailGroup)
+        indent_level: Nesting level for indentation in display (0 for root)
+    """
+    label: str
+    count: int
+    is_expandable: bool = False
+    is_expanded: bool = False
+    children: Optional[List['ExpandableItem']] = None
+    parent_index: Optional[int] = None
+    data: Optional[Any] = None
+    indent_level: int = 0
+
+
 class FilterableListSelector:
     """Interactive curses widget for selecting items from a list with real-time filtering.
 
@@ -41,6 +123,7 @@ class FilterableListSelector:
     - Navigate with arrow keys
     - Select an item with Enter
     - Cancel with ESC
+    - Expand/collapse hierarchical items with Space/arrow keys (when allow_expand=True)
 
     Example:
         items = [("INBOX", 1234), ("Sent", 567), ("Drafts", 89)]
@@ -50,39 +133,209 @@ class FilterableListSelector:
             print(f"Selected: {result}")
     """
 
-    def __init__(self, items: List[Tuple[str, int]], title: str):
+    def __init__(
+        self,
+        items: Union[List[Tuple[str, int]], List[ExpandableItem]],
+        title: str,
+        allow_expand: bool = True
+    ):
         """Initialize the filterable list selector.
 
         Args:
-            items: List of (label, count) tuples to display
+            items: List of (label, count) tuples OR ExpandableItem objects
             title: Display title for the selector
+            allow_expand: Enable expand/collapse functionality (default: True)
         """
-        self.all_items = items
+        self.allow_expand = allow_expand
         self.title = title
         self.filter_text = ""
-        self.filtered_items: List[Tuple[str, int]] = list(items)
+
+        # Normalize items to ExpandableItem format
+        if items and not isinstance(items[0], ExpandableItem):
+            # Legacy tuple format - convert
+            self.all_items = [
+                ExpandableItem(label=label, count=count)
+                for label, count in items
+            ]
+        else:
+            self.all_items = items if items else []
+
+        self.filtered_items: List[ExpandableItem] = []
+        self.visible_items: List[ExpandableItem] = []  # Flattened view with expansions
         self.selected_index = 0
         self.scroll_offset = 0
+
+        # Initialize filtered items
+        self._update_filtered_items()
+
+    def _build_visible_items(self) -> None:
+        """Build the flat list of visible items based on expansion states.
+
+        This method flattens the hierarchical structure by inserting children
+        after their expanded parents. It's called whenever:
+        - Filter changes
+        - Item expanded/collapsed
+        - Initial render
+        """
+        self.visible_items = []
+
+        for item in self.filtered_items:
+            # Add parent item
+            self.visible_items.append(item)
+
+            # Add children if expanded
+            if item.is_expanded and item.children:
+                for child in item.children:
+                    self.visible_items.append(child)
 
     def _update_filtered_items(self) -> None:
         """Update filtered_items based on current filter_text.
 
-        Performs case-insensitive substring matching on item labels.
-        Resets selection to 0 after filtering.
+        Enhanced to handle expandable items:
+        - Filter matches against parent and child labels
+        - If child matches, include parent too
+        - Preserve expansion state after filtering
         """
         if not self.filter_text:
             self.filtered_items = list(self.all_items)
         else:
             filter_lower = self.filter_text.lower()
-            self.filtered_items = [
-                (label, count)
-                for label, count in self.all_items
-                if filter_lower in label.lower()
-            ]
+            matched_items = []
 
-        # Reset selection to top of filtered list
+            for item in self.all_items:
+                # Check if parent matches
+                parent_matches = filter_lower in item.label.lower()
+
+                # Check if any child matches
+                child_matches = False
+                if item.children:
+                    child_matches = any(
+                        filter_lower in child.label.lower()
+                        for child in item.children
+                    )
+
+                # Include if parent OR any child matches
+                if parent_matches or child_matches:
+                    matched_items.append(item)
+
+            self.filtered_items = matched_items
+
+        # Rebuild visible items and reset selection
+        self._build_visible_items()
         self.selected_index = 0
         self.scroll_offset = 0
+
+    def _toggle_expansion(self) -> None:
+        """Toggle expand/collapse for current item."""
+        if not (0 <= self.selected_index < len(self.visible_items)):
+            return
+
+        item = self.visible_items[self.selected_index]
+
+        # Only parent items can be expanded
+        if item.indent_level > 0:
+            return  # Child item, can't expand
+
+        if not item.is_expandable:
+            return  # No children to show
+
+        # Toggle expansion
+        item.is_expanded = not item.is_expanded
+
+        # Rebuild visible list
+        self._build_visible_items()
+
+    def _expand_current(self) -> None:
+        """Expand current item if possible."""
+        if not (0 <= self.selected_index < len(self.visible_items)):
+            return
+
+        item = self.visible_items[self.selected_index]
+
+        if item.indent_level == 0 and item.is_expandable and not item.is_expanded:
+            item.is_expanded = True
+            self._build_visible_items()
+
+    def _collapse_current(self) -> None:
+        """Collapse current item if possible."""
+        if not (0 <= self.selected_index < len(self.visible_items)):
+            return
+
+        item = self.visible_items[self.selected_index]
+
+        # Can collapse if:
+        # 1. Currently on expanded parent
+        # 2. Currently on a child (collapse its parent)
+
+        if item.indent_level > 0:
+            # Find and collapse parent
+            parent = self._find_parent(item)
+            if parent and parent.is_expanded:
+                parent.is_expanded = False
+                # Move selection to parent
+                self._build_visible_items()
+                # Find parent's new index
+                self.selected_index = self.visible_items.index(parent)
+
+        elif item.is_expanded:
+            # Collapse current parent
+            item.is_expanded = False
+            self._build_visible_items()
+
+    def _find_parent(self, child_item: ExpandableItem) -> Optional[ExpandableItem]:
+        """Find the parent item for a given child item."""
+        for item in self.filtered_items:
+            if item.children and child_item in item.children:
+                return item
+        return None
+
+    def _get_display_num_for_parent(self, parent_item: ExpandableItem) -> int:
+        """Get the display number for a parent item (1-indexed position among parents)."""
+        parent_count = 0
+        for item in self.filtered_items:
+            parent_count += 1
+            if item is parent_item:
+                return parent_count
+        return parent_count
+
+    def _get_parent_display_num(self, child_index: int) -> int:
+        """Get the parent's display number for a child at given visible index."""
+        # Walk backward to find parent
+        for i in range(child_index - 1, -1, -1):
+            if self.visible_items[i].indent_level == 0:
+                return self._get_display_num_for_parent(self.visible_items[i])
+        return 1
+
+    def _find_parent_start_index(self, child_index: int) -> int:
+        """Find the visible index of the parent item for a given child.
+
+        Args:
+            child_index: Index in visible_items of a child item
+
+        Returns:
+            The index of the parent item in visible_items, or 0 if not found
+        """
+        # Walk backward to find parent
+        for i in range(child_index - 1, -1, -1):
+            if self.visible_items[i].indent_level == 0:
+                return i
+        return 0
+
+    def _format_count(self, count: int) -> str:
+        """Format count with thousands separator.
+
+        Examples:
+            1 -> "1"
+            1234 -> "1,234"
+            1234567 -> "1,234,567"
+
+        Args:
+            count: The number to format
+
+        Returns:
+            Formatted string with thousands separators
+        """
+        return "{:,}".format(count)
 
     def _render(self, stdscr: Any) -> None:
         """Render the current state of the widget.
@@ -101,7 +354,7 @@ class FilterableListSelector:
         current_row = 0
 
         # Line 0: Title with item count
-        title_text = f"{self.title} ({format_count(len(self.all_items))} items)"
+        title_text = f"{self.title} ({self._format_count(len(self.all_items))} items)"
         stdscr.addnstr(current_row, 0, title_text, width - 1, curses.A_BOLD)
         current_row += 1
 
@@ -123,7 +376,7 @@ class FilterableListSelector:
 
         # Calculate actual list height (may be less than max if fewer items)
         list_start_row = current_row
-        list_height = min(max_list_height, len(self.filtered_items))
+        list_height = min(max_list_height, len(self.visible_items))
 
         # Adjust scroll offset to keep selection visible
         if self.selected_index < self.scroll_offset:
@@ -134,41 +387,78 @@ class FilterableListSelector:
         # Render visible items
         for offset in range(list_height):
             index = self.scroll_offset + offset
-            if index >= len(self.filtered_items):
+            if index >= len(self.visible_items):
                 break
 
-            label, count = self.filtered_items[index]
+            item = self.visible_items[index]
 
-            # Format: "  123. Label (1,234)"
-            display_num = index + 1
-            item_text = f"{display_num:>5}. {label} ({format_count(count)})"
+            # Build expansion indicator
+            expansion_marker = ""
+            if item.indent_level == 0:  # Parent items only
+                if item.is_expandable:
+                    if item.is_expanded:
+                        expansion_marker = " ▼"  # Expanded
+                    else:
+                        expansion_marker = " ▶"  # Collapsed
+
+            # Build indentation
+            indent = "   " * item.indent_level  # 3 spaces per indent level
+
+            # Format item text with item number and count
+            if item.indent_level > 0:
+                # Child item - use parent number + letter (1a, 1b, 1c, etc.)
+                parent_num = self._get_parent_display_num(index)
+                child_offset = index - self._find_parent_start_index(index) - 1
+                letter = chr(ord('a') + child_offset)
+                item_num = f"{parent_num}{letter}"
+            else:
+                # Parent item - use parent number (1, 2, 3, etc.)
+                item_num = str(self._get_display_num_for_parent(item))
+
+            # Format count with thousands separator
+            count_str = f"({self._format_count(item.count)})"
+
+            # Build display text
+            display_text = f"{indent}{item_num:>3}. {item.label}{expansion_marker} {count_str}"
 
             # Add selection marker
             if index == self.selected_index:
                 marker = ">"
-                item_text = f"{marker} {item_text}"
+                display_text = f"{marker} {display_text}"
                 attr = curses.A_REVERSE
             else:
-                item_text = f"  {item_text}"
+                display_text = f"  {display_text}"
                 attr = curses.A_NORMAL
 
+            # Render the line (truncate to terminal width)
             row = list_start_row + offset
-            stdscr.addnstr(row, 0, item_text, width - 1, attr)
+            try:
+                stdscr.addnstr(row, 0, display_text, width - 1, attr)
+            except curses.error:
+                # Handle edge case where terminal is too narrow or Unicode error
+                try:
+                    simplified = display_text.replace('▼', 'v').replace('▶', '>')
+                    stdscr.addnstr(row, 0, simplified, width - 1, attr)
+                except curses.error:
+                    pass  # Give up on rendering this line
 
         # Footer: Help text
-        help_text = "↑/↓ navigate  Enter select  Type to filter  Backspace delete  ESC cancel"
+        if self.allow_expand:
+            help_text = "↑/↓ navigate  Space/→/← expand  Enter select  Type filter  Backspace delete  ESC cancel"
+        else:
+            help_text = "↑/↓ navigate  Enter select  Type to filter  Backspace delete  ESC cancel"
         stdscr.addnstr(height - 1, 0, help_text, width - 1, curses.A_DIM)
 
         stdscr.refresh()
 
-    def _handle_key(self, key: int) -> Optional[str]:
+    def _handle_key(self, key: int) -> Optional[Tuple[str, Any]]:
         """Handle a keypress and return selection if complete.
 
         Args:
             key: The curses key code
 
         Returns:
-            Selected item label if Enter was pressed, None if still navigating,
+            Tuple of (label, data) if Enter was pressed, None if still navigating,
             empty string "" if cancelled
         """
         # Navigation keys (arrow keys only - allow all letters for filter typing)
@@ -177,14 +467,14 @@ class FilterableListSelector:
                 self.selected_index -= 1
 
         elif key == curses.KEY_DOWN:
-            if self.selected_index < len(self.filtered_items) - 1:
+            if self.selected_index < len(self.visible_items) - 1:
                 self.selected_index += 1
 
         elif key == curses.KEY_HOME:
             self.selected_index = 0
 
         elif key == curses.KEY_END:
-            self.selected_index = max(0, len(self.filtered_items) - 1)
+            self.selected_index = max(0, len(self.visible_items) - 1)
 
         elif key == curses.KEY_PPAGE:  # Page Up
             # Move up by ~10 items
@@ -193,15 +483,27 @@ class FilterableListSelector:
         elif key == curses.KEY_NPAGE:  # Page Down
             # Move down by ~10 items
             self.selected_index = min(
-                len(self.filtered_items) - 1,
+                len(self.visible_items) - 1,
                 self.selected_index + 10
             )
+
+        # Expand/collapse keys
+        elif self.allow_expand and key == ord(' '):  # Space bar
+            self._toggle_expansion()
+
+        elif self.allow_expand and key == curses.KEY_RIGHT:  # Right arrow
+            self._expand_current()
+
+        elif self.allow_expand and key == curses.KEY_LEFT:  # Left arrow
+            self._collapse_current()
 
         # Selection/Cancel keys
         elif key in (curses.KEY_ENTER, ord("\n"), ord("\r")):
             # Return selected item
-            if self.filtered_items and 0 <= self.selected_index < len(self.filtered_items):
-                return self.filtered_items[self.selected_index][0]
+            if self.visible_items and 0 <= self.selected_index < len(self.visible_items):
+                selected_item = self.visible_items[self.selected_index]
+                # Return tuple: (label, data) to allow accessing original objects
+                return (selected_item.label, selected_item.data)
             return ""  # No selection available
 
         elif key == 27:  # ESC
@@ -221,7 +523,7 @@ class FilterableListSelector:
 
         return None  # Continue event loop
 
-    def run(self, stdscr: Any) -> Optional[str]:
+    def run(self, stdscr: Any) -> Optional[Union[str, Tuple[str, Any]]]:
         """Show the UI and return the selected item or None if cancelled.
 
         This is the main entry point that should be called via curses.wrapper():
@@ -231,7 +533,9 @@ class FilterableListSelector:
             stdscr: The curses screen object (provided by curses.wrapper)
 
         Returns:
-            The selected item label, or None if cancelled (ESC pressed)
+            For legacy tuple items: returns the selected item label (str)
+            For ExpandableItem objects: returns (label, data) tuple
+            None if cancelled (ESC pressed)
         """
         # Initialize curses settings
         curses.curs_set(0)  # Hide cursor
@@ -264,7 +568,7 @@ class FilterableListSelector:
                 # Empty string means cancelled, return None
                 if result == "":
                     return None
-                # Otherwise return the selected label
+                # Otherwise return the result (label or tuple)
                 return result
 
 
@@ -877,6 +1181,112 @@ def extract_email_address(addr: str) -> str:
     return addr
 
 
+def _extract_display_name(addr: str) -> str:
+    """Extract the display name from an email address string.
+
+    Handles various formats:
+    - 'email@domain.com' → '' (no display name)
+    - '<email@domain.com>' → '' (no display name)
+    - 'Name <email@domain.com>' → 'Name'
+    - '"Name" <email@domain.com>' → 'Name' (quotes removed)
+    - 'First Last <email@domain.com>' → 'First Last'
+
+    Args:
+        addr: Email address string, possibly with display name
+
+    Returns:
+        The display name string, or empty string if no display name found
+    """
+    addr = addr.strip()
+    if '<' not in addr or '>' not in addr:
+        # No angle brackets means no display name
+        return ''
+
+    # Get the part before the angle brackets
+    display_part = addr[:addr.index('<')].strip()
+
+    # Remove surrounding quotes if present
+    if display_part.startswith('"') and display_part.endswith('"'):
+        display_part = display_part[1:-1].strip()
+
+    return display_part
+
+
+def create_expandable_email_items(
+    email_groups: List[EmailGroup]
+) -> List[ExpandableItem]:
+    """Convert EmailGroup objects to ExpandableItem format for selector.
+
+    Creates a hierarchical structure where:
+    - Parent: The consolidated email address (optionally marked with variation count)
+    - Children: Individual display name variations with their counts
+
+    Args:
+        email_groups: List of consolidated email groups with variations
+
+    Returns:
+        List of ExpandableItem objects ready for FilterableListSelector
+
+    Example:
+        Input: [EmailGroup("m@c.com", 150, [
+                    DisplayNameVariation("Name1 <m@c.com>", "Name1", 100),
+                    DisplayNameVariation("Name2 <m@c.com>", "Name2", 50)
+                ])]
+        Output: [ExpandableItem(
+                    label="m@c.com [2 display names]",
+                    count=150,
+                    is_expandable=True,
+                    children=[
+                        ExpandableItem(label="Name1", count=100, indent_level=1),
+                        ExpandableItem(label="Name2", count=50, indent_level=1)
+                    ]
+                )]
+    """
+    items = []
+
+    for group in email_groups:
+        # Create parent item
+        if group.has_variations:
+            label = f"{group.email} [{group.variation_count} display names]"
+        else:
+            label = group.email
+
+        parent = ExpandableItem(
+            label=label,
+            count=group.total_count,
+            is_expandable=group.has_variations,
+            is_expanded=False,
+            data=group,
+            indent_level=0
+        )
+
+        # Create child items for variations (only if multiple)
+        if group.has_variations:
+            children = []
+            for variation in group.variations:
+                # Display format: display name if available, otherwise full address
+                if variation.display_name:
+                    child_label = variation.display_name
+                else:
+                    child_label = variation.full_address
+
+                child = ExpandableItem(
+                    label=child_label,
+                    count=variation.count,
+                    is_expandable=False,
+                    is_expanded=False,
+                    data=variation,
+                    indent_level=1
+                )
+                children.append(child)
+
+            parent.children = children
+
+        items.append(parent)
+
+    return items
+
+
 def compute_domain_counts(addresses: List[Tuple[str, int]]) -> List[Tuple[str, int]]:
     """Aggregate message counts grouped by domain.
 
@@ -939,19 +1349,30 @@ def get_emails_for_domain(
 
 
 def consolidate_email_addresses(
-    addresses: List[Tuple[str, int]]
-) -> List[Tuple[str, int, int]]:
+    addresses: List[Tuple[str, int]], preserve_variations: bool = False
+) -> List:
     """Consolidate email addresses with different display names.
 
     Groups addresses by their normalized email (ignoring display names),
     sums their message counts, and tracks the number of variations.
 
+    Can return data in two formats for backward compatibility and feature expansion:
+    - Default (preserve_variations=False): Returns old format with variation count
+    - New (preserve_variations=True): Returns EmailGroup objects with full variation details
+
     Args:
         addresses: List of (email_address_with_display_name, count) tuples
+        preserve_variations: If True, return detailed EmailGroup objects with variations.
+                            If False (default), return legacy format for backward compatibility.
 
     Returns:
-        List of (normalized_email, total_count, variation_count) tuples,
-        sorted by total_count descending
+        If preserve_variations=False:
+            List of (normalized_email, total_count, variation_count) tuples,
+            sorted by total_count descending
+
+        If preserve_variations=True:
+            List of EmailGroup objects with full DisplayNameVariation details,
+            sorted by total_count descending
 
     Example:
         >>> addresses = [
@@ -960,30 +1381,69 @@ def consolidate_email_addresses(
         ...     ('Clearscore <marketing@clearscore.com>', 17),
         ...     ('updates@clearscore.com', 1008),
         ... ]
+
+        # Default backward-compatible format
         >>> consolidate_email_addresses(addresses)
         [
             ('marketing@clearscore.com', 1003, 3),
             ('updates@clearscore.com', 1008, 1)
         ]
+
+        # New detailed format with variations
+        >>> consolidate_email_addresses(addresses, preserve_variations=True)
+        [
+            EmailGroup(email='marketing@clearscore.com', total_count=1003, variations=[...]),
+            EmailGroup(email='updates@clearscore.com', total_count=1008, variations=[...])
+        ]
     """
     from collections import defaultdict
 
     # Group by normalized email
-    email_data = defaultdict(lambda: {'count': 0, 'variations': set()})
+    email_data = defaultdict(lambda: {'count': 0, 'variations': {}})
 
     for addr, count in addresses:
         normalized = extract_email_address(addr)
         email_data[normalized]['count'] += count
-        email_data[normalized]['variations'].add(addr)
+        # Store with full address as key to preserve original variation
+        if addr not in email_data[normalized]['variations']:
+            email_data[normalized]['variations'][addr] = 0
+        email_data[normalized]['variations'][addr] += count
 
-    # Convert to list with variation counts
-    result = [
-        (email, data['count'], len(data['variations']))
-        for email, data in email_data.items()
-    ]
+    if preserve_variations:
+        # Return new format with detailed variation information
+        result = []
+        for email, data in email_data.items():
+            # Create DisplayNameVariation objects for each variation
+            variations = [
+                DisplayNameVariation(
+                    full_address=full_addr,
+                    display_name=_extract_display_name(full_addr),
+                    count=count
+                )
+                for full_addr, count in data['variations'].items()
+            ]
+            # Sort variations by count descending
+            variations.sort(key=lambda v: v.count, reverse=True)
 
-    # Sort by count descending
-    return sorted(result, key=lambda x: x[1], reverse=True)
+            # Create EmailGroup with consolidated data
+            email_group = EmailGroup(
+                email=email,
+                total_count=data['count'],
+                variations=variations
+            )
+            result.append(email_group)
+
+        # Sort by total_count descending
+        return sorted(result, key=lambda x: x.total_count, reverse=True)
+    else:
+        # Return legacy format for backward compatibility
+        result = [
+            (email, data['count'], len(data['variations']))
+            for email, data in email_data.items()
+        ]
+
+        # Sort by count descending
+        return sorted(result, key=lambda x: x[1], reverse=True)
 
 
 class ConditionNode:
@@ -2350,33 +2810,42 @@ class RuleWizard:
         # Convert cluster.senders dict to list of tuples for consolidation
         senders_list = [(email, count) for email, count in cluster.senders.items()]
 
-        # Consolidate email addresses with different display names
-        consolidated = consolidate_email_addresses(senders_list)
+        # Consolidate email addresses, preserving variations for expand/collapse
+        email_groups = consolidate_email_addresses(senders_list, preserve_variations=True)
 
-        # Format consolidated senders with variation count display
-        formatted_senders = []
-        for email, count, variation_count in consolidated:
-            if variation_count > 1:
-                label = f"{email} [{variation_count} display names]"
-            else:
-                label = email
-            formatted_senders.append((label, count))
+        # Convert to expandable item format
+        expandable_items = create_expandable_email_items(email_groups)
 
-        sender_items = [(f"[All from {cluster.domain}]", cluster.total_count)]
-        sender_items.extend(formatted_senders)
+        # Prepend domain-wide option as ExpandableItem
+        domain_option = ExpandableItem(
+            label=f"[All from {cluster.domain}]",
+            count=cluster.total_count,
+            is_expandable=False,
+            data=None,
+            indent_level=0
+        )
+        sender_items = [domain_option] + expandable_items
 
         print(f"\nSelect Sender from {cluster.domain}")
         print("(Use arrow keys to navigate, type to filter, Enter to select, ESC to cancel)")
         input("Press Enter to open selector...")
 
         selector = FilterableListSelector(sender_items, f"Select Sender from {cluster.domain}")
-        selected = curses.wrapper(selector.run)
-        if not selected:
+        result = curses.wrapper(selector.run)
+        if not result:
             print("\nGoing back to domain selection...")
             return self._select_batch_target(clusters)
 
+        # Handle both tuple (label, data) from new format and string from legacy
+        if isinstance(result, tuple):
+            selected_label, selected_data = result
+        else:
+            # Backward compatibility for legacy string returns
+            selected_label = result
+            selected_data = None
+
         # Determine if domain-wide or specific email
-        if selected.startswith("[All from "):
+        if selected_label.startswith("[All from "):
             return BatchTarget(
                 target_type="domain",
                 value=cluster.domain,
@@ -2385,7 +2854,7 @@ class RuleWizard:
             )
         else:
             # Extract email from consolidated label (remove "[N display names]" suffix if present)
-            email_address = self._extract_email_from_consolidated_label(selected)
+            email_address = self._extract_email_from_consolidated_label(selected_label, selected_data)
 
             # Sum counts for all variations of this email address
             estimated_count = sum(
@@ -2506,24 +2975,46 @@ class RuleWizard:
             return f"@{domain}"
         return selection
 
-    def _extract_email_from_consolidated_label(self, label: str) -> str:
-        """Extract email address from consolidated label format.
+    def _extract_email_from_consolidated_label(
+        self,
+        label: str,
+        data: Optional[Any] = None
+    ) -> str:
+        """Extract email address from consolidated label or data.
 
-        Removes the '[N display names]' suffix if present, which is added
-        when consolidating email addresses with different display names.
+        Can extract from:
+        - Label only (legacy format): "email@domain.com [N display names]"
+        - Data object (new format): EmailGroup or DisplayNameVariation
+        - Or combination of both
 
         Args:
             label: Email label, potentially in format "email@domain.com [N display names]"
+            data: Optional data object (EmailGroup or DisplayNameVariation)
 
         Returns:
-            The email address without the consolidation suffix
+            The email address
 
         Examples:
             'marketing@clearscore.com [4 display names]' -> 'marketing@clearscore.com'
             'marketing@clearscore.com' -> 'marketing@clearscore.com'
         """
+        # If we have EmailGroup or DisplayNameVariation data, use it directly
+        if data is not None:
+            if isinstance(data, EmailGroup):
+                return data.email
+            elif isinstance(data, DisplayNameVariation):
+                # Extract email from the full address
+                return extract_email_address(data.full_address)
+
+        # Fallback to label parsing
         if ' [' in label and label.endswith(' display names]'):
             return label.split(' [')[0]
+
+        # Handle bare email
+        if '@' in label:
+            return extract_email_address(label)
+
+        # Last resort
         return label
 
     def _prepopulate_condition(self, batch_target: BatchTarget) -> None:
@@ -3211,24 +3702,25 @@ class RuleWizard:
             print(f"\nNo {field} addresses found for domain {selected_domain}")
             return None
 
-        # Consolidate email addresses with different display names
-        consolidated = consolidate_email_addresses(domain_emails)
+        # Consolidate email addresses, preserving variations for expand/collapse
+        email_groups = consolidate_email_addresses(domain_emails, preserve_variations=True)
 
-        # Format consolidated emails with variation count display
-        formatted_emails = []
-        for email, count, variation_count in consolidated:
-            if variation_count > 1:
-                label = f"{email} [{variation_count} display names]"
-            else:
-                label = email
-            formatted_emails.append((label, count))
+        # Convert to expandable item format
+        formatted_emails = create_expandable_email_items(email_groups)
 
         # Prepend "All {field} domain" option for consistency with batch mode
         # ISSUE #5 FIX: Use helper method for consistent format
-        domain_total = sum(count for _, count, _ in consolidated)
-        selector_items = [(self._format_domain_selection(selected_domain, field), domain_total)] + formatted_emails
+        domain_total = sum(group.total_count for group in email_groups)
+        domain_option = ExpandableItem(
+            label=self._format_domain_selection(selected_domain, field),
+            count=domain_total,
+            is_expandable=False,
+            data=None,
+            indent_level=0
+        )
+        selector_items = [domain_option] + formatted_emails
 
-        if len(consolidated) == 1:
+        if len(email_groups) == 1:
             # Auto-select if only one email (offer all or specific option)
             # ISSUE #5 FIX: Use helper method for consistent format
             domain_selection = self._format_domain_selection(selected_domain, field)
@@ -3236,11 +3728,11 @@ class RuleWizard:
             print("(Use arrow keys to navigate, Enter to select, ESC to cancel)")
             input("Press Enter to select option...")
 
-            selector_items = [(domain_selection, domain_total)] + formatted_emails
-            selector = FilterableListSelector(selector_items, f"Select Email Option from {selected_domain}")
-            selected_email = curses.wrapper(selector.run)
+            single_selector_items = [domain_option] + formatted_emails
+            selector = FilterableListSelector(single_selector_items, f"Select Email Option from {selected_domain}")
+            result = curses.wrapper(selector.run)
 
-            if not selected_email:
+            if not result:
                 # User cancelled
                 print("\nEmail option selection cancelled.")
                 retry_response = prompt_yes_no("Would you like to try again?", default=True)
@@ -3248,22 +3740,30 @@ class RuleWizard:
                     return self._select_email_address_two_step(field, intent=intent)
                 return None
 
+            # Handle both tuple (label, data) from new format and string from legacy
+            if isinstance(result, tuple):
+                selected_label, selected_data = result
+            else:
+                # Backward compatibility for legacy string returns
+                selected_label = result
+                selected_data = None
+
             # If user selected domain-wide format, return it
-            if self._is_domain_selection(selected_email):
-                return selected_email
+            if self._is_domain_selection(selected_label):
+                return selected_label
 
             # Offer post-selection editing
-            edited_email = self._edit_email_address(selected_email, f"{field} address")
+            edited_email = self._edit_email_address(selected_label, f"{field} address")
             return edited_email if edited_email is not None else None
 
-        print(f"\nFound {len(consolidated)} {field} addresses from {selected_domain}...")
+        print(f"\nFound {len(email_groups)} {field} addresses from {selected_domain}...")
         print("(Use arrow keys to navigate, type to filter, Enter to select, ESC to cancel)")
         input("Press Enter to select email...")
 
         selector = FilterableListSelector(selector_items, f"Select {field.upper()} Address from {selected_domain}")
-        selected_email = curses.wrapper(selector.run)
+        result = curses.wrapper(selector.run)
 
-        if not selected_email:
+        if not result:
             # ISSUE #6 FIX: Offer retry/recovery options on email cancellation
             print("\nEmail selection cancelled.")
             retry_response = prompt_yes_no("Would you like to try selecting again?", default=True)
@@ -3283,12 +3783,20 @@ class RuleWizard:
 
             return None
 
+        # Handle both tuple (label, data) from new format and string from legacy
+        if isinstance(result, tuple):
+            selected_label, selected_data = result
+        else:
+            # Backward compatibility for legacy string returns
+            selected_label = result
+            selected_data = None
+
         # Check if user selected domain-wide format
-        if self._is_domain_selection(selected_email):
-            return selected_email
+        if self._is_domain_selection(selected_label):
+            return selected_label
 
         # Extract email from consolidated label format (remove "[N display names]" suffix if present)
-        actual_email = self._extract_email_from_consolidated_label(selected_email)
+        actual_email = self._extract_email_from_consolidated_label(selected_label, selected_data)
 
         # Offer post-selection editing for specific email
         edited_email = self._edit_email_address(actual_email, f"{field} address")
