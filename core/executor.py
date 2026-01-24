@@ -2357,11 +2357,11 @@ def execute_actions(
                             or "failed" in message
                         ):
                             if strict:
-                                main_db.execute(
+                                db.execute(
                                     "UPDATE actions SET status='failed', executed_at=? WHERE id=?",
                                     (now_iso(), a_id),
                                 )
-                                main_db.commit()
+                                db.commit()
                                 logger.log(
                                     "ERROR",
                                     "message_missing_strict_abort",
@@ -2380,12 +2380,12 @@ def execute_actions(
                                     {"folder": folder, "target": target, "uid": uid, "error": str(exc)}
                                 )
                                 raise
-                            main_db.execute(
+                            db.execute(
                                 "UPDATE actions SET status='skipped', executed_at=? WHERE id=?",
                                 (now_iso(), a_id),
                             )
                             try:
-                                main_db.execute(
+                                db.execute(
                                     "DELETE FROM headers WHERE uid=? AND folder=?",
                                     (uid, folder),
                                 )
@@ -2414,7 +2414,7 @@ def execute_actions(
                             )
                             continue
 
-                        main_db.execute(
+                        db.execute(
                             "UPDATE actions SET status='failed', executed_at=? WHERE id=?",
                             (now_iso(), a_id),
                         )
@@ -2482,9 +2482,9 @@ def execute_actions(
                                 },
                                 console=f"❌ Verification error for {folder}/{uid_value}: {verify_exc}",
                             )
-                    main_db.commit()  # Commit any verification failures
+                    db.commit()  # Commit any verification failures
 
-                main_db.commit()
+                db.commit()
                 logger.log(
                     "INFO",
                     "execute_folder_done",
