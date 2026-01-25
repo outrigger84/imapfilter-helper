@@ -1720,7 +1720,14 @@ def execute_actions(
                     {"folder": folder, "uid": uid, "keywords": keywords},
                     console=console_msg,
                 )
+                # Send action success notification
+                logger.log(
+                    "INFO",
+                    "execute_action_success",
+                    {"action_type": "set_keywords", "folder": folder, "uid": uid, "keywords": keywords},
+                )
             else:
+                error_msg = _format_imap_details(resp)
                 logger.log(
                     "ERROR",
                     "execute_set_keywords_failed",
@@ -1729,7 +1736,19 @@ def execute_actions(
                         "uid": uid,
                         "keywords": keywords,
                         "status": typ,
-                        "details": _format_imap_details(resp),
+                        "details": error_msg,
+                    },
+                )
+                # Send action failure notification
+                logger.log(
+                    "ERROR",
+                    "execute_action_failed",
+                    {
+                        "action_type": "set_keywords",
+                        "folder": folder,
+                        "uid": uid,
+                        "keywords": keywords,
+                        "error": error_msg,
                     },
                 )
 
@@ -1796,7 +1815,14 @@ def execute_actions(
                     {"folder": folder, "uid": uid, "keywords": keywords},
                     console=console_msg,
                 )
+                # Send action success notification
+                logger.log(
+                    "INFO",
+                    "execute_action_success",
+                    {"action_type": "remove_keywords", "folder": folder, "uid": uid, "keywords": keywords},
+                )
             else:
+                error_msg = _format_imap_details(resp)
                 logger.log(
                     "ERROR",
                     "execute_remove_keywords_failed",
@@ -1805,7 +1831,19 @@ def execute_actions(
                         "uid": uid,
                         "keywords": keywords,
                         "status": typ,
-                        "details": _format_imap_details(resp),
+                        "details": error_msg,
+                    },
+                )
+                # Send action failure notification
+                logger.log(
+                    "ERROR",
+                    "execute_action_failed",
+                    {
+                        "action_type": "remove_keywords",
+                        "folder": folder,
+                        "uid": uid,
+                        "keywords": keywords,
+                        "error": error_msg,
                     },
                 )
 
@@ -2087,6 +2125,12 @@ def execute_actions(
                         "execute_uid_done",
                         {"folder": folder, "target": target, "uid": uid_value},
                         console=console_msg,
+                    )
+                    # Send action success notification
+                    logger.log(
+                        "INFO",
+                        "execute_action_success",
+                        {"action_type": "move", "folder": folder, "uid": uid_value, "target": target},
                     )
                     if removed:
                         logger.log(
@@ -2419,17 +2463,24 @@ def execute_actions(
                             (now_iso(), a_id),
                         )
                         stats["failed"] += 1
+                        error_str = str(exc)
                         logger.log(
                             "ERROR",
                             "execute_failed",
-                            {"uid": uid, "folder": folder, "target": target, "error": str(exc)},
+                            {"uid": uid, "folder": folder, "target": target, "error": error_str},
                             console=f"❌ {folder}/{uid}: {exc}",
                         )
                         # Log failure for GOTIFY notification
                         logger.log(
                             "WARN",
                             "imap_move_failed",
-                            {"folder": folder, "target": target, "uid": uid, "error": str(exc)}
+                            {"folder": folder, "target": target, "uid": uid, "error": error_str}
+                        )
+                        # Send action failure notification for feature parity
+                        logger.log(
+                            "ERROR",
+                            "execute_action_failed",
+                            {"action_type": "move", "folder": folder, "uid": uid, "target": target, "error": error_str}
                         )
                     except Exception:
                         if deleted_flagged:

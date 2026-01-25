@@ -130,6 +130,8 @@ class NotificationDispatcher:
             "rule_match": ("Rule Matched", "info"),
             "imap_move_success": ("Email Moved", "success"),
             "imap_move_failed": ("Email Move Failed", "warn"),
+            "execute_action_success": ("Action Executed", "success"),
+            "execute_action_failed": ("Action Failed", "warn"),
             "execute_pending_count": ("Executing Actions", "info"),
             "run_summary": ("Sync Complete", "success"),
             "stream_summary": ("Stream Complete", "success"),
@@ -171,6 +173,43 @@ class NotificationDispatcher:
             error = context.get("error", "Unknown error")
             body = f"{folder} → {target}\nError: {error}"
             priority = 5
+
+        elif message == "execute_action_success":
+            action_type = context.get("action_type", "unknown")
+            folder = context.get("folder", "")
+            uid = context.get("uid", "")
+
+            if action_type == "move":
+                target = context.get("target", "")
+                body = f"Move: {folder}/{uid} → {target}"
+            elif action_type == "set_keywords":
+                keywords = context.get("keywords", [])
+                keywords_str = ", ".join(keywords) if keywords else "none"
+                body = f"Set Keywords: {folder}/{uid}\nKeywords: {keywords_str}"
+            elif action_type == "remove_keywords":
+                keywords = context.get("keywords", [])
+                keywords_str = ", ".join(keywords) if keywords else "none"
+                body = f"Remove Keywords: {folder}/{uid}\nKeywords: {keywords_str}"
+            else:
+                body = f"Action: {action_type}\nLocation: {folder}/{uid}"
+            priority = 1
+
+        elif message == "execute_action_failed":
+            action_type = context.get("action_type", "unknown")
+            folder = context.get("folder", "")
+            uid = context.get("uid", "")
+            error = context.get("error", "Unknown error")
+
+            if action_type == "move":
+                target = context.get("target", "")
+                body = f"Move: {folder}/{uid} → {target}\nError: {error}"
+            elif action_type in ("set_keywords", "remove_keywords"):
+                keywords = context.get("keywords", [])
+                keywords_str = ", ".join(keywords) if keywords else "none"
+                body = f"{action_type.replace('_', ' ').title()}: {folder}/{uid}\nKeywords: {keywords_str}\nError: {error}"
+            else:
+                body = f"Action: {action_type}\nLocation: {folder}/{uid}\nError: {error}"
+            priority = 4
 
         elif message == "execute_pending_count":
             count = context.get("count", 0)
