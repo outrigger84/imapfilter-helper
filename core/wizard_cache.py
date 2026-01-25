@@ -3,9 +3,11 @@ Wizard Cache Manager
 
 Provides persistent caching for wizard data (folders, keywords) with TTL.
 Thread-safe for concurrent wizard sessions.
+Includes coverage analysis caching for performance optimization.
 """
 
 import json
+import os
 import time
 from pathlib import Path
 from threading import Lock
@@ -180,10 +182,83 @@ class WizardCache:
             self._cache = self._empty_cache()
             self.save()
 
+    def get_coverage(self, rules_dir: Path, cache_db: Path) -> Optional[Dict[str, Any]]:
+        """
+        Get cached coverage analysis if valid.
+
+        Checks if rules directory and cache database are unchanged since cache was built.
+
+        Args:
+            rules_dir: Path to the rules directory
+            cache_db: Path to the cache database
+
+        Returns:
+            Coverage cache dict with stats, uncovered_messages, and domain_clusters,
+            or None if cache is stale/missing
+        """
+        cache = self.load()
+        coverage_cache = cache.get('coverage', {})
+
+        data = coverage_cache.get('data')
+        if data is None:
+            return None
+
+        # Get cached mtimes
+        cached_rules_mtime = coverage_cache.get('rules_mtime')
+        cached_db_mtime = coverage_cache.get('db_mtime')
+
+        # Get current mtimes
+        try:
+            current_rules_mtime = os.path.getmtime(str(rules_dir))
+            current_db_mtime = os.path.getmtime(str(cache_db))
+        except (OSError, ValueError):
+            # Files don't exist or can't stat
+            return None
+
+        # Invalidate if mtimes changed
+        if (cached_rules_mtime != current_rules_mtime or
+                cached_db_mtime != current_db_mtime):
+            return None
+
+        return data
+
+    def set_coverage(self, coverage_data: Dict[str, Any], rules_dir: Path, cache_db: Path):
+        """
+        Store coverage analysis result with mtime tracking.
+
+        Args:
+            coverage_data: Dict with 'stats', 'uncovered_messages', 'domain_clusters'
+            rules_dir: Path to the rules directory
+            cache_db: Path to the cache database
+        """
+        cache = self.load()
+        try:
+            rules_mtime = os.path.getmtime(str(rules_dir))
+            db_mtime = os.path.getmtime(str(cache_db))
+        except (OSError, ValueError):
+            # Can't get mtimes, don't cache
+            return
+
+        cache['coverage'] = {
+            'timestamp': time.time(),
+            'rules_mtime': rules_mtime,
+            'db_mtime': db_mtime,
+            'data': coverage_data
+        }
+        self.save()
+
+    def invalidate_coverage(self):
+        """Force re-analysis of coverage on next request."""
+        cache = self.load()
+        if 'coverage' in cache:
+            cache['coverage']['data'] = None
+            self.save()
+
     def _empty_cache(self) -> Dict[str, Any]:
         """Create empty cache structure."""
         return {
             'version': self.CACHE_VERSION,
             'folders': {'timestamp': 0, 'data': None},
-            'keywords': {'timestamp': 0, 'data': None}
+            'keywords': {'timestamp': 0, 'data': None},
+            'coverage': {'timestamp': 0, 'rules_mtime': None, 'db_mtime': None, 'data': None}
         }

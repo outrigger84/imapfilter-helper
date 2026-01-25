@@ -641,6 +641,42 @@ class CacheQueryEngine:
         self.conn.row_factory = sqlite3.Row
         self.show_progress = show_progress
 
+        # Configure SQLite pragmas for better read performance on large databases
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA cache_size = -64000")  # 64MB cache
+        cursor.execute("PRAGMA mmap_size = 536870912")  # 512MB memory-mapped I/O
+        cursor.execute("PRAGMA temp_store = MEMORY")  # Use memory for temp storage
+        cursor.execute("PRAGMA journal_mode = WAL")  # Write-ahead logging for better concurrency
+
+        # Create indexes for common queries if they don't exist
+        self._create_indexes()
+
+    def _create_indexes(self):
+        """Create performance indexes on cache tables.
+
+        Indexes improve query performance for coverage analysis and pattern matching.
+        This is called once per wizard session and is idempotent (safe to call multiple times).
+        """
+        cursor = self.conn.cursor()
+
+        try:
+            # Index for folder/uid lookups (used in coverage analysis)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_headers_folder_uid
+                ON headers(folder, uid)
+            """)
+
+            # Index for status/folder lookups (used in actions table queries)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_actions_status_folder
+                ON actions(status, folder)
+            """)
+
+            self.conn.commit()
+        except sqlite3.Error as e:
+            # Indexes might already exist, which is fine
+            pass
+
     def _get_total_count(self) -> int:
         """Get total number of headers in cache for progress tracking.
 
@@ -956,13 +992,14 @@ class EmailPatternExtractor:
     """
 
     def suggest_patterns(
-        self, email_addr: str, cache_engine: CacheQueryEngine
+        self, email_addr: str, cache_engine: CacheQueryEngine, fast_mode: bool = False
     ) -> List[Tuple[str, str, int]]:
         """Suggest email patterns based on the given email address.
 
         Args:
             email_addr: Email address to extract patterns from (e.g., "noreply@amazon.com")
             cache_engine: Cache query engine for getting match counts
+            fast_mode: If True, skip pattern effectiveness checking and return first pattern immediately
 
         Returns:
             List of tuples: (pattern, description, estimated_count)
@@ -982,8 +1019,13 @@ class EmailPatternExtractor:
         if not email_addr:
             return []
 
-        patterns: List[Tuple[str, str, int]] = []
         email_lower = email_addr.lower().strip()
+
+        # In fast mode, skip effectiveness checking and return just the email as-is
+        if fast_mode:
+            return [(email_lower, "Address as-is", 0)]
+
+        patterns: List[Tuple[str, str, int]] = []
 
         # Handle case where there's no @ sign
         if '@' not in email_lower:
@@ -1040,13 +1082,14 @@ class SubjectPatternExtractor:
     """
 
     def suggest_patterns(
-        self, subject: str, cache_engine: CacheQueryEngine
+        self, subject: str, cache_engine: CacheQueryEngine, fast_mode: bool = False
     ) -> List[Tuple[str, str, int]]:
         """Suggest subject patterns based on the given subject line.
 
         Args:
             subject: Subject line to extract patterns from
             cache_engine: Cache query engine for getting match counts
+            fast_mode: If True, skip pattern effectiveness checking and return first pattern immediately
 
         Returns:
             List of tuples: (pattern, description, estimated_count)
@@ -1071,11 +1114,16 @@ class SubjectPatternExtractor:
 
         import re
 
-        patterns: List[Tuple[str, str, int]] = []
         subject_clean = subject.strip()
 
         if not subject_clean:
             return []
+
+        # In fast mode, skip effectiveness checking and return just the subject as-is
+        if fast_mode:
+            return [(subject_clean, "Subject as-is", 0)]
+
+        patterns: List[Tuple[str, str, int]] = []
 
         # 1. Exact match
         exact_count = cache_engine.count_subject_contains(subject_clean)
@@ -1938,6 +1986,122 @@ def save_rule(rule: dict | list, rules_dir: Path) -> Tuple[bool, str]:
         return False, f"Failed to write rule file: {e}"
 
 
+def _serialize_coverage_data(stats, uncovered_messages, domain_clusters):
+    """Serialize coverage analysis results to JSON-compatible format.
+
+    Converts CoverageStats, UncoveredMessage, and DomainCluster objects
+    to dictionaries suitable for JSON storage.
+
+    Args:
+        stats: CoverageStats object
+        uncovered_messages: List of UncoveredMessage objects
+        domain_clusters: List of DomainCluster objects
+
+    Returns:
+        Dict with serialized coverage data
+    """
+    # Serialize uncovered messages
+    serialized_uncovered = [
+        {
+            'uid': msg.uid,
+            'folder': msg.folder,
+            'from_address': msg.from_address,
+            'subject': msg.subject,
+            'domain': msg.domain,
+        }
+        for msg in uncovered_messages
+    ]
+
+    # Serialize domain clusters
+    serialized_clusters = [
+        {
+            'domain': cluster.domain,
+            'total_count': cluster.total_count,
+            'senders': cluster.senders,
+            'messages': [
+                {
+                    'uid': msg.uid,
+                    'folder': msg.folder,
+                    'from_address': msg.from_address,
+                    'subject': msg.subject,
+                    'domain': msg.domain,
+                }
+                for msg in cluster.messages
+            ]
+        }
+        for cluster in domain_clusters
+    ]
+
+    return {
+        'stats': {
+            'total_messages': stats.total_messages,
+            'covered_messages': stats.covered_messages,
+            'uncovered_messages': stats.uncovered_messages,
+            'coverage_by_rule': stats.coverage_by_rule,
+        },
+        'uncovered_messages': serialized_uncovered,
+        'domain_clusters': serialized_clusters,
+    }
+
+
+def _deserialize_coverage_data(data):
+    """Deserialize coverage data from JSON format back to objects.
+
+    Converts stored dictionaries back to CoverageStats, UncoveredMessage,
+    and DomainCluster objects.
+
+    Args:
+        data: Dict with serialized coverage data
+
+    Returns:
+        Tuple of (CoverageStats, List[UncoveredMessage], List[DomainCluster])
+    """
+    from core.tools.coverage_analyzer import CoverageStats, UncoveredMessage, DomainCluster
+
+    # Deserialize stats
+    stats_data = data['stats']
+    stats = CoverageStats(
+        total_messages=stats_data['total_messages'],
+        covered_messages=stats_data['covered_messages'],
+        uncovered_messages=stats_data['uncovered_messages'],
+        coverage_by_rule=stats_data['coverage_by_rule'],
+    )
+
+    # Deserialize uncovered messages
+    uncovered_messages = [
+        UncoveredMessage(
+            uid=msg['uid'],
+            folder=msg['folder'],
+            from_address=msg['from_address'],
+            subject=msg['subject'],
+            domain=msg['domain'],
+        )
+        for msg in data['uncovered_messages']
+    ]
+
+    # Deserialize domain clusters
+    domain_clusters = [
+        DomainCluster(
+            domain=cluster['domain'],
+            total_count=cluster['total_count'],
+            senders=cluster['senders'],
+            messages=[
+                UncoveredMessage(
+                    uid=msg['uid'],
+                    folder=msg['folder'],
+                    from_address=msg['from_address'],
+                    subject=msg['subject'],
+                    domain=msg['domain'],
+                )
+                for msg in cluster['messages']
+            ]
+        )
+        for cluster in data['domain_clusters']
+    ]
+
+    return stats, uncovered_messages, domain_clusters
+
+
 class RuleWizard:
     """Interactive wizard for creating IMAPFilter rules with guided workflow.
 
@@ -2004,6 +2168,15 @@ class RuleWizard:
         # Batch mode context for consistency across condition selection
         self.batch_mode_active = False
         self.batch_selected_cluster: Optional[DomainCluster] = None
+
+        # Fast mode flag - set via CLI --fast-mode to skip pattern effectiveness checking
+        self.fast_mode = False
+
+        # Session-level JSON parsing cache for header data
+        # Caches parsed headers to avoid repeated parsing of the same message data
+        # Limited to 10,000 entries to avoid excessive memory usage
+        self._json_parse_cache: Dict[Tuple[str, str], dict] = {}
+        self._json_cache_max_size = 10000
 
         # Validate cache exists
         if not self.config.paths.db_file.exists():
@@ -2090,6 +2263,81 @@ class RuleWizard:
             print("\nKeywords: ❌ Not cached")
 
         print("=" * 60)
+
+    def _load_or_analyze_coverage(self):
+        """Load cached coverage analysis or perform fresh analysis.
+
+        Checks if coverage cache is valid (rules and cache.db unchanged).
+        If valid, returns cached results. Otherwise, performs analysis
+        and caches the results.
+
+        Returns:
+            CoverageStats object with coverage information
+        """
+        # Try to load from cache
+        cached_data = self.wizard_cache.get_coverage(
+            self.config.paths.rules_dir,
+            self.config.paths.db_file
+        )
+
+        if cached_data:
+            # Cache hit - restore objects from cached data
+            print("  (using cached analysis)")
+            stats, uncovered_messages, domain_clusters = _deserialize_coverage_data(cached_data)
+            self.coverage_analyzer._coverage_stats = stats
+            self.coverage_analyzer._uncovered_messages = uncovered_messages
+            self.coverage_analyzer._domain_clusters = domain_clusters
+            return stats
+
+        # Cache miss - perform analysis
+        stats = self.coverage_analyzer.analyze_coverage()
+
+        # Save results to cache for next run
+        try:
+            uncovered_messages = self.coverage_analyzer.get_uncovered_messages()
+            domain_clusters = self.coverage_analyzer.get_domain_clusters()
+            coverage_data = _serialize_coverage_data(stats, uncovered_messages, domain_clusters)
+            self.wizard_cache.set_coverage(
+                coverage_data,
+                self.config.paths.rules_dir,
+                self.config.paths.db_file
+            )
+        except Exception as e:
+            # Don't fail if caching doesn't work
+            if self.logger:
+                self.logger.log(f"Warning: Could not cache coverage data: {e}")
+
+        return stats
+
+    def _get_parsed_header(self, folder: str, uid: str, data: str) -> dict:
+        """Get parsed header, using session-level cache to avoid re-parsing.
+
+        This method caches parsed headers to improve performance when the
+        same message data is accessed multiple times during the wizard session.
+
+        Args:
+            folder: Folder name
+            uid: Message UID
+            data: Raw message data (JSON string)
+
+        Returns:
+            Parsed header dictionary
+        """
+        cache_key = (folder, uid)
+
+        # Check cache first
+        if cache_key in self._json_parse_cache:
+            return self._json_parse_cache[cache_key]
+
+        # Parse and cache
+        raw_header = _extract_raw_header(data)
+        header = _parse_header_map(raw_header)
+
+        # Only cache if we're not exceeding memory limits
+        if len(self._json_parse_cache) < self._json_cache_max_size:
+            self._json_parse_cache[cache_key] = header
+
+        return header
 
     def _input_with_prefill(self, prompt: str, prefill: str = "") -> str:
         """
@@ -2520,7 +2768,7 @@ class RuleWizard:
                 rules_dir=self.config.paths.rules_dir,
                 logger=self.logger,
             )
-            stats = self.coverage_analyzer.analyze_coverage()
+            stats = self._load_or_analyze_coverage()
 
             # Display coverage statistics
             self._display_coverage_stats(stats)
@@ -2729,9 +2977,10 @@ class RuleWizard:
             exit_code = self._save_batch_rule()
             if exit_code == 0:
                 print("✅ Rule saved!")
-                # Refresh coverage analysis
+                # Invalidate coverage cache and refresh analysis
                 print("\n🔄 Refreshing coverage...")
-                stats = self.coverage_analyzer.analyze_coverage()
+                self.wizard_cache.invalidate_coverage()
+                stats = self._load_or_analyze_coverage()
                 self._display_coverage_stats(stats)
 
                 if stats.uncovered_messages == 0:
@@ -3835,6 +4084,32 @@ class RuleWizard:
         if field in ("from", "to", "reply-to"):
             display_value = self._extract_email_from_consolidated_label(value)
 
+        # Fast mode: skip pattern effectiveness checking and use first pattern as-is
+        if self.fast_mode:
+            # In fast mode, we skip pattern counting to save 5-10 seconds per criteria
+            if field in ("from", "to", "reply-to"):
+                # Get just the first pattern without effectiveness checking
+                patterns = self.email_extractor.suggest_patterns(display_value, self.cache_engine, fast_mode=True)
+                if patterns:
+                    print(f"\n{field.title()}: {display_value}")
+                    print(f"  Using pattern: {patterns[0][0]}")
+                    return patterns[0][0]
+                else:
+                    return display_value
+            elif field == "subject":
+                patterns = self.subject_extractor.suggest_patterns(value, self.cache_engine, fast_mode=True)
+                if patterns:
+                    print(f"\n{field.title()}: {value}")
+                    print(f"  Using pattern: {patterns[0][0]}")
+                    return patterns[0][0]
+                else:
+                    return value
+            else:
+                # For other fields, just use the value as-is
+                print(f"\n{field.title()}: {value}")
+                return value
+
+        # Normal mode: generate suggestions and let user pick
         # Generate suggestions based on field type
         if field in ("from", "to", "reply-to"):
             patterns = self.email_extractor.suggest_patterns(display_value, self.cache_engine)
@@ -4185,38 +4460,57 @@ class RuleWizard:
             counter = Counter()
             processed = 0
 
-            # For each uncovered message, extract the field value
-            for msg in uncovered_messages:
-                processed += 1
-                if processed % 1000 == 0:
-                    print(f"  Processed {processed:,} uncovered messages...", end="\r")
+            # Build a map of (folder, uid) tuples for bulk lookup
+            message_ids = [(msg.folder, msg.uid) for msg in uncovered_messages]
 
-                # Parse the message header from cache
-                cursor = self.cache_engine.conn.cursor()
-                cursor.execute("SELECT data FROM headers WHERE uid = ? AND folder = ?", (msg.uid, msg.folder))
-                row = cursor.fetchone()
+            # Fetch all uncovered messages in one query for better performance (instead of N+1)
+            cursor = self.cache_engine.conn.cursor()
 
-                if not row:
+            # Group messages by folder for more efficient querying
+            messages_by_folder = {}
+            for folder, uid in message_ids:
+                if folder not in messages_by_folder:
+                    messages_by_folder[folder] = []
+                messages_by_folder[folder].append(uid)
+
+            # Fetch all messages using IN clause for each folder
+            for folder, uids in messages_by_folder.items():
+                if not uids:
                     continue
 
-                data = row[0] if row else ""
-                raw_header = _extract_raw_header(data)
-                header = _parse_header_map(raw_header)
+                # Use WHERE uid IN (...) for bulk fetch instead of individual queries
+                placeholders = ','.join('?' * len(uids))
+                query = f"SELECT uid, data FROM headers WHERE folder = ? AND uid IN ({placeholders})"
+                cursor.execute(query, [folder] + uids)
 
-                # Extract the field value
-                if field == "subject":
-                    value = header.get("subject", "").strip()
-                elif field in ("to", "cc", "bcc"):
-                    value = header.get(field, "").strip()
-                elif field == "from":
-                    value = header.get("from", "").strip()
-                elif field == "list-id":
-                    value = header.get("list-id", "").strip()
-                else:
-                    value = header.get(field, "").strip()
+                for row in cursor.fetchall():
+                    processed += 1
+                    if processed % 1000 == 0:
+                        print(f"  Processed {processed:,} uncovered messages...", end="\r")
 
-                if value:
-                    counter[value] += 1
+                    if not row:
+                        continue
+
+                    uid = row[0] if len(row) > 0 else ""
+                    data = row[1] if len(row) > 1 else ""
+
+                    # Use cached header parsing to avoid repeated parsing
+                    header = self._get_parsed_header(folder, uid, data)
+
+                    # Extract the field value
+                    if field == "subject":
+                        value = header.get("subject", "").strip()
+                    elif field in ("to", "cc", "bcc"):
+                        value = header.get(field, "").strip()
+                    elif field == "from":
+                        value = header.get("from", "").strip()
+                    elif field == "list-id":
+                        value = header.get("list-id", "").strip()
+                    else:
+                        value = header.get(field, "").strip()
+
+                    if value:
+                        counter[value] += 1
 
             print(f"  Processed {processed:,} uncovered messages total")
             result = counter.most_common()  # Get all values, sorted by count

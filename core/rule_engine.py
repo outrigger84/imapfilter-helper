@@ -5,12 +5,33 @@ import email
 import json
 import re
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional, Sequence, Tuple
 
 from tqdm import tqdm
 
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
+
+
+@lru_cache(maxsize=1024)
+def _get_compiled_regex(pattern: str) -> re.Pattern:
+    """Get a compiled regex pattern, with caching to avoid recompilation.
+
+    This function caches compiled regex objects to improve performance
+    when the same patterns are used repeatedly (e.g., during coverage
+    analysis where rules are evaluated against many messages).
+
+    Args:
+        pattern: Regex pattern string to compile
+
+    Returns:
+        Compiled regex pattern object
+
+    Raises:
+        re.error: If the pattern is invalid
+    """
+    return re.compile(pattern, re.IGNORECASE)
 
 
 def load_rules(rule_dir: Path, logger: JsonLogger) -> list[dict]:
@@ -243,7 +264,11 @@ def rule_match(header: dict, cond: dict) -> bool:
 
     if "regex" in cond:
         pattern = cond["regex"]
-        return bool(re.search(pattern, value, re.I))
+        try:
+            compiled = _get_compiled_regex(pattern)
+            return bool(compiled.search(value))
+        except re.error:
+            return False
 
     # Negative operators
     if "not_contains" in cond:
@@ -256,7 +281,11 @@ def rule_match(header: dict, cond: dict) -> bool:
 
     if "not_regex" in cond:
         pattern = cond["not_regex"]
-        return not bool(re.search(pattern, value, re.I))
+        try:
+            compiled = _get_compiled_regex(pattern)
+            return not bool(compiled.search(value))
+        except re.error:
+            return True  # Invalid regex should not match
 
     # No valid operator found
     return False
