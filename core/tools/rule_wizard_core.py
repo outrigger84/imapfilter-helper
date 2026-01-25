@@ -3033,8 +3033,13 @@ class RuleWizard:
             exit_code = self._save_batch_rule()
             if exit_code == 0:
                 print("✅ Rule saved!")
-                # Refresh coverage analysis
-                # The in-session cache will auto-invalidate if rule count changed
+                # Update session cache rule count to match new rule count
+                # This prevents re-analysis of the same coverage data within batch mode
+                # The coverage shown might not perfectly account for the new rule,
+                # but skipping re-analysis saves ~220s per rule in batch mode
+                self._session_coverage_rule_count = self._get_rule_count()
+
+                # Now coverage refresh will use the session cache instead of re-analyzing
                 print("\n🔄 Updating coverage...")
                 stats = self._load_or_analyze_coverage()
                 self._display_coverage_stats(stats)
