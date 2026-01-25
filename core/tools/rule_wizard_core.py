@@ -12,6 +12,7 @@ import email
 import imaplib
 import json
 import sqlite3
+import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -2178,6 +2179,12 @@ class RuleWizard:
         self._json_parse_cache: Dict[Tuple[str, str], dict] = {}
         self._json_cache_max_size = 10000
 
+        # In-session coverage cache - skip re-analysis within batch mode if rules haven't changed
+        # This allows users to create multiple rules without re-analyzing coverage each time
+        self._session_coverage_cache: Optional[Tuple] = None  # (stats, uncovered_messages, domain_clusters)
+        self._session_coverage_rule_count: Optional[int] = None  # Track rules count when cached
+        self._session_coverage_timestamp: Optional[float] = None
+
         # Validate cache exists
         if not self.config.paths.db_file.exists():
             raise ValueError(
@@ -2264,17 +2271,51 @@ class RuleWizard:
 
         print("=" * 60)
 
+    def _get_rule_count(self) -> int:
+        """Get current number of rule files in rules directory.
+
+        Used to detect if rules have changed since last analysis.
+
+        Returns:
+            Number of *.json files in rules directory
+        """
+        try:
+            return len(list(self.config.paths.rules_dir.glob("*.json")))
+        except Exception:
+            return 0
+
     def _load_or_analyze_coverage(self):
         """Load cached coverage analysis or perform fresh analysis.
 
-        Checks if coverage cache is valid (rules and cache.db unchanged).
-        If valid, returns cached results. Otherwise, performs analysis
-        and caches the results.
+        Checks caches in priority order:
+        1. In-session cache (if rule count hasn't changed)
+        2. Persistent cache (if rules and db files unchanged)
+        3. Run fresh analysis
+
+        This enables fast batch mode by skipping re-analysis when rules
+        haven't actually changed, while still updating between wizard sessions.
 
         Returns:
             CoverageStats object with coverage information
         """
-        # Try to load from cache
+        current_rule_count = self._get_rule_count()
+
+        # Check session cache first - fastest path for batch mode
+        if self._session_coverage_cache is not None:
+            if current_rule_count == self._session_coverage_rule_count:
+                # Session cache still valid - rules haven't changed
+                print("  (using session cache - rules unchanged)")
+                stats, uncovered_messages, domain_clusters = self._session_coverage_cache
+                self.coverage_analyzer._coverage_stats = stats
+                self.coverage_analyzer._uncovered_messages = uncovered_messages
+                self.coverage_analyzer._domain_clusters = domain_clusters
+                return stats
+            else:
+                # Rules changed - invalidate session cache
+                self._session_coverage_cache = None
+                self._session_coverage_rule_count = None
+
+        # Try persistent cache (disk) next
         cached_data = self.wizard_cache.get_coverage(
             self.config.paths.rules_dir,
             self.config.paths.db_file
@@ -2282,30 +2323,43 @@ class RuleWizard:
 
         if cached_data:
             # Cache hit - restore objects from cached data
-            print("  (using cached analysis)")
+            print("  (using persistent cache)")
             stats, uncovered_messages, domain_clusters = _deserialize_coverage_data(cached_data)
             self.coverage_analyzer._coverage_stats = stats
             self.coverage_analyzer._uncovered_messages = uncovered_messages
             self.coverage_analyzer._domain_clusters = domain_clusters
+
+            # Store in session cache for fast access within batch mode
+            self._session_coverage_cache = (stats, uncovered_messages, domain_clusters)
+            self._session_coverage_rule_count = current_rule_count
+            self._session_coverage_timestamp = time.time()
             return stats
 
-        # Cache miss - perform analysis
+        # No cache - perform fresh analysis
         stats = self.coverage_analyzer.analyze_coverage()
+        uncovered_messages = self.coverage_analyzer.get_uncovered_messages()
+        domain_clusters = self.coverage_analyzer.get_domain_clusters()
 
-        # Save results to cache for next run
+        # Store in session cache
+        self._session_coverage_cache = (stats, uncovered_messages, domain_clusters)
+        self._session_coverage_rule_count = current_rule_count
+        self._session_coverage_timestamp = time.time()
+
+        # Save results to persistent cache for next wizard session
         try:
-            uncovered_messages = self.coverage_analyzer.get_uncovered_messages()
-            domain_clusters = self.coverage_analyzer.get_domain_clusters()
             coverage_data = _serialize_coverage_data(stats, uncovered_messages, domain_clusters)
+
+            # Log cache save attempt (helpful for debugging)
+            print(f"  Saving coverage to persistent cache ({len(uncovered_messages)} uncovered, {len(domain_clusters)} domains)...")
             self.wizard_cache.set_coverage(
                 coverage_data,
                 self.config.paths.rules_dir,
                 self.config.paths.db_file
             )
+            print("  ✓ Persistent cache saved")
         except Exception as e:
-            # Don't fail if caching doesn't work
-            if self.logger:
-                self.logger.log(f"Warning: Could not cache coverage data: {e}")
+            # Don't fail if caching doesn't work, but warn user
+            print(f"  ⚠️  Could not save persistent cache: {e}")
 
         return stats
 
@@ -2979,9 +3033,9 @@ class RuleWizard:
             exit_code = self._save_batch_rule()
             if exit_code == 0:
                 print("✅ Rule saved!")
-                # Invalidate coverage cache and refresh analysis
-                print("\n🔄 Refreshing coverage...")
-                self.wizard_cache.invalidate_coverage()
+                # Refresh coverage analysis
+                # The in-session cache will auto-invalidate if rule count changed
+                print("\n🔄 Updating coverage...")
                 stats = self._load_or_analyze_coverage()
                 self._display_coverage_stats(stats)
 

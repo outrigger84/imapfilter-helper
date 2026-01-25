@@ -239,6 +239,10 @@ class WizardCache:
             # Can't get mtimes, don't cache
             return
 
+        # Verify coverage_data is not empty
+        if not coverage_data or 'stats' not in coverage_data:
+            return
+
         cache['coverage'] = {
             'timestamp': time.time(),
             'rules_mtime': rules_mtime,
