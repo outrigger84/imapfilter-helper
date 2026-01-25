@@ -995,10 +995,16 @@ class EmailPatternExtractor:
     def suggest_patterns(
         self, email_addr: str, cache_engine: CacheQueryEngine, fast_mode: bool = False
     ) -> List[Tuple[str, str, int]]:
-        """Suggest email patterns based on the given email address.
+        """Suggest email patterns based on the given email address or display name variation.
+
+        Handles both plain email addresses and full addresses with display names
+        (e.g., "Name <email@domain.com>"). When display names are present, suggests
+        patterns that include the display name for differentiation.
 
         Args:
-            email_addr: Email address to extract patterns from (e.g., "noreply@amazon.com")
+            email_addr: Email address to extract patterns from. Can be:
+                       - Plain: "noreply@amazon.com"
+                       - With display name: "Amazon Support <noreply@amazon.com>"
             cache_engine: Cache query engine for getting match counts
             fast_mode: If True, skip pattern effectiveness checking and return first pattern immediately
 
@@ -1016,17 +1022,41 @@ class EmailPatternExtractor:
             noreply@amazon.*               All TLDs            127 messages
             @amazon.com                    All from domain     203 messages
             amazon                         All amazon domains  298 messages
+
+            >>> # With display name
+            >>> patterns = extractor.suggest_patterns("Amazon Support <noreply@amazon.com>", cache)
+            Amazon Support <noreply@amazon.com>  With display name  12 messages
+            Amazon Support                       Display name only   14 messages
+            noreply@amazon.com                   Email only         45 messages
         """
         if not email_addr:
             return []
 
         email_lower = email_addr.lower().strip()
+        patterns: List[Tuple[str, str, int]] = []
+
+        # Extract display name if present
+        display_name = _extract_display_name(email_addr)
+        clean_email = extract_email_address(email_addr)
 
         # In fast mode, skip effectiveness checking and return just the email as-is
         if fast_mode:
             return [(email_lower, "Address as-is", 0)]
 
-        patterns: List[Tuple[str, str, int]] = []
+        # If this has a display name variation, add patterns for it
+        if display_name and display_name.lower() != clean_email.lower():
+            # 1. Full address with display name (highest precision)
+            full_count = cache_engine.count_from_contains(email_lower)
+            patterns.append((email_lower, "Full address (with display name)", full_count))
+
+            # 2. Display name only (if different from email)
+            display_name_lower = display_name.lower()
+            display_count = cache_engine.count_from_contains(display_name_lower)
+            if display_count > 0:
+                patterns.append((display_name_lower, "Display name only", display_count))
+
+        # Now add patterns for just the email address part
+        email_lower = clean_email.lower()
 
         # Handle case where there's no @ sign
         if '@' not in email_lower:
@@ -3297,6 +3327,10 @@ class RuleWizard:
     ) -> str:
         """Extract email address from consolidated label or data.
 
+        Preserves display names when a specific DisplayNameVariation is selected.
+        This allows rules to differentiate between emails with the same address
+        but different display names (e.g., different company names).
+
         Can extract from:
         - Label only (legacy format): "email@domain.com [N display names]"
         - Data object (new format): EmailGroup or DisplayNameVariation
@@ -3307,27 +3341,33 @@ class RuleWizard:
             data: Optional data object (EmailGroup or DisplayNameVariation)
 
         Returns:
-            The email address
+            The full email address with display name preserved if a specific
+            variation was selected, or just the email if a consolidated group was selected
 
         Examples:
-            'marketing@clearscore.com [4 display names]' -> 'marketing@clearscore.com'
-            'marketing@clearscore.com' -> 'marketing@clearscore.com'
+            EmailGroup data -> 'marketing@clearscore.com'
+            DisplayNameVariation data -> 'ClearScore <marketing@clearscore.com>'
+            Consolidated label -> 'marketing@clearscore.com'
         """
-        # If we have EmailGroup or DisplayNameVariation data, use it directly
+        # If we have DisplayNameVariation data, use the FULL address to preserve display name
         if data is not None:
-            if isinstance(data, EmailGroup):
+            if isinstance(data, DisplayNameVariation):
+                # Return full address WITH display name to differentiate from other variations
+                # This allows rules like:
+                # - "A1 Rushmoor Radio Taxis Limited <no-reply@icabbi.com>"
+                # - "Apple Central Taxis (SW) Limited <no-reply@icabbi.com>"
+                return data.full_address
+            elif isinstance(data, EmailGroup):
+                # For consolidated groups, just return the email address
                 return data.email
-            elif isinstance(data, DisplayNameVariation):
-                # Extract email from the full address
-                return extract_email_address(data.full_address)
 
         # Fallback to label parsing
         if ' [' in label and label.endswith(' display names]'):
             return label.split(' [')[0]
 
-        # Handle bare email
+        # Handle bare email or full address with display name
         if '@' in label:
-            return extract_email_address(label)
+            return label
 
         # Last resort
         return label
@@ -4132,18 +4172,20 @@ class RuleWizard:
     def _suggest_patterns(self, field: str, value: str) -> Optional[str]:
         """Show pattern suggestions and let user pick one.
 
+        For email fields, handles both plain addresses and display name variations.
+        When a user selects a display name variation, patterns will include the
+        display name to differentiate from other senders.
+
         Args:
-            field: Header field name
-            value: The selected value
+            field: Header field name (from, to, cc, bcc, subject, etc.)
+            value: The selected value (already includes display name if one was selected)
 
         Returns:
             Chosen pattern string, or None if cancelled
         """
-        # For email fields, extract clean address from consolidated labels
-        # This handles cases like "email@domain.com [2 display names]" from expandable selectors
+        # Value is already properly formatted with display name preserved from selection
+        # No need to extract - just use as-is
         display_value = value
-        if field in ("from", "to", "reply-to"):
-            display_value = self._extract_email_from_consolidated_label(value)
 
         # Fast mode: skip pattern effectiveness checking and use first pattern as-is
         if self.fast_mode:
