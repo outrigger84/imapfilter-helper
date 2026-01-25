@@ -2781,8 +2781,8 @@ class RuleWizard:
         selector = FilterableListSelector(
             domain_items, f"Select Domain ({len(clusters)} with uncovered emails)"
         )
-        selected_domain = curses.wrapper(selector.run)
-        if not selected_domain:
+        selection_result = curses.wrapper(selector.run)
+        if not selection_result:
             # ISSUE #6 FIX: Enhanced domain cancellation with menu options
             print("\nDomain selection cancelled.")
             print("\nWhat would you like to do?")
@@ -2799,6 +2799,11 @@ class RuleWizard:
             else:
                 return None
 
+        # Extract label from (label, data) tuple returned by selector
+        if isinstance(selection_result, tuple):
+            selected_domain = selection_result[0]
+        else:
+            selected_domain = selection_result
 
         # Find the cluster
         cluster = self.coverage_analyzer.find_cluster(selected_domain)
@@ -3582,9 +3587,9 @@ class RuleWizard:
         input("Press Enter to open selector...")
 
         selector = FilterableListSelector(items, f"Select {field.title()}")
-        selected = curses.wrapper(selector.run)
+        selection_result = curses.wrapper(selector.run)
 
-        if selected is None:
+        if selection_result is None:
             # ISSUE #1 FIX: Offer manual entry on cancellation (consistent with keyword selection)
             print("\nSelection cancelled.")
             manual_response = prompt_yes_no("Would you like to enter the value manually?", default=True)
@@ -3593,6 +3598,12 @@ class RuleWizard:
                 if manual_value:
                     return manual_value
             return None
+
+        # Extract label from (label, data) tuple returned by selector
+        if isinstance(selection_result, tuple):
+            selected = selection_result[0]
+        else:
+            selected = selection_result
 
         # Offer post-selection editing for email fields
         if field in ("to", "reply-to", "cc", "bcc"):
@@ -3685,7 +3696,13 @@ class RuleWizard:
             input("Press Enter to select domain...")
 
             selector = FilterableListSelector(domain_counts, f"Select Domain for {field.upper()}")
-            selected_domain = curses.wrapper(selector.run)
+            selection_result = curses.wrapper(selector.run)
+
+            # Extract label from (label, data) tuple returned by selector
+            if isinstance(selection_result, tuple):
+                selected_domain = selection_result[0]
+            else:
+                selected_domain = selection_result
 
         if not selected_domain:
             # ISSUE #6 FIX: Offer retry on domain cancellation
@@ -4445,15 +4462,21 @@ class RuleWizard:
         input("Press Enter to open folder selector...")
 
         selector = FilterableListSelector(items, "Select Target Folder")
-        selected = curses.wrapper(selector.run)
+        selection_result = curses.wrapper(selector.run)
 
-        if selected is None:
+        if selection_result is None:
             # User cancelled (ESC) - offer manual entry
             print("\nSelection cancelled.")
             print("Would you like to enter a folder path manually?")
             print("(Press Enter to skip, or type the folder path)")
             manual = input("  > ").strip()
             return manual if manual else None
+
+        # Extract label from (label, data) tuple returned by selector
+        if isinstance(selection_result, tuple):
+            selected = selection_result[0]
+        else:
+            selected = selection_result
 
         # User selected a folder - offer option to edit it
         return self._edit_folder_path(selected)
@@ -4646,9 +4669,9 @@ class RuleWizard:
 
         # Show filterable selector
         selector = FilterableListSelector(items, "Select Keywords")
-        selected_display = curses.wrapper(selector.run)
+        selection_result = curses.wrapper(selector.run)
 
-        if selected_display is None:
+        if selection_result is None:
             # User cancelled - offer manual entry
             print("\nSelection cancelled.")
             response = prompt_yes_no("Would you like to enter keywords manually?", default=False)
@@ -4656,6 +4679,12 @@ class RuleWizard:
                 return self._enter_keywords_manually()
             else:
                 return None
+
+        # Extract label from (label, data) tuple returned by selector
+        if isinstance(selection_result, tuple):
+            selected_display = selection_result[0]
+        else:
+            selected_display = selection_result
 
         # Extract keyword from display text, removing emoji prefix and message count
         # Handles both "📌 keyword" and "📊 keyword (count messages)" formats
