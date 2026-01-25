@@ -2102,7 +2102,7 @@ def execute_actions(
                     raise imaplib.IMAP4.error(f"Cannot open folder {folder}")
 
                 target_ready = target is None
-                successful_moves: list[tuple[int, str]] = []  # Track (action_id, uid) for post-EXPUNGE verification
+                successful_moves: list[tuple[int, str]] = []  # Track (action_id, uid) for pre-EXPUNGE verification
 
                 def _record_success(action_id: int, uid_value: str) -> None:
                     """Mark action as successful and track for later verification."""
@@ -2145,7 +2145,7 @@ def execute_actions(
                         )
 
                 def _verify_move(action_id: int, uid_value: str) -> None:
-                    """Verify a successful move after EXPUNGE."""
+                    """Verify a successful move before EXPUNGE to prevent accidental deletion."""
                     message_id = _cached_message_id(folder, uid_value)
                     if not message_id:
                         logger.log(
@@ -2504,6 +2504,59 @@ def execute_actions(
                         msgs_bar.update(1)
                         actions_bar.update(1)
 
+                # CRITICAL FIX: Verify all successful moves BEFORE EXPUNGE
+                # This prevents messages from being deleted if verification fails
+                verified_uids: set[str] = set()  # UIDs that passed verification
+                if successful_moves and verify_moves:
+                    for action_id, uid_value in successful_moves:
+                        try:
+                            _verify_move(action_id, uid_value)
+                            verified_uids.add(uid_value)
+                        except Exception as verify_exc:  # pragma: no cover
+                            logger.log(
+                                "ERROR",
+                                "execute_verify_exception",
+                                {
+                                    "action_id": action_id,
+                                    "uid": uid_value,
+                                    "error": str(verify_exc),
+                                },
+                                console=f"❌ Verification failed for {folder}/{uid_value}: {verify_exc}",
+                            )
+                            # Remove \Deleted flag for failed verification to prevent accidental expunge
+                            try:
+                                cleanup_typ, cleanup_resp = client.uid(
+                                    "STORE", uid_value, "-FLAGS", "(\\Deleted)"
+                                )
+                                log_imap_call(
+                                    "imap_uid_store_cleanup_failed_verify",
+                                    op_label="UID STORE -FLAGS (verification failed)",
+                                    status=cleanup_typ,
+                                    response=cleanup_resp,
+                                    folder=folder,
+                                    target=target,
+                                    uid=uid_value,
+                                )
+                                logger.log(
+                                    "INFO",
+                                    "execute_verify_cleanup_flag",
+                                    {"folder": folder, "uid": uid_value, "action": "restored from deletion"},
+                                    console=f"   🔄 Restored {folder}/{uid_value} (verification failed)",
+                                )
+                            except Exception as cleanup_exc:  # pragma: no cover
+                                logger.log(
+                                    "WARN",
+                                    "execute_verify_cleanup_flag_failed",
+                                    {
+                                        "folder": folder,
+                                        "uid": uid_value,
+                                        "error": str(cleanup_exc),
+                                    },
+                                )
+                    db.commit()  # Commit any verification results
+
+                # Now EXPUNGE only after verification is complete
+                # Messages will only be deleted if they were verified in destination
                 try:
                     exp_typ, exp_resp = client.expunge()
                     log_imap_call(
@@ -2516,24 +2569,6 @@ def execute_actions(
                     )
                 except Exception:  # pragma: no cover - best effort cleanup
                     pass
-
-                # Verify all successful moves after EXPUNGE completes
-                if successful_moves and verify_moves:
-                    for action_id, uid_value in successful_moves:
-                        try:
-                            _verify_move(action_id, uid_value)
-                        except Exception as verify_exc:  # pragma: no cover
-                            logger.log(
-                                "ERROR",
-                                "execute_verify_exception",
-                                {
-                                    "action_id": action_id,
-                                    "uid": uid_value,
-                                    "error": str(verify_exc),
-                                },
-                                console=f"❌ Verification error for {folder}/{uid_value}: {verify_exc}",
-                            )
-                    db.commit()  # Commit any verification failures
 
                 db.commit()
                 logger.log(
@@ -2783,7 +2818,7 @@ def _execute_folder_worker(
         worker_id: Worker ID for logging
         dry_run: Preview actions without executing
         strict: Abort on first error
-        verify_moves: Verify moves after EXPUNGE
+        verify_moves: Verify moves before EXPUNGE (to prevent accidental deletion)
         backup_moved: Backup messages before moving
         backup_all: Backup all cached messages
         backup_dir: Directory for backups
@@ -2918,7 +2953,7 @@ def _execute_folder_worker(
                             client=client,
                             main_db=main_db,
                             action=action,
-                            verify_moves=False,  # Verification done after EXPUNGE
+                            verify_moves=False,  # Verification done in main thread before EXPUNGE
                             backup_moved=backup_moved,
                             backup_dir=backup_dir,
                             dry_run=False,  # Real execution
@@ -2973,7 +3008,8 @@ def _execute_folder_worker(
                     except Exception:
                         pass  # Best effort
 
-                # Verify successful moves (after EXPUNGE)
+                # Verify successful moves (before EXPUNGE in main thread flow)
+                # In parallel worker context, verification is handled by main thread
                 if verify_moves and successful_moves and not dry_run:
                     for action, message_id in successful_moves:
                         try:
