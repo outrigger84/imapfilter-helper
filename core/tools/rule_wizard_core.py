@@ -2323,6 +2323,8 @@ class RuleWizard:
         Returns:
             Parsed header dictionary
         """
+        from core.rule_engine import _extract_raw_header, _parse_header_map
+
         cache_key = (folder, uid)
 
         # Check cache first
