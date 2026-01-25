@@ -3829,9 +3829,15 @@ class RuleWizard:
         Returns:
             Chosen pattern string, or None if cancelled
         """
+        # For email fields, extract clean address from consolidated labels
+        # This handles cases like "email@domain.com [2 display names]" from expandable selectors
+        display_value = value
+        if field in ("from", "to", "reply-to"):
+            display_value = self._extract_email_from_consolidated_label(value)
+
         # Generate suggestions based on field type
         if field in ("from", "to", "reply-to"):
-            patterns = self.email_extractor.suggest_patterns(value, self.cache_engine)
+            patterns = self.email_extractor.suggest_patterns(display_value, self.cache_engine)
         elif field == "subject":
             patterns = self.subject_extractor.suggest_patterns(value, self.cache_engine)
         else:
@@ -3839,9 +3845,9 @@ class RuleWizard:
             patterns = [(value, "Exact match", 1)]
 
         if not patterns:
-            return value
+            return display_value
 
-        print(f"\n{field.title()}: {value}")
+        print(f"\n{field.title()}: {display_value}")
         print("\nSuggested patterns:")
         for i, (pattern, description, count) in enumerate(patterns, 1):
             marker = " [RECOMMENDED]" if i == 2 and len(patterns) > 2 else ""
@@ -3857,13 +3863,13 @@ class RuleWizard:
             elif idx == len(patterns):
                 # Manual edit
                 manual = input(f"Enter pattern for {field}: ").strip()
-                return manual if manual else value
+                return manual if manual else display_value
             else:
                 print("Invalid choice, using original value.")
-                return value
+                return display_value
         except ValueError:
             print("Invalid input, using original value.")
-            return value
+            return display_value
 
     def _select_match_type(self, field: str) -> Optional[str]:
         """Prompt for match type with field-specific guidance.
