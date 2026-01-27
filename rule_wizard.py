@@ -568,15 +568,19 @@ class RuleWizard:
             return 1
 
 
-def main() -> int:
-    """Main entry point for the rule wizard.
+def main(cache_file: Optional[Path] = None) -> int:
+    """
+    Run the interactive rule wizard.
+
+    Args:
+        cache_file: Optional path to cache database
 
     Returns:
         Exit code (0 for success, 1 for error, 130 for user cancellation)
     """
     try:
         # Load configuration
-        config = build_default_config()
+        config = build_default_config(cache_override=cache_file)
 
         # Initialize and run wizard
         wizard = RuleWizard(config)
@@ -598,4 +602,16 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="IMAPFilter Rule Wizard - Interactive rule creation assistant"
+    )
+    parser.add_argument(
+        "--cache-file",
+        type=Path,
+        help="Path to cache database to query (default: data/cache.db)",
+    )
+    args = parser.parse_args()
+
+    sys.exit(main(cache_file=args.cache_file))

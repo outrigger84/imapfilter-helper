@@ -24,9 +24,41 @@ Handler = Callable[[argparse.Namespace, AppConfig, sqlite3.Connection, JsonLogge
 DEFAULT_INBOX = "INBOX"
 
 
+def _validate_cache_access(
+    cache_path: Path,
+    require_exists: bool,
+    logger: JsonLogger
+) -> None:
+    """
+    Validate cache file accessibility.
+
+    Args:
+        cache_path: Path to cache database
+        require_exists: True if cache must exist, False if creating new
+        logger: Logger for error messages
+
+    Raises:
+        FileNotFoundError: If require_exists=True and cache doesn't exist
+    """
+    if require_exists and not cache_path.exists():
+        logger.log("ERROR", "cache_not_found", {"path": str(cache_path)})
+        raise FileNotFoundError(
+            f"Cache not found: {cache_path}. Run build-cache first."
+        )
+
+    if not require_exists:
+        # Ensure parent directory exists for write operations
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Return the CLI argument parser."""
     parser = argparse.ArgumentParser(description="IMAPFilter Helper")
+    parser.add_argument(
+        "--cache-file",
+        type=Path,
+        help="Path to cache database (default: data/cache.db)",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_build = sub.add_parser("build-cache", help="Build local message cache")
@@ -1493,7 +1525,11 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    cfg = build_default_config(base_dir)
+    # Build config with optional cache override
+    cfg = build_default_config(
+        base_dir=base_dir,
+        cache_override=getattr(args, "cache_file", None)
+    )
     _ensure_layout(cfg)
 
     # Initialize notification dispatcher with GOTIFY if configured
@@ -1526,6 +1562,20 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
         print(f"⚠️  GOTIFY setup error: {e}")
 
     logger = JsonLogger(cfg.paths.log_file, notifier=notifier)
+
+    # Validate cache access based on command
+    read_only_commands = {"evaluate", "execute", "eval-execute", "check-conflicts", "view-cache"}
+    write_commands = {"build-cache", "run-all", "stream"}
+
+    try:
+        if args.cmd in read_only_commands:
+            _validate_cache_access(cfg.paths.db_file, require_exists=True, logger=logger)
+        elif args.cmd in write_commands:
+            _validate_cache_access(cfg.paths.db_file, require_exists=False, logger=logger)
+    except FileNotFoundError as e:
+        print(f"❌ {e}")
+        return 1
+
     db = init_db(cfg.paths.db_file, logger=logger)
 
     try:

@@ -245,7 +245,25 @@ class AppConfig:
     executor: ExecutorConfig = field(default_factory=ExecutorConfig)
 
 
-def build_default_config(base_dir: Optional[Path] = None) -> AppConfig:
-    """Return the default configuration for the application."""
+def build_default_config(
+    base_dir: Optional[Path] = None,
+    cache_override: Optional[Path] = None
+) -> AppConfig:
+    """
+    Return the default configuration for the application.
+
+    Args:
+        base_dir: Base directory for application paths
+        cache_override: Optional path to cache database (overrides default)
+
+    Returns:
+        AppConfig with resolved paths
+    """
     resolved = Path(base_dir).resolve() if base_dir else DEFAULT_BASE_DIR
-    return AppConfig(paths=PathsConfig(base_dir=resolved))
+    cfg = AppConfig(paths=PathsConfig(base_dir=resolved))
+
+    # Override cache path if specified
+    if cache_override:
+        cfg.paths.db_file = Path(cache_override).resolve()
+
+    return cfg
