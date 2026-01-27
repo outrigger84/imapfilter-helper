@@ -2,6 +2,16 @@
 
 A helper CLI that orchestrates cache building, rule evaluation, and action execution for [IMAPFilter](https://github.com/lefcha/imapfilter).
 
+**Key Features:**
+- Multi-cache support via `--cache-file` for testing and isolation
+- Cache-assisted rule wizard with intelligent pattern suggestions
+- Parallel cache building and execution (3-5x faster for multi-folder mailboxes)
+- Stream-based processing for memory efficiency with large mailboxes
+- Rule conflict detection and interactive resolution
+- Interactive cache viewer and rule manager
+- Message backup and recovery support
+- Support for complex rule conditions with AND/OR/NOT logic
+
 ## Layout
 
 ```
@@ -84,22 +94,51 @@ The `data/` directory is created automatically if it doesn't exist. Rules can be
 Invoke the CLI via the module or script:
 
 ```bash
-python -m core.cli <command> [flags]
+python -m core.cli [global-options] <command> [flags]
 # or
-./imapfilter_helper.py <command> [flags]
+./imapfilter_helper.py [global-options] <command> [flags]
+```
+
+### Global Options
+
+All commands support these global options:
+
+| Option | Purpose |
+| --- | --- |
+| `--cache-file PATH` | Use a custom cache database instead of the default `data/cache.db`. Allows maintaining multiple independent cache instances for testing, isolation, or parallel processing. Path is resolved relative to the current directory. Works with all commands. |
+
+**Examples:**
+```bash
+# Use test cache for evaluation
+python -m core.cli --cache-file data/cache-test.db evaluate --verbose
+
+# Build separate cache for specific folder
+python -m core.cli --cache-file data/cache-inbox.db build-cache --folder INBOX
+
+# Run wizard with custom cache for pattern discovery
+python rule_wizard.py --cache-file data/cache-discovery.db
+
+# Process different folders with isolated caches
+python -m core.cli --cache-file data/cache-work.db run-all --folder Work
+python -m core.cli --cache-file data/cache-personal.db run-all --folder Personal
 ```
 
 ### Commands
 
 | Command | Purpose | Key flags |
 | --- | --- | --- |
-| `build-cache` | Fetches mail headers from the IMAP server and stores a local cache in `data/cache.db`. **Fast** – headers only, no message bodies. | `--all-folders` – scan every folder instead of just `INBOX`.<br>`--folder NAME` – cache only the specified folder **(can be repeated for multiple folders)**.<br>`--folder-recursive NAME` – cache folder and all subfolders recursively **(can be repeated)**.<br>`--limit N` – cache at most N messages per folder.<br>`--order newest\|oldest\|random` – which messages to cache when limiting.<br>`--parallel-workers N` – number of parallel IMAP connections (default: auto-detect, use 1 to force sequential). |
-| `evaluate` | Loads rules from `rules/` and evaluates them against the cached messages, enqueueing matching actions. | `--dry-run` – report matches without mutating the database.<br>`--all-folders` – consider every cached folder.<br>`--folder NAME` – evaluate only the selected folder(s).<br>`--verbose` – show detailed match information.<br>`--debug-headers` – log message headers for troubleshooting. |
-| `execute` | Executes any queued actions against the IMAP server. **Can backup messages before moving them.** | `--dry-run` – preview without performing IMAP writes.<br>`--backup-moved` – backup messages before moving (recommended).<br>`--backup-all` – backup all cached messages after moves complete.<br>`--strict` – abort if required IMAP operations are missing or fail.<br>`--verify-moves` – confirm moves by searching for Message-ID.<br>`--verbose` – log IMAP server replies and per-message progress.<br>`--limit` – process at most this many pending actions.<br>`--all-folders` / `--folder` – limit execution to particular folders. |
-| `run-all` | Convenience command that runs `build-cache`, `evaluate`, and `execute` sequentially. **Optimized** – much faster than old --backup approach. | `--dry-run` – perform a full simulation without IMAP writes.<br>`--all-folders` – include every folder.<br>`--folder NAME` – restrict all three phases to the specified folder(s).<br>`--cache-limit` / `--cache-order` – cache-limiting flags.<br>`--backup-moved` – backup messages before moving them (recommended).<br>`--backup-all` – create full mbox archive after all moves complete.<br>`--debug-headers` – log message headers while evaluating rules.<br>`--strict` / `--verify-moves` – execute integrity checks.<br>`--verbose` – detailed progress and IMAP replies.<br>`--action-limit` – cap pending actions executed. |
+| `build-cache` | Fetches mail headers from the IMAP server and stores a local cache. **Fast** – headers only, no message bodies. Supports parallel processing for multiple folders. | `--all-folders` – scan every folder instead of just `INBOX`.<br>`--folder NAME` – cache only the specified folder **(can be repeated for multiple folders)**.<br>`--folder-recursive NAME` – cache folder and all subfolders recursively **(can be repeated)**.<br>`--limit N` – cache at most N messages per folder.<br>`--order newest\|oldest\|random` – which messages to cache when limiting.<br>`--parallel-workers N` – number of parallel IMAP connections (default: auto-detect, use 1 to force sequential). |
+| `evaluate` | Loads rules from `rules/` and evaluates them against the cached messages, enqueueing matching actions. | `--dry-run` – report matches without mutating the database.<br>`--all-folders` – consider every cached folder.<br>`--folder NAME` – evaluate only the selected folder(s).<br>`--folder-recursive NAME` – evaluate folder and all subfolders recursively.<br>`--verbose` – show detailed match information.<br>`--debug-headers` – log message headers for troubleshooting. |
+| `execute` | Executes any queued actions against the IMAP server. **Can backup messages before moving them.** | `--dry-run` – preview without performing IMAP writes.<br>`--backup-moved` – backup messages before moving (recommended).<br>`--backup-all` – backup all cached messages after moves complete.<br>`--strict` – abort if required IMAP operations are missing or fail.<br>`--verify-moves` – confirm moves by searching for Message-ID.<br>`--verbose` – log IMAP server replies and per-message progress.<br>`--limit` – process at most this many pending actions.<br>`--all-folders` / `--folder` – limit execution to particular folders.<br>`--parallel-workers N` – number of parallel workers for execution. |
+| `run-all` | Convenience command that runs `build-cache`, `evaluate`, and `execute` sequentially. **Optimized** – much faster than old --backup approach. | `--dry-run` – perform a full simulation without IMAP writes.<br>`--all-folders` – include every folder.<br>`--folder NAME` – restrict all three phases to the specified folder(s).<br>`--cache-limit` / `--cache-order` – cache-limiting flags.<br>`--backup-moved` – backup messages before moving them (recommended).<br>`--backup-all` – create full mbox archive after all moves complete.<br>`--debug-headers` – log message headers while evaluating rules.<br>`--strict` / `--verify-moves` – execute integrity checks.<br>`--verbose` – detailed progress and IMAP replies.<br>`--action-limit` – cap pending actions executed.<br>`--parallel-workers N` – control parallelization during execute phase. |
+| `eval-execute` | Evaluate rules and execute actions in sequence **without rebuilding the cache** (requires existing cache). Faster for re-evaluating with new rules. | `--dry-run` – simulate without IMAP writes.<br>`--all-folders` – process all cached folders.<br>`--folder NAME` – process only selected folder(s).<br>`--folder-recursive NAME` – process folder and subfolders recursively.<br>`--verbose` – show detailed progress.<br>`--debug-headers` – log message headers during evaluation.<br>`--limit N` – process at most N pending actions.<br>`--backup-moved` / `--backup-all` – backup messages during execution.<br>`--strict` / `--verify-moves` – execute integrity checks.<br>`--parallel-workers N` – control parallelization. |
+| `stream` | **Stream-process mode:** Read messages from IMAP → evaluate rules → execute actions in real-time, **without using a cache database**. Memory efficient for large mailboxes or one-time processing. | `--dry-run` – simulate without IMAP writes.<br>`--all-folders` – process every folder instead of just `INBOX`.<br>`--folder NAME` – process only specified folder(s).<br>`--folder-recursive NAME` – process folder and all subfolders recursively.<br>`--verbose` – show detailed progress and matches.<br>`--limit N` – process at most N messages per folder.<br>`--backup-moved` – backup messages before moving them. |
+| `check-conflicts` | Detect and resolve rule conflicts (priority ordering, unreachable rules, redundant patterns). Supports cache-based validation or static analysis. | `--validation-mode cache\|static\|prompt` – how to validate rules (default: prompt).<br>`--output detailed\|summary\|json` – output format (default: detailed).<br>`--conflict-types all\|priority\|unreachable\|redundant` – which conflicts to report (default: all).<br>`--severity all\|high\|medium\|low` – minimum severity level to report (default: all).<br>`--auto-fix` – enable interactive resolution workflow.<br>`--export PATH` – export conflict report to JSON file. |
 | `clear-pending` | Removes all pending actions from the queue without contacting the IMAP server. | *(no flags)* |
 | `clear-cache` | Deletes cached message headers, folder metadata, and any queued actions. | *(no flags)* |
 | `compact-cache` | Removes cached headers for messages whose actions have already been executed so future evaluations skip them. | *(no flags)* |
+| `keywords` | Manage predefined IMAP keywords and custom flags. Subcommands: `list` (show all), `add KEYWORD`, `remove KEYWORD`, `edit` (in default editor). | *(varies by subcommand)* |
+| `view-cache` | Interactive browser for exploring and analyzing cached emails. Sort by sender, subject, date, or folder. Search and filter messages in real-time. | `--limit N` – maximum emails to load (default: 1000).<br>`--folder NAME` – filter by folder name. |
 
 **Folder selection note:** When using `build-cache`, choose one of these mutually exclusive options:
 - **`--all-folders`** – Cache every folder on the server (fastest for small mailboxes, slower for large ones)
@@ -485,7 +524,31 @@ python -c "from core.tools.cache_viewer import main; main()"
 
 ### Configuration and data locations
 
-The helper stores its cache database, log file, and secrets JSON under `data/` by default. Rules continue to be loaded from the `rules/` directory. These locations can be customised by constructing an `AppConfig` via `core.config.build_default_config()` with a different base directory.
+The helper stores its cache database, log file, and secrets JSON under `data/` by default. Rules continue to be loaded from the `rules/` directory.
+
+**Default locations:**
+- Cache: `data/cache.db`
+- Logs: `data/imapfilter-helper.log`
+- Secrets: `data/secrets.json`
+- Rules: `rules/`
+
+**Custom cache locations:**
+
+Use the `--cache-file` argument to specify a custom cache path:
+
+```bash
+# Alternate cache location in same directory
+python -m core.cli --cache-file data/cache-backup.db build-cache
+
+# Absolute path
+python -m core.cli --cache-file /tmp/cache.db build-cache
+
+# Relative path (relative to current directory)
+python -m core.cli --cache-file ../other-project/cache.db build-cache
+
+# Home directory
+python -m core.cli --cache-file ~/mail-cache.db build-cache
+```
 
 To get started quickly, copy `data/secrets.example.json` to `data/secrets.json` and replace the placeholder IMAP credentials with your own.
 
@@ -650,6 +713,83 @@ The `--parallel-workers` flag controls how many IMAP connections are used simult
 ./imapfilter_helper.py clear-cache
 ```
 
+### Using Multiple Cache Instances
+
+The `--cache-file` argument allows you to maintain separate, independent cache databases for different purposes. This is useful for testing, isolation, and parallel processing.
+
+**Testing new rules safely with a separate cache:**
+
+```bash
+# Build a test cache with a sample of messages
+./imapfilter_helper.py --cache-file data/cache-test.db build-cache --folder INBOX --limit 100
+
+# Create and test new rules against the test cache
+python rule_wizard.py --cache-file data/cache-test.db
+
+# Evaluate new rules against test cache
+./imapfilter_helper.py --cache-file data/cache-test.db evaluate --verbose
+
+# Dry-run execution
+./imapfilter_helper.py --cache-file data/cache-test.db execute --dry-run
+
+# Once confident, run against production cache
+./imapfilter_helper.py evaluate --verbose
+./imapfilter_helper.py execute --backup-moved
+```
+
+**Isolating different folder hierarchies:**
+
+```bash
+# Separate cache for newsletters only
+./imapfilter_helper.py --cache-file data/cache-newsletters.db build-cache --folder Newsletters --folder-recursive
+
+# Separate cache for work emails
+./imapfilter_helper.py --cache-file data/cache-work.db build-cache --folder-recursive "Work"
+
+# Separate cache for personal emails
+./imapfilter_helper.py --cache-file data/cache-personal.db build-cache --folder Personal
+
+# Process each independently with their own rules
+./imapfilter_helper.py --cache-file data/cache-newsletters.db run-all
+./imapfilter_helper.py --cache-file data/cache-work.db run-all
+./imapfilter_helper.py --cache-file data/cache-personal.db run-all
+```
+
+**Using the wizard to discover patterns:**
+
+```bash
+# Build a limited cache for pattern discovery
+./imapfilter_helper.py --cache-file data/cache-discovery.db build-cache --limit 500
+
+# Run the rule wizard with limited cache to explore patterns
+python rule_wizard.py --cache-file data/cache-discovery.db
+
+# Once rules are created and tested, use full production cache
+./imapfilter_helper.py evaluate
+```
+
+**Parallel cache management:**
+
+```bash
+# Build multiple independent caches in sequence
+./imapfilter_helper.py --cache-file data/cache-inbox.db build-cache --folder INBOX
+./imapfilter_helper.py --cache-file data/cache-sent.db build-cache --folder Sent
+./imapfilter_helper.py --cache-file data/cache-archive.db build-cache --folder Archive
+
+# Or run evaluation on multiple caches with different rule sets
+./imapfilter_helper.py --cache-file data/cache-inbox.db evaluate
+./imapfilter_helper.py --cache-file data/cache-inbox.db execute --backup-moved
+```
+
+**When to use multiple caches:**
+
+- **Testing rules** – Create test cache with sample messages before applying to production
+- **Selective processing** – Maintain separate caches for folders that need different rule sets
+- **Performance** – Build caches in parallel, then process them independently
+- **Safety** – Experiment with new configurations without affecting production cache
+- **Isolation** – Process different folder hierarchies completely independently
+- **Cleanup** – Keep archive of old cache while building fresh one
+
 ### Troubleshooting
 
 **Connection errors:**
@@ -687,6 +827,14 @@ The `--parallel-workers` flag controls how many IMAP connections are used simult
 - Backups stored in `data/backups/` as mbox files
 - Remove old backup files manually if space is needed
 - Use `--backup-moved` (smaller) instead of `--backup-all` (larger)
+
+**Custom cache file issues:**
+- **"Cache not found" error** – Verify the path exists or use `build-cache` first to create it
+- **Path not found** – Ensure parent directory exists: `mkdir -p data/subdirectory/`
+- **Permission denied** – Check file permissions: `ls -l data/cache.db`
+- **Tilde not expanding** – Use absolute paths instead: `~/cache.db` becomes `/home/user/cache.db`
+- **Relative paths** – Are resolved relative to current directory, use absolute paths for clarity
+- **Multiple cache instances** – Each cache is completely independent; changes to one don't affect others
 
 ## Development
 
