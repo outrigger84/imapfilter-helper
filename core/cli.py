@@ -15,7 +15,7 @@ from core.imap_client import imap_login, list_all_folders, get_folder_sizes, exp
 from core.keywords import KeywordManager
 from core.logging_utils import JsonLogger, PhaseTimer
 from core.rule_engine import evaluate_rules, load_rules
-from core.stream_processor import stream_messages
+from core.stream_processor import count_stream_messages, stream_messages
 from core.stream_executor import stream_execute
 from core.stream_resume import create_resume_log
 
@@ -59,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Path to cache database (default: data/cache.db)",
     )
+    parser.add_argument(
+        "--no-gotify",
+        action="store_true",
+        help="Disable Gotify notifications for this run",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_build = sub.add_parser("build-cache", help="Build local message cache")
@@ -101,6 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--debug-headers",
         action="store_true",
         help="Log message headers for troubleshooting",
+    )
+    p_eval.add_argument(
+        "--limit",
+        type=int,
+        help="Stop after this many matched emails have been found",
     )
     eval_scope = p_eval.add_mutually_exclusive_group()
     eval_scope.add_argument(
@@ -172,6 +182,23 @@ def build_parser() -> argparse.ArgumentParser:
             "0=force sequential, N>0=force N workers, None=auto-detect "
             "(parallel if ≥5 folders, otherwise sequential). Default: None (auto-detect)"
         ),
+    )
+    p_exec.add_argument(
+        "--no-move",
+        action="store_true",
+        help="Skip all move actions during execution",
+    )
+    p_exec.add_argument(
+        "--no-keyword",
+        action="store_true",
+        help="Skip all keyword (set/remove flags) actions during execution",
+    )
+    p_exec.add_argument(
+        "--folder-order",
+        dest="folder_order",
+        choices=["most-first", "least-first", "alpha"],
+        default="alpha",
+        help="Order folders by destination match count: most-first (most matches first), least-first, or alpha (default)",
     )
 
     p_run = sub.add_parser("run-all", help="Build cache, evaluate, and execute")
@@ -245,6 +272,23 @@ def build_parser() -> argparse.ArgumentParser:
             "(parallel if ≥5 folders, otherwise sequential). Default: None (auto-detect)"
         ),
     )
+    p_run.add_argument(
+        "--no-move",
+        action="store_true",
+        help="Skip all move actions during the execute phase",
+    )
+    p_run.add_argument(
+        "--no-keyword",
+        action="store_true",
+        help="Skip all keyword (set/remove flags) actions during the execute phase",
+    )
+    p_run.add_argument(
+        "--folder-order",
+        dest="folder_order",
+        choices=["most-first", "least-first", "alpha"],
+        default="alpha",
+        help="Order folders by destination match count during execute: most-first (most matches first), least-first, or alpha (default)",
+    )
 
     p_eval_exec = sub.add_parser("eval-execute", help="Evaluate rules and execute actions (requires existing cache)")
     p_eval_exec.add_argument("--dry-run", action="store_true", help="Simulate everything (no IMAP writes)")
@@ -301,6 +345,23 @@ def build_parser() -> argparse.ArgumentParser:
             "(parallel if ≥5 folders, otherwise sequential). Default: None (auto-detect)"
         ),
     )
+    p_eval_exec.add_argument(
+        "--no-move",
+        action="store_true",
+        help="Skip all move actions during execution",
+    )
+    p_eval_exec.add_argument(
+        "--no-keyword",
+        action="store_true",
+        help="Skip all keyword (set/remove flags) actions during execution",
+    )
+    p_eval_exec.add_argument(
+        "--folder-order",
+        dest="folder_order",
+        choices=["most-first", "least-first", "alpha"],
+        default="alpha",
+        help="Order folders by destination match count during execute: most-first (most matches first), least-first, or alpha (default)",
+    )
 
     p_stream = sub.add_parser(
         "stream",
@@ -333,6 +394,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--backup-moved",
         action="store_true",
         help="Backup messages before moving them (recommended for safety)",
+    )
+    p_stream.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Clear the resume log before running so all emails are re-evaluated from scratch",
     )
 
     p_clear = sub.add_parser("clear-pending", help="Remove all pending actions without executing them")
@@ -412,6 +478,70 @@ def build_parser() -> argparse.ArgumentParser:
         "--folder",
         type=str,
         help="Filter by folder name",
+    )
+
+    p_mbox = sub.add_parser(
+        "mbox-import",
+        help="Upload an MBOX file to IMAP, routing each message directly to its target folder via rules",
+    )
+    p_mbox.add_argument(
+        "mbox_file",
+        type=Path,
+        help="Path to the MBOX file to import",
+    )
+    p_mbox.add_argument(
+        "--default-folder",
+        default="INBOX",
+        help="Destination folder for messages that match no rule (default: INBOX)",
+    )
+    p_mbox.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show per-folder upload plan without uploading anything",
+    )
+    p_mbox.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Log per-message rule matching decisions",
+    )
+    p_mbox.add_argument(
+        "--limit",
+        type=int,
+        help="Process only the first N messages from the MBOX file",
+    )
+    p_mbox.add_argument(
+        "--no-preserve-flags",
+        action="store_true",
+        help="Upload all messages without flags (ignore mbox Status/X-Status headers)",
+    )
+    p_mbox.add_argument(
+        "--error-mbox",
+        type=Path,
+        metavar="PATH",
+        help="Append failed messages to this MBOX file for later retry",
+    )
+    p_mbox.add_argument(
+        "--parallel-workers",
+        type=int,
+        default=1,
+        help="Number of parallel IMAP connections for uploading (default: 1 = sequential)",
+    )
+    p_mbox.add_argument(
+        "--no-move",
+        action="store_true",
+        help="Skip rule-based folder routing — upload all messages to the default folder",
+    )
+    p_mbox.add_argument(
+        "--no-keyword",
+        action="store_true",
+        help="Accepted for consistency; mbox-import does not apply keyword actions",
+    )
+    p_mbox.add_argument(
+        "--folder-order",
+        dest="folder_order",
+        choices=["most-first", "least-first", "alpha"],
+        default="alpha",
+        help="Order in which destination folders are uploaded: most-first (most messages first), least-first, or alpha (default)",
     )
 
     return parser
@@ -543,7 +673,7 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
         parallel_workers = args.parallel_workers
         if parallel_workers is None:
             # Auto-detect: use parallelization for 5+ folders
-            parallel_workers = 5 if len(folders) >= 5 else 1
+            parallel_workers = 8 if len(folders) >= 5 else 1
 
         # Choose implementation based on worker count
         if parallel_workers > 1:
@@ -688,8 +818,19 @@ def handle_evaluate(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLo
         verbose=cfg.logging.verbose,
         debug_headers=args.debug_headers,
         folders=eval_folders,
+        limit=getattr(args, "limit", None),
     )
     return 0
+
+
+def _build_disabled_action_types(args: argparse.Namespace) -> set[str]:
+    """Build the set of action types to skip based on --no-* flags."""
+    disabled: set[str] = set()
+    if getattr(args, "no_move", False):
+        disabled.add("move")
+    if getattr(args, "no_keyword", False):
+        disabled.update({"set_keywords", "remove_keywords"})
+    return disabled
 
 
 def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
@@ -718,6 +859,8 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
 
     # Get parallel_workers setting from CLI args
     parallel_workers = getattr(args, "parallel_workers", None)
+    disabled_action_types = _build_disabled_action_types(args)
+    folder_order = getattr(args, "folder_order", "alpha")
 
     # Determine which implementation to use
     if should_use_parallel_mode(cfg.paths.db_file, parallel_workers, logger):
@@ -737,6 +880,8 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             backup_all=getattr(args, "backup_all", False),
             backup_dir=cfg.paths.backup_dir,
             max_workers=parallel_workers if parallel_workers and parallel_workers > 0 else 5,
+            disabled_action_types=disabled_action_types,
+            folder_order=folder_order,
         )
         # Log execute completion summary notification
         logger.log(
@@ -766,6 +911,8 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                 backup_moved=getattr(args, "backup_moved", False),
                 backup_all=getattr(args, "backup_all", False),
                 backup_dir=cfg.paths.backup_dir,
+                disabled_action_types=disabled_action_types,
+                folder_order=folder_order,
             )
             # Log execute completion summary notification
             logger.log(
@@ -847,6 +994,8 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
         )
         # Get parallel_workers setting from CLI args
         parallel_workers = getattr(args, "parallel_workers", None)
+        disabled_action_types = _build_disabled_action_types(args)
+        folder_order = getattr(args, "folder_order", "alpha")
 
         # Determine which implementation to use for execute phase
         if should_use_parallel_mode(cfg.paths.db_file, parallel_workers, logger):
@@ -866,6 +1015,8 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                 backup_all=getattr(args, "backup_all", False),
                 backup_dir=cfg.paths.backup_dir,
                 max_workers=parallel_workers if parallel_workers and parallel_workers > 0 else 5,
+                disabled_action_types=disabled_action_types,
+                folder_order=folder_order,
             )
         else:
             # Use existing sequential implementation
@@ -883,6 +1034,8 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                 backup_moved=getattr(args, "backup_moved", False),
                 backup_all=getattr(args, "backup_all", False),
                 backup_dir=cfg.paths.backup_dir,
+                disabled_action_types=disabled_action_types,
+                folder_order=folder_order,
             )
         run_timer.stop()
         summary_context: dict[str, object] = {
@@ -964,6 +1117,8 @@ def handle_eval_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: Js
 
         # Phase 2: Execute actions
         parallel_workers = getattr(args, "parallel_workers", None)
+        disabled_action_types = _build_disabled_action_types(args)
+        folder_order = getattr(args, "folder_order", "alpha")
 
         # Determine which implementation to use for execute phase
         if should_use_parallel_mode(cfg.paths.db_file, parallel_workers, logger):
@@ -983,6 +1138,8 @@ def handle_eval_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: Js
                 backup_all=getattr(args, "backup_all", False),
                 backup_dir=cfg.paths.backup_dir,
                 max_workers=parallel_workers if parallel_workers and parallel_workers > 0 else 5,
+                disabled_action_types=disabled_action_types,
+                folder_order=folder_order,
             )
         else:
             # Use existing sequential implementation
@@ -1000,6 +1157,8 @@ def handle_eval_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: Js
                 backup_moved=getattr(args, "backup_moved", False),
                 backup_all=getattr(args, "backup_all", False),
                 backup_dir=cfg.paths.backup_dir,
+                disabled_action_types=disabled_action_types,
+                folder_order=folder_order,
             )
 
         run_timer.stop()
@@ -1072,12 +1231,26 @@ def handle_stream(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogg
         # Create resume log for tracking progress
         resume_log = create_resume_log(cfg.paths.log_file, logger=logger, session_id="default")
 
+        if getattr(args, "fresh", False):
+            resume_log.clear()
+            logger.log(
+                "INFO",
+                "stream_resume_cleared",
+                {},
+                console="📋 Resume log cleared (--fresh) — re-evaluating all emails",
+            )
+
+        _limit = args.limit if hasattr(args, 'limit') else None
+
+        # Pre-count messages for progress bar total (SELECT+SEARCH only, no header fetching)
+        total_messages = count_stream_messages(client, folders, limit=_limit, resume_log=resume_log)
+
         # Stream messages and execute
         messages = stream_messages(
             client,
             folders,
             logger=logger,
-            limit=args.limit if hasattr(args, 'limit') else None,
+            limit=_limit,
             resume_log=resume_log,
         )
 
@@ -1092,6 +1265,7 @@ def handle_stream(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogg
             backup_dir=cfg.paths.backup_dir,
             resume_log=resume_log,
             logger=logger,
+            total=total_messages,
         )
 
         stream_timer.stop()
@@ -1301,6 +1475,39 @@ def handle_view_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Json
     from core.tools.cache_viewer import launch_cache_viewer
 
     return launch_cache_viewer(cfg, limit=args.limit, folder=args.folder)
+
+
+def handle_mbox_import(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
+    """Handle the ``mbox-import`` command."""
+    from core.mbox_importer import run_mbox_import
+
+    del db  # mbox-import does not use the local cache
+
+    mbox_path = Path(args.mbox_file)
+    if not mbox_path.exists():
+        logger.log(
+            "ERROR",
+            "mbox_file_not_found",
+            {"path": str(mbox_path)},
+            console=f"❌ MBOX file not found: {mbox_path}",
+        )
+        return 1
+
+    return run_mbox_import(
+        mbox_path=mbox_path,
+        rules_dir=cfg.paths.rules_dir,
+        secrets_path=cfg.paths.secrets_file,
+        default_folder=args.default_folder,
+        dry_run=args.dry_run,
+        verbose=args.verbose,
+        limit=args.limit,
+        preserve_flags=not args.no_preserve_flags,
+        error_mbox_path=getattr(args, "error_mbox", None),
+        logger=logger,
+        parallel_workers=getattr(args, "parallel_workers", 1),
+        no_move=getattr(args, "no_move", False),
+        folder_order=getattr(args, "folder_order", "alpha"),
+    )
 
 
 def handle_check_conflicts(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
@@ -1514,6 +1721,7 @@ COMMAND_HANDLERS: dict[str, Handler] = {
     "keywords": handle_keywords,
     "check-conflicts": handle_check_conflicts,
     "view-cache": handle_view_cache,
+    "mbox-import": handle_mbox_import,
 }
 
 
@@ -1534,32 +1742,35 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
 
     # Initialize notification dispatcher with GOTIFY if configured
     notifier = None
-    try:
-        secrets_path = cfg.paths.secrets_file
-        if secrets_path.exists():
-            with open(secrets_path, encoding="utf-8") as f:
-                secrets = json.load(f)
-                gotify_cfg = secrets.get("notifications", {}).get("gotify", {})
-                if gotify_cfg.get("enabled"):
-                    base_url = gotify_cfg.get("base_url", "")
-                    token = gotify_cfg.get("token", "")
-                    if not base_url or not token:
-                        print("⚠️  GOTIFY configured but missing base_url or token")
+    if getattr(args, "no_gotify", False):
+        print("ℹ️  GOTIFY notifications disabled via --no-gotify")
+    else:
+        try:
+            secrets_path = cfg.paths.secrets_file
+            if secrets_path.exists():
+                with open(secrets_path, encoding="utf-8") as f:
+                    secrets = json.load(f)
+                    gotify_cfg = secrets.get("notifications", {}).get("gotify", {})
+                    if gotify_cfg.get("enabled"):
+                        base_url = gotify_cfg.get("base_url", "")
+                        token = gotify_cfg.get("token", "")
+                        if not base_url or not token:
+                            print("⚠️  GOTIFY configured but missing base_url or token")
+                        else:
+                            gotify = GotifyNotifier(
+                                base_url=base_url,
+                                token=token,
+                                max_timeout_failures=gotify_cfg.get("max_timeout_failures", 3),
+                            )
+                            notifier = NotificationDispatcher(gotify_notifier=gotify)
+                            print(f"✅ GOTIFY initialized: {base_url}")
                     else:
-                        gotify = GotifyNotifier(
-                            base_url=base_url,
-                            token=token,
-                            max_timeout_failures=gotify_cfg.get("max_timeout_failures", 3),
-                        )
-                        notifier = NotificationDispatcher(gotify_notifier=gotify)
-                        print(f"✅ GOTIFY initialized: {base_url}")
-                else:
-                    print("ℹ️  GOTIFY is disabled in configuration")
-        else:
-            print(f"ℹ️  Secrets file not found: {secrets_path}")
-    except Exception as e:
-        # Log notification setup errors but don't let them break mail processing
-        print(f"⚠️  GOTIFY setup error: {e}")
+                        print("ℹ️  GOTIFY is disabled in configuration")
+            else:
+                print(f"ℹ️  Secrets file not found: {secrets_path}")
+        except Exception as e:
+            # Log notification setup errors but don't let them break mail processing
+            print(f"⚠️  GOTIFY setup error: {e}")
 
     logger = JsonLogger(cfg.paths.log_file, notifier=notifier)
 
@@ -1603,4 +1814,5 @@ __all__ = [
     "handle_keywords",
     "handle_check_conflicts",
     "handle_view_cache",
+    "handle_mbox_import",
 ]

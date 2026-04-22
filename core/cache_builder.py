@@ -24,6 +24,7 @@ from core.imap_client import safe_search_all
 
 VALID_LIMIT_ORDERS = {"newest", "oldest", "random"}
 MEGA_FOLDER_THRESHOLD = 10000  # Messages per folder before splitting
+FETCH_BATCH_SIZE = 200  # UIDs per IMAP FETCH call (probe-tuned for high-latency servers)
 
 
 def split_mega_folders(
@@ -231,6 +232,50 @@ def _parse_fetch_response(msg_data) -> tuple[bytes, list[str], str | None]:
     return header_bytes, flags, internaldate
 
 
+def _parse_batch_fetch_response(
+    msg_data,
+) -> dict[str, tuple[bytes, list[str], str | None]]:
+    """Parse a multi-UID IMAP FETCH response into per-UID results.
+
+    imaplib returns a flat list of (envelope_bytes, header_bytes) tuples
+    interleaved with b")" separator items. Each tuple represents one message.
+
+    Returns:
+        Dict mapping uid_str -> (header_bytes, flags_list, internaldate_string)
+    """
+    results: dict[str, tuple[bytes, list[str], str | None]] = {}
+    if not msg_data:
+        return results
+    try:
+        for item in msg_data:
+            if not isinstance(item, tuple) or len(item) < 2:
+                continue
+            metadata = item[0] if isinstance(item[0], bytes) else b""
+            payload = item[1] if isinstance(item[1], (bytes, bytearray)) else b""
+
+            # UID is present in the envelope when fetched via client.uid()
+            uid_match = re.search(rb'\bUID\s+(\d+)\b', metadata)
+            if not uid_match:
+                continue
+            uid_str = uid_match.group(1).decode()
+
+            flags: list[str] = []
+            flags_match = re.search(rb'FLAGS \(([^)]*)\)', metadata)
+            if flags_match:
+                flags_str = flags_match.group(1).decode('ascii', 'ignore').strip()
+                flags = [f for f in flags_str.split() if f]
+
+            internaldate: str | None = None
+            date_match = re.search(rb'INTERNALDATE "([^"]*)"', metadata)
+            if date_match:
+                internaldate = date_match.group(1).decode('ascii', 'ignore')
+
+            results[uid_str] = (bytes(payload), flags, internaldate)
+    except Exception:
+        pass
+    return results
+
+
 def build_cache(
     client,
     db,
@@ -315,7 +360,7 @@ def build_cache(
                 )
 
             msgs_bar = tqdm(
-                limited_uids,
+                total=len(limited_uids),
                 desc=f"   ✉️ Fetching {folder}",
                 unit="msg",
                 dynamic_ncols=True,
@@ -324,52 +369,55 @@ def build_cache(
                 disable=not show_progress,
             )
 
-            for uid in msgs_bar:
-                uid_value = (
-                    uid.decode("ascii", "ignore") if isinstance(uid, (bytes, bytearray)) else str(uid)
+            db_insert_count = 0
+            for batch_start in range(0, len(limited_uids), FETCH_BATCH_SIZE):
+                batch = limited_uids[batch_start : batch_start + FETCH_BATCH_SIZE]
+                uid_set = b",".join(
+                    uid if isinstance(uid, (bytes, bytearray)) else str(uid).encode()
+                    for uid in batch
                 )
-                if not uid_value:
-                    continue
-
-                # Fetch BODY[HEADER], FLAGS, and INTERNALDATE
-                typ, msg_data = client.uid("FETCH", uid_value, "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)")
+                # Fetch BODY[HEADER], FLAGS, and INTERNALDATE for the whole batch
+                typ, msg_data = client.uid(
+                    "FETCH", uid_set, "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)"
+                )
                 if typ != "OK":
                     logger.log(
                         "WARNING",
                         "cache_fetch_failed",
-                        {"folder": folder, "uid": uid_value},
+                        {"folder": folder, "batch_start": batch_start},
                     )
+                    msgs_bar.update(len(batch))
                     continue
 
-                # Parse the FETCH response
-                raw_hdr, flags, internaldate = _parse_fetch_response(msg_data)
-                if not raw_hdr:
-                    logger.log(
-                        "WARNING",
-                        "cache_parse_failed",
-                        {"folder": folder, "uid": uid_value},
+                parsed = _parse_batch_fetch_response(msg_data)
+                for uid_str, (raw_hdr, flags, internaldate) in parsed.items():
+                    if not raw_hdr:
+                        logger.log(
+                            "WARNING",
+                            "cache_parse_failed",
+                            {"folder": folder, "uid": uid_str},
+                        )
+                        continue
+
+                    cache_entry: dict = {"header": raw_hdr.decode(errors="ignore")}
+                    if flags:
+                        cache_entry["flags"] = flags
+                    if internaldate:
+                        cache_entry["internaldate"] = internaldate
+
+                    db.execute(
+                        "INSERT OR REPLACE INTO headers (folder, uid, data, updated_at) "
+                        "VALUES(?,?,?,?)",
+                        (folder, uid_str, json.dumps(cache_entry), now_iso()),
                     )
-                    continue
+                    db_insert_count += 1
+                    msgs_bar.update(1)
 
-                hdr_str = raw_hdr.decode(errors="ignore")
+                # Commit periodically to reduce transaction scope and lock contention
+                if db_insert_count % 50 == 0:
+                    db.commit()
 
-                # Build cache entry with FLAGS and INTERNALDATE
-                cache_entry = {"header": hdr_str}
-                if flags:
-                    cache_entry["flags"] = flags
-                if internaldate:
-                    cache_entry["internaldate"] = internaldate
-
-                db.execute(
-                    "INSERT OR REPLACE INTO headers (folder, uid, data, updated_at) "
-                    "VALUES(?,?,?,?)",
-                    (
-                        folder,
-                        uid_value,
-                        json.dumps(cache_entry),
-                        now_iso(),
-                    ),
-                )
+            msgs_bar.close()
 
             db.execute(
                 "INSERT OR REPLACE INTO folders VALUES(NULL,?,?,?)",
@@ -649,59 +697,53 @@ def build_cache_parallel(
                 desc += f" [chunk {chunk_idx + 1}/{num_chunks}]"
             worker_bar.set_description(desc)
 
-            # Fetch and cache headers for each message
-            # Batch commits every 50 messages to reduce transaction scope and lock contention
-            batch_size = 50
-            for idx, uid in enumerate(limited_uids):
-                uid_value = (
-                    uid.decode("ascii", "ignore") if isinstance(uid, (bytes, bytearray)) else str(uid)
+            # Fetch and cache headers in batches; commit every ~50 inserts
+            db_insert_count = 0
+            for batch_start in range(0, len(limited_uids), FETCH_BATCH_SIZE):
+                batch = limited_uids[batch_start : batch_start + FETCH_BATCH_SIZE]
+                uid_set = b",".join(
+                    uid if isinstance(uid, (bytes, bytearray)) else str(uid).encode()
+                    for uid in batch
                 )
-                if not uid_value:
-                    continue
-
-                # Fetch BODY[HEADER], FLAGS, and INTERNALDATE
-                typ, msg_data = client.uid("FETCH", uid_value, "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)")
+                # Fetch BODY[HEADER], FLAGS, and INTERNALDATE for the whole batch
+                typ, msg_data = client.uid(
+                    "FETCH", uid_set, "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)"
+                )
                 if typ != "OK":
                     logger.log(
                         "WARNING",
                         "cache_fetch_failed",
-                        {"folder": folder, "uid": uid_value},
+                        {"folder": folder, "batch_start": batch_start},
                     )
+                    worker_bar.update(len(batch))
                     continue
 
-                # Parse the FETCH response
-                raw_hdr, flags, internaldate = _parse_fetch_response(msg_data)
-                if not raw_hdr:
-                    logger.log(
-                        "WARNING",
-                        "cache_parse_failed",
-                        {"folder": folder, "uid": uid_value},
+                parsed = _parse_batch_fetch_response(msg_data)
+                for uid_str, (raw_hdr, flags, internaldate) in parsed.items():
+                    if not raw_hdr:
+                        logger.log(
+                            "WARNING",
+                            "cache_parse_failed",
+                            {"folder": folder, "uid": uid_str},
+                        )
+                        continue
+
+                    cache_entry: dict = {"header": raw_hdr.decode(errors="ignore")}
+                    if flags:
+                        cache_entry["flags"] = flags
+                    if internaldate:
+                        cache_entry["internaldate"] = internaldate
+
+                    db.execute(
+                        "INSERT OR REPLACE INTO headers (folder, uid, data, updated_at) "
+                        "VALUES(?,?,?,?)",
+                        (folder, uid_str, json.dumps(cache_entry), now_iso()),
                     )
-                    continue
+                    worker_bar.update(1)
+                    db_insert_count += 1
 
-                hdr_str = raw_hdr.decode(errors="ignore")
-
-                # Build cache entry with FLAGS and INTERNALDATE
-                cache_entry = {"header": hdr_str}
-                if flags:
-                    cache_entry["flags"] = flags
-                if internaldate:
-                    cache_entry["internaldate"] = internaldate
-
-                db.execute(
-                    "INSERT OR REPLACE INTO headers (folder, uid, data, updated_at) "
-                    "VALUES(?,?,?,?)",
-                    (
-                        folder,
-                        uid_value,
-                        json.dumps(cache_entry),
-                        now_iso(),
-                    ),
-                )
-                worker_bar.update(1)
-
-                # Commit in batches to reduce transaction scope and lock contention
-                if (idx + 1) % batch_size == 0:
+                # Commit periodically to reduce transaction scope and lock contention
+                if db_insert_count % 50 == 0:
                     db.commit()
 
             # Commit folder's cached messages

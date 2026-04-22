@@ -31,6 +31,41 @@ def _coalesce_fetch_payload(msg_data) -> bytes:
     return b"".join(parts)
 
 
+def count_stream_messages(
+    client: imaplib.IMAP4,
+    folders: list[str],
+    *,
+    limit: int | None = None,
+    resume_log: ResumeLog | None = None,
+) -> int:
+    """
+    Count total messages that stream_messages would yield, without fetching headers.
+
+    Performs SELECT + SEARCH per folder (fast). Used to give tqdm a known total.
+    """
+    total = 0
+    for folder in folders:
+        try:
+            sel_typ, _ = client.select(f'"{folder}"', readonly=True)
+            if sel_typ != "OK":
+                continue
+            uids = list(safe_search_all(client, undeleted_only=True))
+            if limit is not None and limit > 0 and len(uids) > limit:
+                uids = uids[-limit:]
+            if resume_log:
+                uids = [
+                    uid for uid in uids
+                    if not resume_log.is_processed(
+                        folder,
+                        uid.decode("ascii", "ignore") if isinstance(uid, (bytes, bytearray)) else str(uid),
+                    )
+                ]
+            total += len(uids)
+        except Exception:
+            continue
+    return total
+
+
 def stream_messages(
     client: imaplib.IMAP4,
     folders: list[str],
@@ -98,23 +133,24 @@ def stream_messages(
 
             # Filter out already-processed messages if resuming
             if resume_log:
+                original_count = len(uids_to_process)
                 uids_to_process = [
                     uid for uid in uids_to_process
                     if not resume_log.is_processed(folder, uid)
                 ]
-                if resume_log.is_processed(folder, uids_to_process[0] if uids_to_process else ""):
-                    skipped_count += len(uids) - len(uids_to_process)
-                    if skipped_count > 0 and len(uids_to_process) > 0:
-                        logger.log(
-                            "INFO",
-                            "stream_folder_resumed",
-                            {
-                                "folder": folder,
-                                "skipped": skipped_count,
-                                "remaining": len(uids_to_process),
-                            },
-                            console=f"⏭️ {folder}: skipping {skipped_count} already-processed messages",
-                        )
+                folder_skipped = original_count - len(uids_to_process)
+                if folder_skipped > 0:
+                    skipped_count += folder_skipped
+                    logger.log(
+                        "INFO",
+                        "stream_folder_resumed",
+                        {
+                            "folder": folder,
+                            "skipped": folder_skipped,
+                            "remaining": len(uids_to_process),
+                        },
+                        console=f"⏭️ {folder}: skipping {folder_skipped} already-processed messages",
+                    )
 
             logger.log(
                 "INFO",

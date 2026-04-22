@@ -426,6 +426,7 @@ def evaluate_rules(
     verbose: bool = False,
     debug_headers: bool = False,
     folders: Sequence[str] | None = None,
+    limit: int | None = None,
 ) -> tuple[PhaseTimer, int, int]:
     rule_list = list(rules)
     timer = PhaseTimer("evaluate")
@@ -473,8 +474,10 @@ def evaluate_rules(
         )
 
     total_matches = 0
+    matched_email_count = 0
     folder_match_counts: dict[str, int] = {}
     rule_match_counts: dict[str, int] = {}
+    action_type_counts: dict[str, int] = {}
     folders_bar = tqdm(
         total=len(folder_totals) if folder_totals else None,
         desc="🧩 Evaluating folders",
@@ -519,6 +522,7 @@ def evaluate_rules(
         current_folder_count = 0
 
     chunk_size = 512
+    limit_reached = False
     while True:
         rows = cur.fetchmany(chunk_size)
         if not rows:
@@ -577,9 +581,16 @@ def evaluate_rules(
                     },
                 )
 
+            email_matched = False
             for rule in rule_list:
                 conds = rule.get("conditions")
                 if conditions_match(header, conds, flags=flags, date=date):
+                    email_matched = True
+                    rule_name = rule.get("name") or "(unnamed)"
+                    total_matches += 1
+                    folder_match_counts[folder] = folder_match_counts.get(folder, 0) + 1
+                    rule_match_counts[rule_name] = rule_match_counts.get(rule_name, 0) + 1
+
                     # Support both "action" (single) and "actions" (array)
                     actions = rule.get("actions", [])
                     if not actions and "action" in rule:
@@ -594,7 +605,6 @@ def evaluate_rules(
 
                         # Skip redundant same-folder move actions
                         if action_type == "move" and target and folder == target:
-                            rule_name = rule.get("name") or "(unnamed)"
                             logger.log(
                                 "INFO",
                                 "skipped_same_folder_move",
@@ -642,10 +652,7 @@ def evaluate_rules(
                                 action_data,
                             ),
                         )
-                        total_matches += 1
-                        folder_match_counts[folder] = folder_match_counts.get(folder, 0) + 1
-                        rule_name = rule.get("name") or "(unnamed)"
-                        rule_match_counts[rule_name] = rule_match_counts.get(rule_name, 0) + 1
+                        action_type_counts[action_type] = action_type_counts.get(action_type, 0) + 1
 
                         # Log verbose output for each action
                         console_msg: str | None = None
@@ -673,12 +680,31 @@ def evaluate_rules(
                             console=console_msg,
                         )
 
+            if email_matched:
+                matched_email_count += 1
+                if limit is not None and matched_email_count >= limit:
+                    limit_reached = True
+                    break
+
+        if limit_reached:
+            break
+
+    if limit_reached:
+        logger.log(
+            "INFO",
+            "evaluate_limit_reached",
+            {"limit": limit, "matched_emails": matched_email_count},
+            console=f"🛑 Limit reached: stopped after {matched_email_count} matched email{'s' if matched_email_count != 1 else ''}",
+        )
+
     _finalize_folder()
     folders_bar.close()
     timer.stop()
     timer.count = total_matches
     folder_summary = sorted(folder_match_counts.items(), key=lambda kv: (-kv[1], kv[0]))
     rule_summary = sorted(rule_match_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    total_actions = sum(action_type_counts.values())
+    action_summary = sorted(action_type_counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
     def _fmt_summary(title: str, entries: list[tuple[str, int]], limit: int = 5) -> str:
         if not entries:
@@ -695,9 +721,11 @@ def evaluate_rules(
         "\n📊 Summary — Evaluate Rules\n"
         f"   🧩  Rules evaluated: {len(rule_list)}\n"
         f"   🎯  Matches found: {total_matches}\n"
+        f"   ⚡  Actions generated: {total_actions}\n"
         f"   ⏱️  Duration: {timer.fmt()} ({timer.rate():.1f} msg/s)\n"
         + _fmt_summary("📂  Matches by folder:", folder_summary)
         + _fmt_summary("🧠  Matches by rule:", rule_summary)
+        + _fmt_summary("⚙️  Actions by type:", action_summary)
     )
     logger.log(
         "INFO",
@@ -706,10 +734,12 @@ def evaluate_rules(
             "phase": "evaluate",
             "rules": len(rule_list),
             "matches": total_matches,
+            "actions": total_actions,
             "elapsed_sec": timer.elapsed,
             "rate": timer.rate(),
             "matches_by_folder": folder_match_counts,
             "matches_by_rule": rule_match_counts,
+            "actions_by_type": action_type_counts,
         },
         console=summary_console,
     )

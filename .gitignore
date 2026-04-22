@@ -6,9 +6,15 @@ secrets.json
 # --- Cache / Databases ---
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 
 # --- Logs ---
 *.log
+*.log.[0-9]*
+
+# --- Coverage ---
+.coverage
 
 # --- Python build junk ---
 __pycache__/

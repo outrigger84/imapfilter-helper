@@ -28,6 +28,7 @@ from core.rule_utils import slugify, generate_filename
 from core.ui_components import prompt_yes_no, format_count
 from core.tools.coverage_analyzer import (
     RuleCoverageAnalyzer,
+    CoverageStats,
     DomainCluster,
     BatchTarget,
     _decode_mime_header,
@@ -2393,6 +2394,56 @@ class RuleWizard:
 
         return stats
 
+    def _update_session_cache_after_rule(self, batch_target: BatchTarget) -> None:
+        """Remove the saved rule's target messages from the in-session coverage cache.
+
+        Avoids a full re-analysis (220s+) while keeping the batch-mode display
+        accurate: the selected domain/sender disappears immediately after saving.
+        """
+        if not self._session_coverage_cache:
+            return
+
+        stats, uncovered_messages, _ = self._session_coverage_cache
+
+        if batch_target.target_type == "domain":
+            filtered = [m for m in uncovered_messages if m.domain != batch_target.value]
+        else:
+            target_email = batch_target.value
+            filtered = [
+                m for m in uncovered_messages
+                if extract_email_address(m.from_address) != target_email
+            ]
+
+        removed_count = len(uncovered_messages) - len(filtered)
+        if removed_count == 0:
+            return
+
+        new_stats = CoverageStats(
+            total_messages=stats.total_messages,
+            covered_messages=stats.covered_messages + removed_count,
+            uncovered_messages=stats.uncovered_messages - removed_count,
+            coverage_by_rule=stats.coverage_by_rule,
+        )
+
+        clusters_dict: dict = {}
+        for msg in filtered:
+            if msg.domain not in clusters_dict:
+                clusters_dict[msg.domain] = DomainCluster(
+                    domain=msg.domain,
+                    total_count=0,
+                    senders={},
+                    messages=[],
+                )
+            cluster = clusters_dict[msg.domain]
+            cluster.total_count += 1
+            cluster.messages.append(msg)
+            if msg.from_address not in cluster.senders:
+                cluster.senders[msg.from_address] = 0
+            cluster.senders[msg.from_address] += 1
+
+        new_clusters = sorted(clusters_dict.values(), key=lambda c: c.total_count, reverse=True)
+        self._session_coverage_cache = (new_stats, filtered, new_clusters)
+
     def _get_parsed_header(self, folder: str, uid: str, data: str) -> dict:
         """Get parsed header, using session-level cache to avoid re-parsing.
 
@@ -3063,13 +3114,14 @@ class RuleWizard:
             exit_code = self._save_batch_rule()
             if exit_code == 0:
                 print("✅ Rule saved!")
-                # Update session cache rule count to match new rule count
-                # This prevents re-analysis of the same coverage data within batch mode
-                # The coverage shown might not perfectly account for the new rule,
-                # but skipping re-analysis saves ~220s per rule in batch mode
+                # Update session cache rule count so _load_or_analyze_coverage reuses
+                # the session cache instead of running a full re-analysis (~220s)
                 self._session_coverage_rule_count = self._get_rule_count()
 
-                # Now coverage refresh will use the session cache instead of re-analyzing
+                # Optimistically remove the saved rule's target from the session cache
+                # so the next iteration no longer shows those emails as uncovered
+                self._update_session_cache_after_rule(batch_target)
+
                 print("\n🔄 Updating coverage...")
                 stats = self._load_or_analyze_coverage()
                 self._display_coverage_stats(stats)
@@ -3378,17 +3430,23 @@ class RuleWizard:
         Args:
             batch_target: BatchTarget with selection info
         """
-        if batch_target.target_type == "domain":
+        if batch_target.target_type == "domain" and batch_target.value == "unknown":
+            # Special case: "unknown" domain means emails with no @ in the From header
+            # (empty, display-name-only, malformed addresses). Use not_contains "@"
+            # to match them, since contains "@unknown" would match nothing real.
+            self.rule_builder.add_condition(header="from", match_type="not_contains", value="@")
+            pattern = "(no valid email address)"
+            print(f"\n✓ Condition: sender (from) does not contain '@'")
+        elif batch_target.target_type == "domain":
             # Domain-wide: use @domain.com pattern (via helper for consistency)
             pattern = self._convert_domain_selection_to_pattern(f"[All from {batch_target.value}]")
             self.rule_builder.add_condition(header="from", match_type="contains", value=pattern)
+            print(f"\n✓ Condition: sender (from) contains '{pattern}'")
         else:
             # Specific email: use exact address
             pattern = batch_target.value
             self.rule_builder.add_condition(header="from", match_type="contains", value=pattern)
-
-        # ISSUE #2 FIX: Standardized success message format
-        print(f"\n✓ Condition: sender (from) contains '{pattern}'")
+            print(f"\n✓ Condition: sender (from) contains '{pattern}'")
         print(f"  (Estimated to match {format_count(batch_target.estimated_count)} messages)")
 
     def _display_batch_context(self, batch_target: BatchTarget) -> None:

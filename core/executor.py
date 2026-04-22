@@ -1161,6 +1161,8 @@ def execute_actions(
     backup_moved: bool = False,
     backup_all: bool = False,
     backup_dir: Path | None = None,
+    disabled_action_types: set[str] | None = None,
+    folder_order: str = "alpha",
 ) -> tuple[PhaseTimer, Dict[str, int]]:
     if not dry_run and client is None:
         raise ValueError("An IMAP client is required when not running in dry-run mode")
@@ -1192,27 +1194,41 @@ def execute_actions(
         placeholders = ",".join("?" for _ in folder_params)
         folder_filter = f" AND folder IN ({placeholders})"
 
+    disabled_types = disabled_action_types or set()
+    action_type_params: tuple[str, ...] = ()
+    action_type_filter = ""
+    if disabled_types:
+        placeholders = ",".join("?" for _ in disabled_types)
+        action_type_filter = f" AND action_type NOT IN ({placeholders})"
+        action_type_params = tuple(disabled_types)
+        logger.log(
+            "INFO",
+            "execute_action_types_disabled",
+            {"disabled": sorted(disabled_types)},
+            console=f"⚙️  Skipping action types: {', '.join(sorted(disabled_types))}",
+        )
+
+    where_params = folder_params + action_type_params
     pending_cur = db.cursor()
     pending_cur.execute(
-        "SELECT COUNT(*) FROM actions WHERE status='pending'" + folder_filter,
-        folder_params,
+        "SELECT COUNT(*) FROM actions WHERE status='pending'" + folder_filter + action_type_filter,
+        where_params,
     )
     pending_total = pending_cur.fetchone()[0] or 0
     if pending_total == 0:
         logger.log("INFO", "execute_nothing", {"dry_run": dry_run}, console="ℹ️ No pending actions")
         return timer, {"done": 0, "skipped": 0, "failed": 0, "suppressed": 0}
 
-    distinct_cur = db.cursor()
-    distinct_cur.execute(
-        "SELECT COUNT(DISTINCT uid) FROM actions WHERE status='pending'" + folder_filter,
-        folder_params,
-    )
-    distinct_uids = distinct_cur.fetchone()[0] or 0
-    suppressed = pending_total - distinct_uids
+    suppressed = 0  # calculated after CTE is built below
 
     # Order by effective priority first (ensures keywords execute before moves across all rules)
     # Then by folder/target for batch processing, then by creation order
-    order_clause = "ORDER BY priority DESC, folder, target, created_at ASC, id ASC"
+    if folder_order == "most-first":
+        order_clause = "ORDER BY priority DESC, folder_action_count DESC, folder, target, created_at ASC, id ASC"
+    elif folder_order == "least-first":
+        order_clause = "ORDER BY priority DESC, folder_action_count ASC, folder, target, created_at ASC, id ASC"
+    else:
+        order_clause = "ORDER BY priority DESC, folder, target, created_at ASC, id ASC"
 
     # Deduplication: Keep only one occurrence of each unique action per UID
     # PARTITION BY (uid, folder, rule_name, action_type, target, action_data) allows:
@@ -1220,7 +1236,10 @@ def execute_actions(
     # - Different rules' actions to execute
     # - Only prevents identical duplicate actions in the same folder
     # - Includes folder to handle cases where emails are moved and re-matched
-    dedup_cte = """
+    folder_count_col = ""
+    if folder_order in ("most-first", "least-first"):
+        folder_count_col = "\n                COUNT(*) OVER (PARTITION BY target) AS folder_action_count,"
+    dedup_cte = f"""
         WITH ranked AS (
             SELECT
                 id,
@@ -1231,7 +1250,7 @@ def execute_actions(
                 priority,
                 created_at,
                 action_type,
-                action_data,
+                action_data,{folder_count_col}
                 ROW_NUMBER() OVER (
                     PARTITION BY uid, folder, rule_name, action_type, target, action_data
                     ORDER BY created_at ASC, id ASC
@@ -1240,17 +1259,19 @@ def execute_actions(
             WHERE status='pending'
     )
 """
-    if folder_filter:
+    combined_filter = folder_filter + action_type_filter
+    if combined_filter:
         dedup_cte = dedup_cte.replace(
             "WHERE status='pending'",
-            f"WHERE status='pending'{folder_filter}",
+            f"WHERE status='pending'{combined_filter}",
         )
     selection_source = "ranked WHERE rn=1"
     limit_param: tuple[int, ...] = ()
     if limit is not None:
+        extra_col = ", folder_action_count" if folder_order in ("most-first", "least-first") else ""
         dedup_cte += (
             "    , limited AS (\n"
-            "        SELECT id, uid, folder, target, rule_name, priority, created_at, action_type, action_data\n"
+            f"        SELECT id, uid, folder, target, rule_name, priority, created_at, action_type, action_data{extra_col}\n"
             "        FROM ranked\n"
             "        WHERE rn=1\n"
             f"        {order_clause}\n"
@@ -1260,7 +1281,14 @@ def execute_actions(
         selection_source = "limited"
         limit_param = (int(limit),)
 
-    dedup_params = folder_params + limit_param
+    dedup_params = where_params + limit_param
+
+    suppressed_count_cur = db.cursor()
+    suppressed_count_cur.execute(
+        dedup_cte + "SELECT COUNT(*) FROM ranked WHERE rn>1",
+        where_params,
+    )
+    suppressed = suppressed_count_cur.fetchone()[0] or 0
 
     if suppressed > 0:
         duplicates_cur = db.cursor()
@@ -1585,24 +1613,26 @@ def execute_actions(
                 keyword_set_to_uids[key] = []
             keyword_set_to_uids[key].append(uid)
 
-        # Execute one STORE per keyword set (batch operation)
+        # Execute one STORE per keyword set, chunked to avoid oversized IMAP commands.
+        # Most IMAP servers enforce an ~8 KB command-line limit; a UID is ≤10 digits so
+        # 500 UIDs per chunk ≈ 5 KB of UID data, comfortably under the limit.
+        _STORE_CHUNK = 500
         for keyword_tuple, uids in keyword_set_to_uids.items():
             keywords = list(keyword_tuple)
             flags_str = " ".join(keywords)
-            uid_str = ",".join(uids)
-
-            typ, resp = client.uid("STORE", uid_str, "+FLAGS", f"({flags_str})")
-            log_imap_call(
-                "imap_uid_store_batch_set",
-                op_label="UID STORE +FLAGS (batch)",
-                status=typ,
-                response=resp,
-                folder=folder,
-            )
-
-            # Record result for each UID
-            for uid in uids:
-                results[uid] = (typ, resp)
+            for i in range(0, len(uids), _STORE_CHUNK):
+                chunk = uids[i : i + _STORE_CHUNK]
+                uid_str = ",".join(chunk)
+                typ, resp = client.uid("STORE", uid_str, "+FLAGS", f"({flags_str})")
+                log_imap_call(
+                    "imap_uid_store_batch_set",
+                    op_label="UID STORE +FLAGS (batch)",
+                    status=typ,
+                    response=resp,
+                    folder=folder,
+                )
+                for uid in chunk:
+                    results[uid] = (typ, resp)
 
         return results
 
@@ -1646,24 +1676,24 @@ def execute_actions(
                 keyword_set_to_uids[key] = []
             keyword_set_to_uids[key].append(uid)
 
-        # Execute one STORE per keyword set (batch operation)
+        # Execute one STORE per keyword set, chunked to avoid oversized IMAP commands.
+        _STORE_CHUNK = 500
         for keyword_tuple, uids in keyword_set_to_uids.items():
             keywords = list(keyword_tuple)
             flags_str = " ".join(keywords)
-            uid_str = ",".join(uids)
-
-            typ, resp = client.uid("STORE", uid_str, "-FLAGS", f"({flags_str})")
-            log_imap_call(
-                "imap_uid_store_batch_remove",
-                op_label="UID STORE -FLAGS (batch)",
-                status=typ,
-                response=resp,
-                folder=folder,
-            )
-
-            # Record result for each UID
-            for uid in uids:
-                results[uid] = (typ, resp)
+            for i in range(0, len(uids), _STORE_CHUNK):
+                chunk = uids[i : i + _STORE_CHUNK]
+                uid_str = ",".join(chunk)
+                typ, resp = client.uid("STORE", uid_str, "-FLAGS", f"({flags_str})")
+                log_imap_call(
+                    "imap_uid_store_batch_remove",
+                    op_label="UID STORE -FLAGS (batch)",
+                    status=typ,
+                    response=resp,
+                    folder=folder,
+                )
+                for uid in chunk:
+                    results[uid] = (typ, resp)
 
         return results
 
@@ -1894,9 +1924,36 @@ def execute_actions(
             else:
                 assert client is not None
 
-                # Build UID->keywords map for batching, validate keywords first
-                uid_keyword_map: dict[str, list[str]] = {}
-                items_to_skip: dict[int, str] = {}  # action_id -> reason
+                # Select the folder once for all per-message STORE operations.
+                sel_typ, sel_resp = client.select(f'"{folder}"')
+                log_imap_call(
+                    "imap_select",
+                    op_label=f'SELECT "{folder}"',
+                    status=sel_typ,
+                    response=sel_resp,
+                    folder=folder,
+                )
+                if sel_typ != "OK":
+                    for a_id, uid, _, _, _ in current_items:
+                        db.execute(
+                            "UPDATE actions SET status='failed', executed_at=? WHERE id=?",
+                            (now_iso(), a_id),
+                        )
+                        stats["failed"] += 1
+                        actions_bar.update(1)
+                    db.commit()
+                    logger.log(
+                        "ERROR",
+                        f"{action_type}_select_failed",
+                        {"folder": folder, "status": sel_typ},
+                        console=f"   ❌ Cannot select {folder} for {action_type}",
+                    )
+                    folders_bar.update(1)
+                    current_items = []
+                    current_key = None
+                    return
+
+                store_op = "+FLAGS" if action_type == "set_keywords" else "-FLAGS"
 
                 for a_id, uid, _, _, action_data in current_items:
                     keywords = []
@@ -1910,8 +1967,6 @@ def execute_actions(
                                 "action_data_parse_failed",
                                 {"folder": folder, "uid": uid, "action_id": a_id},
                             )
-                            items_to_skip[a_id] = "Invalid action_data JSON"
-                            continue
 
                     if not keywords:
                         logger.log(
@@ -1919,76 +1974,63 @@ def execute_actions(
                             f"{action_type}_empty",
                             {"folder": folder, "uid": uid},
                         )
-                        items_to_skip[a_id] = "No keywords specified"
+                        db.execute(
+                            "UPDATE actions SET status='skipped', executed_at=? WHERE id=?",
+                            (now_iso(), a_id),
+                        )
+                        stats["skipped"] += 1
+                        actions_bar.update(1)
                         continue
 
-                    uid_keyword_map[uid] = (a_id, keywords)
-
-                # Process skipped items first
-                for a_id, reason in items_to_skip.items():
-                    db.execute(
-                        "UPDATE actions SET status='skipped', executed_at=? WHERE id=?",
-                        (now_iso(), a_id),
-                    )
-                    stats["skipped"] += 1
-                    actions_bar.update(1)
-
-                # Execute batch operation if there are items to process
-                if uid_keyword_map:
+                    flags_str = " ".join(keywords)
                     try:
-                        # Build map for batch execution (uid -> keywords only)
-                        batch_map: dict[str, list[str]] = {
-                            uid: keywords for uid, (_, keywords) in uid_keyword_map.items()
-                        }
-
-                        # Execute batch operation
-                        if action_type == "set_keywords":
-                            results = _execute_batch_set_keywords(folder, batch_map)
-                        else:  # remove_keywords
-                            results = _execute_batch_remove_keywords(folder, batch_map)
-
-                        # Process results
-                        for uid, (a_id, keywords) in uid_keyword_map.items():
-                            typ, resp = results.get(uid, ("FAILED", None))
-
-                            if typ == "OK":
-                                db.execute(
-                                    "UPDATE actions SET status='done', executed_at=? WHERE id=?",
-                                    (now_iso(), a_id),
-                                )
-                                stats["done"] += 1
-                                if verbose:
-                                    logger.log(
-                                        "INFO",
-                                        f"batch_{action_type}_done",
-                                        {"folder": folder, "uid": uid, "keywords": keywords},
-                                        console=f"   🏷️  Batch {action_type} on {folder}/{uid}: {keywords}",
-                                    )
-                            else:
-                                db.execute(
-                                    "UPDATE actions SET status='failed', executed_at=? WHERE id=?",
-                                    (now_iso(), a_id),
-                                )
-                                stats["failed"] += 1
-
-                            actions_bar.update(1)
-
-                    except Exception as exc:
-                        # On batch error, mark all as failed
-                        for uid, (a_id, keywords) in uid_keyword_map.items():
+                        typ, resp = client.uid("STORE", uid, store_op, f"({flags_str})")
+                        log_imap_call(
+                            f"imap_uid_store_{action_type}",
+                            op_label=f"UID STORE {store_op}",
+                            status=typ,
+                            response=resp,
+                            folder=folder,
+                            uid=uid,
+                        )
+                        if typ == "OK":
                             db.execute(
-                                "UPDATE actions SET status='failed', executed_at=? WHERE id=?",
+                                "UPDATE actions SET status='done', executed_at=? WHERE id=?",
                                 (now_iso(), a_id),
                             )
+                            stats["done"] += 1
+                            if verbose:
+                                logger.log(
+                                    "INFO",
+                                    f"{action_type}_done",
+                                    {"folder": folder, "uid": uid, "keywords": keywords},
+                                    console=f"   🏷️  {action_type} {folder}/{uid}: {keywords}",
+                                )
+                        else:
+                            error_detail = _format_imap_details(resp)
+                            db.execute(
+                                "UPDATE actions SET status='failed', executed_at=?, error_message=? WHERE id=?",
+                                (now_iso(), error_detail, a_id),
+                            )
                             stats["failed"] += 1
-                            actions_bar.update(1)
-
+                            logger.log(
+                                "ERROR",
+                                f"{action_type}_failed",
+                                {"folder": folder, "uid": uid, "keywords": keywords, "error": error_detail},
+                            )
+                    except imaplib.IMAP4.error as exc:
+                        db.execute(
+                            "UPDATE actions SET status='failed', executed_at=?, error_message=? WHERE id=?",
+                            (now_iso(), str(exc), a_id),
+                        )
+                        stats["failed"] += 1
                         logger.log(
                             "ERROR",
-                            f"batch_{action_type}_exception",
-                            {"folder": folder, "error": str(exc)},
-                            console=f"❌ Batch {action_type} failed for {folder}: {exc}",
+                            f"{action_type}_imap_error",
+                            {"folder": folder, "uid": uid, "error": str(exc)},
                         )
+
+                    actions_bar.update(1)
 
                 db.commit()
 
@@ -1999,6 +2041,29 @@ def execute_actions(
 
         # Handle move actions (original logic)
         uids = [uid for _, uid, _, _, _ in current_items]
+
+        # Skip move actions that have no target folder — attempting IMAP COPY/MOVE with
+        # target=None causes slow per-message IMAP failures and effectively stalls execution.
+        if not target:
+            for a_id, _, _, _, _ in current_items:
+                db.execute(
+                    "UPDATE actions SET status='skipped', executed_at=?, error_message=? WHERE id=?",
+                    (now_iso(), "No target folder specified", a_id),
+                )
+                stats["skipped"] += 1
+                actions_bar.update(1)
+            if not dry_run:
+                db.commit()
+            logger.log(
+                "WARN",
+                "execute_no_target_skipped",
+                {"folder": folder, "count": len(current_items)},
+                console=f"   ⊘ Skipped {len(current_items)} actions in {folder}: no target folder",
+            )
+            folders_bar.update(1)
+            current_items = []
+            current_key = None
+            return
 
         # Backup messages before moving (if requested and not in dry-run)
         backup_result: BackupResult | None = None
@@ -2237,8 +2302,156 @@ def execute_actions(
                             console=console_warn,
                         )
 
-                for a_id, uid, _, _, _ in current_items:
-                    # Guard: Skip if email is already in target folder
+                # --- Batch move attempt (O(1) round-trips for the happy path) ---
+                # Pre-separate same-folder skips so the batch UID set is clean.
+                items_to_move = []
+                for a_id, uid, rn, at, ad in current_items:
+                    if target and folder == target:
+                        db.execute(
+                            "UPDATE actions SET status='skipped', executed_at=?, error_message=? WHERE id=?",
+                            (now_iso(), 'Already in target folder', a_id),
+                        )
+                        stats["skipped"] += 1
+                        actions_bar.update(1)
+                        if verbose:
+                            logger.log(
+                                "INFO",
+                                "skipped_redundant_move",
+                                {"folder": folder, "uid": uid, "target": target},
+                                console=f"      ⊘ {folder}/{uid} already in {target}",
+                            )
+                    else:
+                        items_to_move.append((a_id, uid, rn, at, ad))
+
+                # Batch move, processed in chunks to avoid oversized IMAP commands.
+                # Most IMAP servers enforce an ~8 KB command-line limit; 500 UIDs ≤ ~5 KB.
+                _MOVE_CHUNK = 500
+                batch_succeeded = False
+                batch_fallback: list = []  # items whose chunk failed → per-message retry
+
+                if items_to_move and target and not dry_run:
+                    method = "UID MOVE" if supports_uid_move else "UID COPY+STORE"
+                    chunks = [
+                        items_to_move[i : i + _MOVE_CHUNK]
+                        for i in range(0, len(items_to_move), _MOVE_CHUNK)
+                    ]
+                    batch_done_count = 0
+                    for chunk in chunks:
+                        uid_set = ",".join(uid for _, uid, _, _, _ in chunk if uid)
+                        if not uid_set:
+                            continue
+                        chunk_ok = False
+                        try:
+                            if supports_uid_move:
+                                b_typ, b_resp = client.uid("MOVE", uid_set, f'"{target}"')
+                                log_imap_call(
+                                    "imap_uid_move_batch",
+                                    op_label="UID MOVE (batch)",
+                                    status=b_typ,
+                                    response=b_resp,
+                                    folder=folder,
+                                    target=target,
+                                    uid=uid_set,
+                                )
+                                if b_typ != "OK" and not target_ready and _should_try_create_folder(b_resp):
+                                    c_typ, c_resp = client.create(f'"{target}"')
+                                    log_imap_call("imap_create", op_label="CREATE", status=c_typ,
+                                                  response=c_resp, folder=folder, target=target)
+                                    if c_typ == "OK":
+                                        target_ready = True
+                                        logger.log("INFO", "create_missing_target",
+                                                   {"folder": folder, "target": target},
+                                                   console=f"   📁 Created missing folder {target}")
+                                        b_typ, b_resp = client.uid("MOVE", uid_set, f'"{target}"')
+                                        log_imap_call("imap_uid_move_batch", op_label="UID MOVE (batch, retry)",
+                                                      status=b_typ, response=b_resp,
+                                                      folder=folder, target=target, uid=uid_set)
+                                if b_typ == "OK":
+                                    if not target_ready:
+                                        target_ready = True
+                                    chunk_ok = True
+                            else:
+                                b_typ, b_resp = client.uid("COPY", uid_set, f'"{target}"')
+                                log_imap_call(
+                                    "imap_uid_copy_batch",
+                                    op_label="UID COPY (batch)",
+                                    status=b_typ,
+                                    response=b_resp,
+                                    folder=folder,
+                                    target=target,
+                                    uid=uid_set,
+                                )
+                                if b_typ != "OK" and not target_ready and _should_try_create_folder(b_resp):
+                                    c_typ, c_resp = client.create(f'"{target}"')
+                                    log_imap_call("imap_create", op_label="CREATE", status=c_typ,
+                                                  response=c_resp, folder=folder, target=target)
+                                    if c_typ == "OK":
+                                        target_ready = True
+                                        logger.log("INFO", "create_missing_target",
+                                                   {"folder": folder, "target": target},
+                                                   console=f"   📁 Created missing folder {target}")
+                                        b_typ, b_resp = client.uid("COPY", uid_set, f'"{target}"')
+                                        log_imap_call("imap_uid_copy_batch", op_label="UID COPY (batch, retry)",
+                                                      status=b_typ, response=b_resp,
+                                                      folder=folder, target=target, uid=uid_set)
+                                if b_typ == "OK":
+                                    if not target_ready:
+                                        target_ready = True
+                                    s_typ, s_resp = client.uid("STORE", uid_set, "+FLAGS", "(\\Deleted)")
+                                    log_imap_call(
+                                        "imap_uid_store_batch",
+                                        op_label="UID STORE +FLAGS (batch)",
+                                        status=s_typ,
+                                        response=s_resp,
+                                        folder=folder,
+                                        target=target,
+                                        uid=uid_set,
+                                    )
+                                    if s_typ == "OK":
+                                        chunk_ok = True
+
+                        except imaplib.IMAP4.error as batch_exc:
+                            logger.log(
+                                "WARN",
+                                "execute_batch_move_failed",
+                                {"folder": folder, "target": target, "error": str(batch_exc)},
+                                console=f"   ⚠️ Batch move chunk failed, retrying per-message: {batch_exc}",
+                            )
+                            chunk_ok = False
+
+                        if chunk_ok:
+                            for a_id, uid, _, _, _ in chunk:
+                                _record_success(a_id, uid)
+                                msgs_bar.update(1)
+                                actions_bar.update(1)
+                            batch_done_count += len(chunk)
+                        else:
+                            batch_fallback.extend(chunk)
+
+                    if batch_done_count:
+                        logger.log(
+                            "INFO",
+                            "execute_batch_move_done",
+                            {
+                                "folder": folder,
+                                "target": target,
+                                "count": batch_done_count,
+                                "fallback": len(batch_fallback),
+                                "method": method,
+                            },
+                            console=(
+                                f"   ✅ Batch {method}: "
+                                f"{batch_done_count} messages → {display_target}"
+                                + (f" ({len(batch_fallback)} retrying per-msg)" if batch_fallback else "")
+                            ),
+                        )
+
+                    batch_succeeded = len(batch_fallback) == 0
+
+                # Per-message fallback: items whose batch chunk failed (or dry-run path)
+                _per_msg_items = batch_fallback if (items_to_move and target and not dry_run) else items_to_move
+                for a_id, uid, _, _, _ in ([] if batch_succeeded else _per_msg_items):
+                    # Guard: Skip if email is already in target folder (dry-run path)
                     if target and folder == target:
                         db.execute(
                             "UPDATE actions SET status='skipped', executed_at=?, error_message=? WHERE id=?",
@@ -2555,22 +2768,25 @@ def execute_actions(
                                 )
                     db.commit()  # Commit any verification results
 
-                # Now EXPUNGE only after verification is complete
-                # Messages will only be deleted if they were verified in destination
+                db.commit()  # Commit move results before expunge so they survive a timeout
+
+                # Use CLOSE (not EXPUNGE) to silently purge \Deleted messages.
+                # EXPUNGE sends a * EXPUNGE response for every renumbered message in the mailbox —
+                # on a 500k-message INBOX this is extremely slow. CLOSE achieves the same purge
+                # without per-message notifications. The next flush_group() re-selects the folder.
+                logger.log("DEBUG", "imap_close_start", {"folder": folder, "target": target})
                 try:
-                    exp_typ, exp_resp = client.expunge()
+                    cls_typ, cls_resp = client.close()
                     log_imap_call(
-                        "imap_expunge",
-                        op_label="EXPUNGE",
-                        status=exp_typ,
-                        response=exp_resp,
+                        "imap_close",
+                        op_label="CLOSE",
+                        status=cls_typ,
+                        response=cls_resp,
                         folder=folder,
                         target=target,
                     )
-                except Exception:  # pragma: no cover - best effort cleanup
-                    pass
-
-                db.commit()
+                except Exception as cls_exc:  # pragma: no cover - best effort cleanup
+                    logger.log("WARN", "imap_close_failed", {"folder": folder, "error": str(cls_exc)})
                 logger.log(
                     "INFO",
                     "execute_folder_done",
@@ -3085,6 +3301,8 @@ def execute_actions_parallel(
     backup_all: bool = False,
     backup_dir: Path | None = None,
     max_workers: int = 5,
+    disabled_action_types: set[str] | None = None,
+    folder_order: str = "alpha",
 ) -> tuple[PhaseTimer, Dict[str, int]]:
     """
     Execute pending actions in parallel (one worker per source folder).
@@ -3146,11 +3364,28 @@ def execute_actions_parallel(
         placeholders = ",".join("?" for _ in folder_params)
         folder_filter = f" AND folder IN ({placeholders})"
 
+    disabled_types = disabled_action_types or set()
+    action_type_params: tuple[str, ...] = ()
+    action_type_filter = ""
+    if disabled_types:
+        placeholders = ",".join("?" for _ in disabled_types)
+        action_type_filter = f" AND action_type NOT IN ({placeholders})"
+        action_type_params = tuple(disabled_types)
+        logger.log(
+            "INFO",
+            "execute_action_types_disabled",
+            {"disabled": sorted(disabled_types)},
+            console=f"⚙️  Skipping action types: {', '.join(sorted(disabled_types))}",
+        )
+
+    where_params = folder_params + action_type_params
+    combined_filter = folder_filter + action_type_filter
+
     # Count pending actions
     pending_cur = db.cursor()
     pending_cur.execute(
-        "SELECT COUNT(*) FROM actions WHERE status='pending'" + folder_filter,
-        folder_params,
+        "SELECT COUNT(*) FROM actions WHERE status='pending'" + combined_filter,
+        where_params,
     )
     pending_total = pending_cur.fetchone()[0] or 0
 
@@ -3193,10 +3428,10 @@ def execute_actions_parallel(
             FROM actions
             WHERE status='pending'
     """
-    if folder_filter:
+    if combined_filter:
         query = query.replace(
             "WHERE status='pending'",
-            f"WHERE status='pending'{folder_filter}",
+            f"WHERE status='pending'{combined_filter}",
         )
     query += """
         )
@@ -3209,7 +3444,7 @@ def execute_actions_parallel(
         query += f" LIMIT {int(limit)}"
 
     cursor = db.cursor()
-    cursor.execute(query, folder_params)
+    cursor.execute(query, where_params)
 
     # Group actions by source folder
     folder_actions: dict[str, list[dict]] = {}
@@ -3234,8 +3469,13 @@ def execute_actions_parallel(
         timer.stop()
         return timer, {"done": 0, "skipped": 0, "failed": 0, "suppressed": 0}
 
-    # Sort folders by action count (load balance: smallest first)
-    sorted_folders = sorted(folder_actions.keys(), key=lambda f: len(folder_actions[f]))
+    # Sort folders by action count based on folder_order preference
+    if folder_order == "most-first":
+        sorted_folders = sorted(folder_actions.keys(), key=lambda f: len(folder_actions[f]), reverse=True)
+    elif folder_order == "least-first":
+        sorted_folders = sorted(folder_actions.keys(), key=lambda f: len(folder_actions[f]))
+    else:
+        sorted_folders = sorted(folder_actions.keys())
 
     # Log verbose execution overview (similar to sequential executor)
     if verbose:

@@ -44,6 +44,33 @@ def _should_try_create_folder(response) -> bool:
     return any(keyword in text for keyword in keywords)
 
 
+MAX_FOLDER_LINES = 6
+
+
+def _update_folder_bars(
+    folder_bars: list,
+    folder_move_counts: dict[str, int],
+) -> None:
+    """Update the fixed-height folder move display bars."""
+    total = sum(folder_move_counts.values())
+    sorted_folders = sorted(folder_move_counts.items(), key=lambda x: -x[1])
+
+    folder_bars[0].set_description_str(f"   → Moves: {total} total")
+
+    display = sorted_folders[:MAX_FOLDER_LINES]
+    overflow = len(folder_move_counts) - len(display)
+
+    for i, slot_bar in enumerate(folder_bars[1:MAX_FOLDER_LINES + 1], start=0):
+        if i < len(display):
+            folder, count = display[i]
+            short_name = folder.split(".")[-1]
+            slot_bar.set_description_str(f"    {short_name:<30} {count}")
+        elif i == len(display) and overflow > 0:
+            slot_bar.set_description_str(f"    (+{overflow} more folders)")
+        else:
+            slot_bar.set_description_str("")
+
+
 def stream_execute(
     client: imaplib.IMAP4 | None,
     rules: Sequence[dict],
@@ -56,6 +83,7 @@ def stream_execute(
     backup_dir: Path | None = None,
     resume_log: ResumeLog | None = None,
     logger: JsonLogger,
+    total: int | None = None,
 ) -> tuple[PhaseTimer, dict[str, int]]:
     """
     Execute rules against a stream of messages.
@@ -87,23 +115,40 @@ def stream_execute(
     sorted_rules = sorted(rules, key=lambda r: int(r.get("priority", 100)), reverse=True)
 
     stats = {"done": 0, "skipped": 0, "failed": 0, "matched": 0}
+    folder_move_counts: dict[str, int] = {}
     current_folder: str | None = None
     folder_open = False
-
-    # Convert to list if it's a generator so we can get total count
-    message_list = list(messages)
-    total_messages = len(message_list)
+    pending_expunge = False  # True when ≥1 COPY+STORE completed; flushed at folder boundary
+    supports_uid_move = (
+        not dry_run
+        and client is not None
+        and b"MOVE" in getattr(client, "capabilities", ())
+    )
+    processed_count = 0
 
     progress_bar = tqdm(
-        message_list,
+        messages,
         desc="⚙️ Processing messages",
         unit="msg",
         dynamic_ncols=True,
         leave=True,
         disable=not show_progress,
+        total=total,
+        position=0,
     )
+    folder_bars = [
+        tqdm(
+            total=0,
+            bar_format="{desc}",
+            position=i + 1,
+            leave=False,
+            disable=not show_progress,
+        )
+        for i in range(MAX_FOLDER_LINES + 2)
+    ]
 
     for msg in progress_bar:
+        processed_count += 1
         try:
             # Parse header into dict
             header = _parse_header_map(msg.header_text)
@@ -113,6 +158,8 @@ def stream_execute(
 
             if not matching_rule:
                 stats["skipped"] += 1
+                if resume_log:
+                    resume_log.mark_processed(msg.folder, msg.uid)
                 if verbose:
                     logger.log(
                         "INFO",
@@ -122,9 +169,17 @@ def stream_execute(
                     )
                 continue
 
-            # Get target folder from rule action
-            action = matching_rule.get("action", {})
-            target = action.get("target")
+            # Support both "actions" (new format) and "action" (old format)
+            actions = matching_rule.get("actions", [])
+            if not actions and "action" in matching_rule:
+                actions = [matching_rule["action"]]
+
+            # Find the move action to get the target folder
+            target = None
+            for act in actions:
+                if act.get("type") == "move":
+                    target = act.get("target")
+                    break
             if not target:
                 stats["skipped"] += 1
                 if verbose:
@@ -136,7 +191,7 @@ def stream_execute(
                             "uid": msg.uid,
                             "rule": matching_rule.get("name"),
                         },
-                        console=f"   ⊘ {msg.folder}/{msg.uid}: rule has no target",
+                        console=f"   ⊘ {msg.folder}/{msg.uid}: rule '{matching_rule.get('name', '(unnamed)')}' has no target",
                     )
                 continue
 
@@ -164,8 +219,9 @@ def stream_execute(
             rule_name = matching_rule.get("name", "(unnamed)")
 
             if dry_run:
-                progress_bar.set_postfix_str(f"{msg.folder} → {target}")
                 stats["done"] += 1
+                folder_move_counts[target] = folder_move_counts.get(target, 0) + 1
+                _update_folder_bars(folder_bars, folder_move_counts)
                 # Mark as processed in resume log
                 if resume_log:
                     resume_log.mark_processed(msg.folder, msg.uid)
@@ -189,6 +245,13 @@ def stream_execute(
             # Ensure we have the source folder selected
             if current_folder != msg.folder:
                 if folder_open:
+                    # Flush deferred EXPUNGE before leaving the folder
+                    if pending_expunge:
+                        try:
+                            client.expunge()
+                        except imaplib.IMAP4.error:
+                            pass
+                        pending_expunge = False
                     try:
                         client.close()
                     except imaplib.IMAP4.error:
@@ -260,93 +323,101 @@ def stream_execute(
                     stats["failed"] += 1
                     continue
 
-            # Try to copy message to target folder
+            # Move message to target folder
             try:
-                copy_typ, copy_resp = client.uid("COPY", msg.uid, f'"{target}"')
+                move_succeeded = False
 
-                if copy_typ != "OK":
-                    # Try to create folder if it doesn't exist
-                    if _should_try_create_folder(copy_resp):
+                if supports_uid_move:
+                    # Single atomic UID MOVE — no STORE or EXPUNGE needed
+                    try:
+                        move_typ, move_resp = client.uid("MOVE", msg.uid, f'"{target}"')
+                    except imaplib.IMAP4.error:
+                        move_typ = "NO"
+                        move_resp = None
+
+                    if move_typ != "OK" and _should_try_create_folder(move_resp):
                         logger.log(
                             "INFO",
                             "stream_create_folder",
                             {"target": target},
                             console=f"   📂 Creating folder: {target}",
                         )
-                        create_typ, create_resp = client.create(f'"{target}"')
+                        create_typ, _cr = client.create(f'"{target}"')
                         if create_typ == "OK":
-                            # Retry copy
-                            copy_typ, copy_resp = client.uid("COPY", msg.uid, f'"{target}"')
+                            move_typ, move_resp = client.uid("MOVE", msg.uid, f'"{target}"')
+
+                    if move_typ == "OK":
+                        move_succeeded = True
+
+                if not move_succeeded:
+                    # COPY + STORE + deferred EXPUNGE fallback
+                    copy_typ, copy_resp = client.uid("COPY", msg.uid, f'"{target}"')
 
                     if copy_typ != "OK":
-                        error_detail = _format_imap_details(copy_resp)
+                        if _should_try_create_folder(copy_resp):
+                            logger.log(
+                                "INFO",
+                                "stream_create_folder",
+                                {"target": target},
+                                console=f"   📂 Creating folder: {target}",
+                            )
+                            create_typ, _cr = client.create(f'"{target}"')
+                            if create_typ == "OK":
+                                copy_typ, copy_resp = client.uid("COPY", msg.uid, f'"{target}"')
+
+                        if copy_typ != "OK":
+                            error_detail = _format_imap_details(copy_resp)
+                            logger.log(
+                                "ERROR",
+                                "stream_copy_failed",
+                                {
+                                    "folder": msg.folder,
+                                    "uid": msg.uid,
+                                    "target": target,
+                                    "error": error_detail,
+                                },
+                                console=f"   ❌ Copy failed: {msg.folder}/{msg.uid} → {target}{error_detail}",
+                            )
+                            stats["failed"] += 1
+                            continue
+
+                    store_typ, store_resp = client.uid("STORE", msg.uid, "+FLAGS", "(\\Deleted)")
+                    if store_typ != "OK":
+                        error_detail = _format_imap_details(store_resp)
                         logger.log(
                             "ERROR",
-                            "stream_copy_failed",
+                            "stream_store_failed",
                             {
                                 "folder": msg.folder,
                                 "uid": msg.uid,
-                                "target": target,
                                 "error": error_detail,
                             },
-                            console=f"   ❌ Copy failed: {msg.folder}/{msg.uid} → {target}{error_detail}",
+                            console=f"   ⚠️ Failed to mark deleted: {msg.folder}/{msg.uid}{error_detail}",
                         )
-                        stats["failed"] += 1
+                        # Copy succeeded so count as done; expunge not needed
+                        stats["done"] += 1
+                        folder_move_counts[target] = folder_move_counts.get(target, 0) + 1
+                        _update_folder_bars(folder_bars, folder_move_counts)
+                        if verbose:
+                            logger.log(
+                                "INFO",
+                                "stream_success",
+                                {"folder": msg.folder, "uid": msg.uid, "target": target, "rule": rule_name},
+                                console=f"   ✅ Moved {msg.folder}/{msg.uid} → {target}",
+                            )
+                        if resume_log:
+                            resume_log.mark_processed(msg.folder, msg.uid)
                         continue
 
-                # Mark message as deleted
-                store_typ, store_resp = client.uid("STORE", msg.uid, "+FLAGS", "(\\Deleted)")
-                if store_typ != "OK":
-                    error_detail = _format_imap_details(store_resp)
-                    logger.log(
-                        "ERROR",
-                        "stream_store_failed",
-                        {
-                            "folder": msg.folder,
-                            "uid": msg.uid,
-                            "error": error_detail,
-                        },
-                        console=f"   ⚠️ Failed to mark deleted: {msg.folder}/{msg.uid}{error_detail}",
-                    )
-                    # Continue anyway, message was copied
-                    stats["done"] += 1
-                    if verbose:
-                        logger.log(
-                            "INFO",
-                            "stream_success",
-                            {
-                                "folder": msg.folder,
-                                "uid": msg.uid,
-                                "target": target,
-                                "rule": rule_name,
-                            },
-                            console=f"   ✅ Moved {msg.folder}/{msg.uid} → {target}",
-                        )
-                    # Mark as processed even if delete failed (copy succeeded)
-                    if resume_log:
-                        resume_log.mark_processed(msg.folder, msg.uid)
-                    continue
+                    # STORE succeeded — defer EXPUNGE to folder boundary
+                    pending_expunge = True
+                    move_succeeded = True
 
-                # Expunge the message
-                exp_typ, exp_resp = client.expunge()
-                if exp_typ != "OK":
-                    error_detail = _format_imap_details(exp_resp)
-                    logger.log(
-                        "WARN",
-                        "stream_expunge_failed",
-                        {
-                            "folder": msg.folder,
-                            "uid": msg.uid,
-                            "error": error_detail,
-                        },
-                        console=f"   ⚠️ Expunge warning: {msg.folder}/{msg.uid}{error_detail}",
-                    )
-                    # Message still moved even if expunge failed
-
+                # Common success path
                 stats["done"] += 1
-                progress_bar.set_postfix_str(f"{msg.folder} → {target}")
+                folder_move_counts[target] = folder_move_counts.get(target, 0) + 1
+                _update_folder_bars(folder_bars, folder_move_counts)
 
-                # Mark as processed in resume log
                 if resume_log:
                     resume_log.mark_processed(msg.folder, msg.uid)
 
@@ -354,12 +425,7 @@ def stream_execute(
                     logger.log(
                         "INFO",
                         "stream_success",
-                        {
-                            "folder": msg.folder,
-                            "uid": msg.uid,
-                            "target": target,
-                            "rule": rule_name,
-                        },
+                        {"folder": msg.folder, "uid": msg.uid, "target": target, "rule": rule_name},
                         console=f"   ✅ Moved {msg.folder}/{msg.uid} → {target}",
                     )
 
@@ -386,17 +452,38 @@ def stream_execute(
             )
             stats["failed"] += 1
 
+    for bar in folder_bars:
+        bar.close()
     progress_bar.close()
 
-    # Close folder if open
+    # Flush deferred EXPUNGE and close folder if open
     if folder_open:
+        if pending_expunge:
+            try:
+                exp_typ, exp_resp = client.expunge()
+                if exp_typ != "OK":
+                    error_detail = _format_imap_details(exp_resp)
+                    logger.log(
+                        "WARN",
+                        "stream_expunge_failed",
+                        {"folder": current_folder, "error": error_detail},
+                        console=f"   ⚠️ Expunge warning on {current_folder}{error_detail}",
+                    )
+            except (imaplib.IMAP4.error, AttributeError):
+                pass
         try:
             client.close()
         except (imaplib.IMAP4.error, AttributeError):
             pass
 
     timer.stop()
-    timer.count = len(message_list)
+    timer.count = processed_count
+
+    # Build per-folder move breakdown for summary
+    folder_breakdown = "".join(
+        f"      → {folder}: {count}\n"
+        for folder, count in sorted(folder_move_counts.items(), key=lambda x: -x[1])
+    )
 
     # Log summary
     logger.log(
@@ -404,19 +491,21 @@ def stream_execute(
         "phase_summary",
         {
             "phase": "stream-execute",
-            "total_messages": total_messages,
+            "total_messages": processed_count,
             "matched_rules": stats["matched"],
             "moved": stats["done"],
             "skipped": stats["skipped"],
             "failed": stats["failed"],
             "elapsed_sec": timer.elapsed,
             "rate": timer.rate(),
+            "moves_by_folder": folder_move_counts,
         },
         console=(
             "\n📊 Summary — Stream Execute\n"
-            f"   ✉️  Total messages: {total_messages}\n"
+            f"   ✉️  Total messages: {processed_count}\n"
             f"   🎯  Rules matched: {stats['matched']}\n"
             f"   ✅  Moved: {stats['done']}\n"
+            f"{folder_breakdown}"
             f"   ⊘  Skipped: {stats['skipped']}\n"
             f"   ❌  Failed: {stats['failed']}\n"
             f"   ⏱️  Duration: {timer.fmt()} ({timer.rate():.1f} msg/s)\n"

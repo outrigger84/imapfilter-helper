@@ -182,6 +182,24 @@ class WizardCache:
             self._cache = self._empty_cache()
             self.save()
 
+    @staticmethod
+    def _rules_effective_mtime(rules_dir: Path) -> float:
+        """Return the effective mtime for the rules directory.
+
+        Uses the max of the directory mtime and all individual .json file mtimes
+        so that edits to existing rule files (which don't update the dir mtime on
+        Linux) are detected correctly.
+        """
+        dir_mtime = os.path.getmtime(str(rules_dir))
+        try:
+            file_mtimes = [
+                os.path.getmtime(str(f))
+                for f in rules_dir.glob("*.json")
+            ]
+        except (OSError, ValueError):
+            file_mtimes = []
+        return max([dir_mtime] + file_mtimes) if file_mtimes else dir_mtime
+
     def get_coverage(self, rules_dir: Path, cache_db: Path) -> Optional[Dict[str, Any]]:
         """
         Get cached coverage analysis if valid.
@@ -209,7 +227,7 @@ class WizardCache:
 
         # Get current mtimes
         try:
-            current_rules_mtime = os.path.getmtime(str(rules_dir))
+            current_rules_mtime = self._rules_effective_mtime(rules_dir)
             current_db_mtime = os.path.getmtime(str(cache_db))
         except (OSError, ValueError):
             # Files don't exist or can't stat
@@ -233,7 +251,7 @@ class WizardCache:
         """
         cache = self.load()
         try:
-            rules_mtime = os.path.getmtime(str(rules_dir))
+            rules_mtime = self._rules_effective_mtime(rules_dir)
             db_mtime = os.path.getmtime(str(cache_db))
         except (OSError, ValueError):
             # Can't get mtimes, don't cache

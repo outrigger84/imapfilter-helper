@@ -39,6 +39,7 @@ def imap_login(secrets_path: Path, logger: JsonLogger) -> imaplib.IMAP4_SSL:
         console=f"🔐 Connecting as {secrets_cfg['username']}",
     )
     mail = imaplib.IMAP4_SSL(secrets_cfg["host"], secrets_cfg.get("port", 993))
+    mail.sock.settimeout(120)
     mail.login(secrets_cfg["username"], secrets_cfg["password"])
     return mail
 

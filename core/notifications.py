@@ -138,6 +138,10 @@ class NotificationDispatcher:
             "cache_folder_done": ("Folder Cached", "info"),
             "cache_summary": ("Cache Complete", "success"),
             "execute_summary": ("Execute Complete", "success"),
+            # mbox-import events
+            "classify_done": ("MBOX Classified", "info"),
+            "folder_upload_done": ("Folder Uploaded", "info"),
+            "mbox_import_done": ("Import Complete", "success"),
         }
 
         if message not in notify_events:
@@ -242,6 +246,31 @@ class NotificationDispatcher:
             skipped = context.get("skipped", 0)
             body = f"Executed: {done}\nFailed: {failed}\nSkipped: {skipped}"
             priority = 3 if failed > 0 else 2
+
+        elif message == "classify_done":
+            total = context.get("total", 0)
+            matched = context.get("matched", 0)
+            unmatched = context.get("unmatched", 0)
+            folders = context.get("folders", 0)
+            body = f"Messages: {total}\nMatched by rules: {matched}\nUnmatched: {unmatched}\nTarget folders: {folders}"
+            priority = 2
+
+        elif message == "folder_upload_done":
+            folder = context.get("folder", "")
+            uploaded = context.get("uploaded", 0)
+            failed = context.get("failed", 0)
+            body = f"Folder: {folder}\nUploaded: {uploaded}"
+            if failed:
+                body += f"\nFailed: {failed}"
+            priority = 4 if failed > 0 else 2
+
+        elif message == "mbox_import_done":
+            uploaded = context.get("total_uploaded", 0)
+            failed = context.get("total_failed", 0)
+            body = f"Uploaded: {uploaded} messages"
+            if failed:
+                body += f"\nFailed: {failed} messages"
+            priority = 4 if failed > 0 else 2
 
         else:
             return

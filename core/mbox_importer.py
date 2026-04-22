@@ -161,7 +161,8 @@ def _classify_messages(
     limit: Optional[int],
     verbose: bool,
     uploaded_ids: set[str],
-) -> tuple[dict[str, list[int]], int, dict[int, str]]:
+    no_move: bool = False,
+) -> tuple[dict[str, list[int]], int, dict[int, str], list[int]]:
     """Stream through MBOX and record the target folder index for each message.
 
     Skips messages whose Message-ID is already in uploaded_ids (progress recovery).
@@ -170,6 +171,7 @@ def _classify_messages(
         folder_indices   — folder name → list of integer mbox keys
         unmatched_count  — messages routed to default_folder due to no rule match
         index_to_msgid   — mbox key → Message-ID (empty string if header absent)
+        skipped_indices  — mbox keys skipped because already uploaded (for cleanup)
     """
     sorted_rules = sorted(rules, key=lambda r: int(r.get("priority", 100)))
 
@@ -182,6 +184,7 @@ def _classify_messages(
     index_to_msgid: dict[int, str] = {}
     unmatched_count = 0
     skipped_count = 0
+    skipped_indices: list[int] = []
 
     with tqdm(total=total, desc="Classifying messages", unit="msg") as bar:
         for i, msg in enumerate(mbox):
@@ -193,28 +196,36 @@ def _classify_messages(
             # Skip messages already successfully uploaded in a previous run
             if msg_id and msg_id in uploaded_ids:
                 skipped_count += 1
+                skipped_indices.append(i)
                 bar.update(1)
                 continue
 
             header_dict = {k.lower(): v for k, v in msg.items()}
 
-            matching_rule = find_matching_rule(header_dict, sorted_rules)
-            if matching_rule:
-                action = matching_rule.get("action") or {}
-                if not action:
-                    actions = matching_rule.get("actions") or []
-                    action = next((a for a in actions if a.get("type") == "move"), {})
-                target = action.get("target", default_folder)
-
-                if verbose:
-                    subject = msg.get("subject", "(no subject)")
-                    print(f"  [{i+1}] {subject[:60]} → {target} (rule: {matching_rule.get('name', '?')})")
-            else:
+            if no_move:
                 target = default_folder
                 unmatched_count += 1
                 if verbose:
                     subject = msg.get("subject", "(no subject)")
-                    print(f"  [{i+1}] {subject[:60]} → {target} (no rule matched)")
+                    print(f"  [{i+1}] {subject[:60]} → {target} (--no-move)")
+            else:
+                matching_rule = find_matching_rule(header_dict, sorted_rules)
+                if matching_rule:
+                    action = matching_rule.get("action") or {}
+                    if not action:
+                        actions = matching_rule.get("actions") or []
+                        action = next((a for a in actions if a.get("type") == "move"), {})
+                    target = action.get("target", default_folder)
+
+                    if verbose:
+                        subject = msg.get("subject", "(no subject)")
+                        print(f"  [{i+1}] {subject[:60]} → {target} (rule: {matching_rule.get('name', '?')})")
+                else:
+                    target = default_folder
+                    unmatched_count += 1
+                    if verbose:
+                        subject = msg.get("subject", "(no subject)")
+                        print(f"  [{i+1}] {subject[:60]} → {target} (no rule matched)")
 
             folder_indices[target].append(i)
             index_to_msgid[i] = msg_id
@@ -223,7 +234,7 @@ def _classify_messages(
     if skipped_count:
         print(f"   ⏭️  Skipped {skipped_count} already-uploaded messages (from progress file)")
 
-    return dict(folder_indices), unmatched_count, index_to_msgid
+    return dict(folder_indices), unmatched_count, index_to_msgid, skipped_indices
 
 
 # ---------------------------------------------------------------------------
@@ -274,12 +285,12 @@ def _append_folder_batch(
     progress_lock: Optional[threading.Lock] = None,
     index_to_msgid: Optional[dict[int, str]] = None,
     show_inner_bar: bool = True,
-) -> tuple[int, int, list[int]]:
+) -> tuple[int, int, list[int], list[int]]:
     """Upload messages (read one-at-a-time by index) to one IMAP folder via APPEND.
 
-    Returns (uploaded, failed, successful_indices).
-    Successful indices are NOT flushed from the mbox here — caller does one
-    batch flush at the end to avoid invalidating remaining indices mid-run.
+    Returns (uploaded, failed, successful_indices, failed_indices).
+    Neither list is flushed from the mbox here — caller does one batch flush at
+    the end to avoid invalidating remaining indices mid-run.
 
     err_lock and progress_lock should be supplied when called from multiple threads
     to serialise writes to the shared err_mbox and progress file.
@@ -293,12 +304,13 @@ def _append_folder_batch(
                     except Exception:
                         pass
                 err_mbox.flush()
-        return 0, len(indices), []
+        return 0, len(indices), [], list(indices)
 
     quoted = _quote_mailbox(folder)
     uploaded = 0
     failed = 0
     successful_indices: list[int] = []
+    failed_indices: list[int] = []
 
     bar = tqdm(indices, desc=f"  {folder}", unit="msg", position=1,
                leave=False, disable=not show_inner_bar)
@@ -337,28 +349,38 @@ def _append_folder_batch(
                     print(f"    ✓ {subject[:60]}")
             else:
                 failed += 1
+                failed_indices.append(idx)
                 logger.log("WARN", "append_failed",
                            {"folder": folder, "resp": str(resp)})
                 if err_mbox is not None and msg is not None:
                     with (err_lock or _null_context()):
                         err_mbox.add(msg)
+                msg_id = index_to_msgid.get(idx, "")
+                if msg_id:
+                    with (progress_lock or _null_context()):
+                        _record_uploaded(progress_path, msg_id)
 
         except imaplib.IMAP4.abort:
             # Connection is dead; propagate so the caller can reconnect and retry.
             raise
         except Exception as exc:
             failed += 1
+            failed_indices.append(idx)
             logger.log("WARN", "append_error",
                        {"folder": folder, "error": str(exc)})
             if err_mbox is not None and msg is not None:
                 with (err_lock or _null_context()):
                     err_mbox.add(msg)
+            msg_id = index_to_msgid.get(idx, "")
+            if msg_id:
+                with (progress_lock or _null_context()):
+                    _record_uploaded(progress_path, msg_id)
 
     if err_mbox is not None:
         with (err_lock or _null_context()):
             err_mbox.flush()
     bar.close()
-    return uploaded, failed, successful_indices
+    return uploaded, failed, successful_indices, failed_indices
 
 
 @contextmanager
@@ -392,6 +414,8 @@ def run_mbox_import(
     error_mbox_path: Optional[Path],
     logger: JsonLogger,
     parallel_workers: int = 1,
+    no_move: bool = False,
+    folder_order: str = "alpha",
 ) -> int:
     """Main entry point for the mbox-import command."""
 
@@ -414,11 +438,14 @@ def run_mbox_import(
                    console=f"♻️  Resuming: {len(uploaded_ids)} messages already uploaded, skipping them")
 
     # Phase 3: Classify — streams through mbox storing only integer indices
+    if no_move:
+        logger.log("INFO", "mbox_no_move", {},
+                   console=f"⚙️  --no-move: skipping rule routing, all messages → {default_folder}")
     logger.log("INFO", "mbox_classify_start", {"path": str(mbox_path)},
                console=f"📂 Classifying messages from {mbox_path.name} ...")
 
-    folder_indices, unmatched_count, index_to_msgid = _classify_messages(
-        mbox_path, rules, default_folder, limit, verbose, uploaded_ids
+    folder_indices, unmatched_count, index_to_msgid, skipped_indices = _classify_messages(
+        mbox_path, rules, default_folder, limit, verbose, uploaded_ids, no_move=no_move
     )
 
     total = sum(len(v) for v in folder_indices.values())
@@ -448,6 +475,7 @@ def run_mbox_import(
     total_uploaded = 0
     total_failed = 0
     all_successful_indices: list[int] = []
+    all_failed_indices: list[int] = []
 
     num_workers = max(1, min(parallel_workers, len(folder_indices)))
 
@@ -459,11 +487,30 @@ def run_mbox_import(
         client = imap_login(secrets_path, logger)
         mbox = mailbox.mbox(str(mbox_path))
         try:
+            # Determine folder processing order.
+            if folder_order == "most-first":
+                _folder_seq = sorted(
+                    folder_indices.keys(),
+                    key=lambda f: len(folder_indices[f]),
+                    reverse=True,
+                )
+            elif folder_order == "least-first":
+                _folder_seq = sorted(
+                    folder_indices.keys(),
+                    key=lambda f: len(folder_indices[f]),
+                )
+            else:
+                # alpha: default folder first (INBOX visible early), then alphabetical
+                _folder_seq = sorted(
+                    folder_indices.keys(),
+                    key=lambda f: (0 if f == default_folder else 1, f),
+                )
             folders_bar = tqdm(
-                folder_indices.items(),
+                ((f, folder_indices[f]) for f in _folder_seq),
                 desc="Uploading",
                 unit="folder",
                 position=0,
+                total=len(folder_indices),
             )
             for folder, indices in folders_bar:
                 folders_bar.set_postfix({"folder": folder[:30]})
@@ -472,11 +519,12 @@ def run_mbox_import(
                 folder_uploaded = 0
                 folder_failed = 0
                 folder_successful: list[int] = []
+                folder_failed_idxs: list[int] = []
                 remaining = list(indices)
 
                 for attempt in range(1, _RECONNECT_ATTEMPTS + 1):
                     try:
-                        uploaded, failed, successful_indices = _append_folder_batch(
+                        uploaded, failed, successful_indices, failed_indices = _append_folder_batch(
                             client, folder, remaining, mbox,
                             preserve_flags=preserve_flags,
                             verbose=verbose,
@@ -488,6 +536,7 @@ def run_mbox_import(
                         folder_uploaded += uploaded
                         folder_failed += failed
                         folder_successful.extend(successful_indices)
+                        folder_failed_idxs.extend(failed_indices)
                         break  # success — move on to next folder
                     except (imaplib.IMAP4.abort, imaplib.IMAP4.error, OSError) as exc:
                         logger.log("WARN", "imap_conn_dropped", {
@@ -504,20 +553,22 @@ def run_mbox_import(
                         else:
                             logger.log("ERROR", "imap_folder_give_up", {"folder": folder},
                                        console=f"  ❌ Giving up on {folder} after {_RECONNECT_ATTEMPTS} attempts")
-                            folder_failed += len(remaining)
+                            succ_set = set(folder_successful)
+                            give_up_indices = [i for i in remaining if i not in succ_set]
+                            folder_failed += len(give_up_indices)
+                            folder_failed_idxs.extend(give_up_indices)
                             if err_mbox is not None:
-                                succ_set = set(folder_successful)
-                                for idx in remaining:
-                                    if idx not in succ_set:
-                                        try:
-                                            err_mbox.add(mbox[idx])
-                                        except Exception:
-                                            pass
+                                for idx in give_up_indices:
+                                    try:
+                                        err_mbox.add(mbox[idx])
+                                    except Exception:
+                                        pass
                                 err_mbox.flush()
 
                 total_uploaded += folder_uploaded
                 total_failed += folder_failed
                 all_successful_indices.extend(folder_successful)
+                all_failed_indices.extend(folder_failed_idxs)
                 logger.log("INFO", "folder_upload_done", {
                     "folder": folder, "uploaded": folder_uploaded, "failed": folder_failed,
                 }, console=f"  📤 {folder}: {folder_uploaded} uploaded, {folder_failed} failed")
@@ -534,10 +585,27 @@ def run_mbox_import(
         progress_lock = threading.Lock()
         results_lock = threading.Lock()
 
-        folder_items = list(folder_indices.items())
+        # Determine folder processing order for parallel upload.
+        if folder_order == "most-first":
+            folder_items = sorted(
+                folder_indices.items(),
+                key=lambda kv: len(kv[1]),
+                reverse=True,
+            )
+        elif folder_order == "least-first":
+            folder_items = sorted(
+                folder_indices.items(),
+                key=lambda kv: len(kv[1]),
+            )
+        else:
+            # alpha: default folder first, then alphabetical
+            folder_items = sorted(
+                folder_indices.items(),
+                key=lambda kv: (0 if kv[0] == default_folder else 1, kv[0]),
+            )
         folders_bar = tqdm(total=len(folder_items), desc="Uploading", unit="folder", position=0)
 
-        def _worker(folder: str, indices: list[int]) -> tuple[str, int, int, list[int]]:
+        def _worker(folder: str, indices: list[int]) -> tuple[str, int, int, list[int], list[int]]:
             # Each worker opens its own mbox handle (mbox reads are not thread-safe)
             worker_mbox = mailbox.mbox(str(mbox_path))
             conn = pool.acquire()
@@ -545,8 +613,9 @@ def run_mbox_import(
             up: int = 0
             fail: int = 0
             succ: list[int] = []
+            fail_idxs: list[int] = []
             try:
-                up, fail, succ = _append_folder_batch(
+                up, fail, succ, fail_idxs = _append_folder_batch(
                     conn, folder, indices, worker_mbox,
                     preserve_flags=preserve_flags,
                     verbose=verbose,
@@ -561,6 +630,7 @@ def run_mbox_import(
             except (imaplib.IMAP4.abort, imaplib.IMAP4.error, OSError) as exc:
                 conn_healthy = False
                 fail = len(indices)
+                fail_idxs = list(indices)
                 logger.log("WARN", "imap_worker_conn_dropped", {
                     "folder": folder, "error": str(exc),
                 }, console=f"  ⚠️  Worker connection dropped for {folder}: {exc}")
@@ -585,7 +655,7 @@ def run_mbox_import(
                         with pool._lock:
                             pool._created -= 1
                 worker_mbox.close()
-            return folder, up, fail, succ
+            return folder, up, fail, succ, fail_idxs
 
         try:
             with ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -594,11 +664,12 @@ def run_mbox_import(
                     for folder, indices in folder_items
                 }
                 for future in as_completed(future_to_folder):
-                    folder, uploaded, failed, successful_indices = future.result()
+                    folder, uploaded, failed, successful_indices, failed_indices = future.result()
                     with results_lock:
                         total_uploaded += uploaded
                         total_failed += failed
                         all_successful_indices.extend(successful_indices)
+                        all_failed_indices.extend(failed_indices)
                     folders_bar.update(1)
                     folders_bar.set_postfix({"last": folder[:30]})
                     logger.log("INFO", "folder_upload_done", {
@@ -610,12 +681,16 @@ def run_mbox_import(
             if err_mbox is not None:
                 err_mbox.close()
 
-    # Phase 6: Remove uploaded messages from mbox in one batch flush
-    if all_successful_indices:
-        logger.log("INFO", "mbox_cleanup_start", {"count": len(all_successful_indices)},
-                   console=f"🧹 Removing {len(all_successful_indices)} uploaded messages from {mbox_path.name} ...")
+    # Phase 6: Remove processed messages from mbox in one batch flush.
+    # Covers: successfully uploaded this run, already uploaded in a prior run
+    # (skipped during classification), and messages that failed and were saved to
+    # the error mbox — retries should be done from the error file, not the source.
+    indices_to_remove = list(set(all_successful_indices) | set(skipped_indices) | set(all_failed_indices))
+    if indices_to_remove:
+        logger.log("INFO", "mbox_cleanup_start", {"count": len(indices_to_remove)},
+                   console=f"🧹 Removing {len(indices_to_remove)} uploaded messages from {mbox_path.name} ...")
         cleanup_mbox = mailbox.mbox(str(mbox_path))
-        for idx in all_successful_indices:
+        for idx in indices_to_remove:
             try:
                 cleanup_mbox.remove(idx)
             except Exception:
