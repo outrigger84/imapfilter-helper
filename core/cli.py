@@ -95,6 +95,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Number of parallel IMAP connections (default: auto-detect based on folder count, use 1 to force sequential)",
     )
+    p_build.add_argument(
+        "--temp-dir",
+        type=Path,
+        default=None,
+        help="Directory for intermediate worker databases during parallel build (default: system temp dir)",
+    )
     p_eval = sub.add_parser("evaluate", help="Evaluate rules against cache")
     p_eval.add_argument("--dry-run", action="store_true", help="Simulate rule matches only")
     p_eval.add_argument(
@@ -710,6 +716,7 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
                 order=cfg.cache.order,
                 max_workers=parallel_workers,
                 folder_sizes=folder_sizes,
+                temp_dir=getattr(args, "temp_dir", None),
             )
             # Log cache completion summary notification
             logger.log(

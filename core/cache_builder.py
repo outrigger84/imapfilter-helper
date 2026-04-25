@@ -511,6 +511,7 @@ def build_cache_parallel(
     order: str,
     max_workers: int,
     folder_sizes: dict[str, int] | None = None,
+    temp_dir: Path | None = None,
 ) -> tuple[PhaseTimer, int, int]:
     """
     Build cache with parallel folder processing.
@@ -536,6 +537,7 @@ def build_cache_parallel(
         order: Message order (newest/oldest/random)
         max_workers: Number of parallel IMAP connections
         folder_sizes: Optional dict of folder sizes for progress display
+        temp_dir: Base directory for intermediate worker databases (default: system temp dir)
 
     Returns:
         Tuple of (timer, folder_count, message_count)
@@ -544,8 +546,9 @@ def build_cache_parallel(
 
     # Create temporary directory for thread-based databases
     # Each thread gets its own database file to avoid SQLite locking issues
-    temp_dir = Path(tempfile.gettempdir()) / f"imapfilter_cache_{os.getpid()}"
-    temp_dir.mkdir(exist_ok=True)
+    base_temp = temp_dir if temp_dir is not None else Path(tempfile.gettempdir())
+    temp_dir = base_temp / f"imapfilter_cache_{os.getpid()}"
+    temp_dir.mkdir(parents=True, exist_ok=True)
 
     # Create connection pool with specified max workers
     pool = IMAPConnectionPool(secrets_path, max_workers, logger)
