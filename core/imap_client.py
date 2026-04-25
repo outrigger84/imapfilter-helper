@@ -23,7 +23,7 @@ def _ensure_large_imap_buffer() -> None:
         imaplib._MAXLINE = _IMAP_MAXLINE
 
 
-def imap_login(secrets_path: Path, logger: JsonLogger) -> imaplib.IMAP4_SSL:
+def imap_login(secrets_path: Path, logger: JsonLogger) -> imaplib.IMAP4:
     """Establish an authenticated IMAP session using the provided secrets file."""
     _ensure_large_imap_buffer()
     secrets_path = Path(secrets_path)
@@ -32,13 +32,18 @@ def imap_login(secrets_path: Path, logger: JsonLogger) -> imaplib.IMAP4_SSL:
     with secrets_path.open(encoding="utf-8") as handle:
         secrets = json.load(handle)
     secrets_cfg = secrets["imap"]
+    use_ssl = secrets_cfg.get("ssl", True)
+    default_port = 993 if use_ssl else 143
     logger.log(
         "INFO",
         "imap_connect",
         {"host": secrets_cfg["host"], "user": secrets_cfg["username"]},
         console=f"🔐 Connecting as {secrets_cfg['username']}",
     )
-    mail = imaplib.IMAP4_SSL(secrets_cfg["host"], secrets_cfg.get("port", 993))
+    if use_ssl:
+        mail = imaplib.IMAP4_SSL(secrets_cfg["host"], secrets_cfg.get("port", default_port))
+    else:
+        mail = imaplib.IMAP4(secrets_cfg["host"], secrets_cfg.get("port", default_port))
     mail.sock.settimeout(120)
     mail.login(secrets_cfg["username"], secrets_cfg["password"])
     return mail

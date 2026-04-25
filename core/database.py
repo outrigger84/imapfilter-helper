@@ -10,7 +10,7 @@ from core.logging_utils import JsonLogger
 
 def init_db(path: Path, *, logger: Optional[JsonLogger] = None) -> sqlite3.Connection:
     """Initialise the sqlite database and apply lightweight migrations."""
-    db = sqlite3.connect(path)
+    db = sqlite3.connect(path, timeout=30.0)
 
     # Enable WAL mode for better concurrency (production-standard SQLite configuration)
     current_mode = db.execute("PRAGMA journal_mode").fetchone()[0]

@@ -851,14 +851,7 @@ def build_cache_parallel(
             except Exception:
                 pass  # Files may be in use
 
-    # Also clean up main database lock files (but NOT the main .db file!)
-    for lock_file in [db_path.with_suffix(".db-wal"), db_path.with_suffix(".db-shm")]:
-        try:
-            lock_file.unlink()
-        except Exception:
-            pass
-
-    # Glob the main database files (WAL cleanup above removed -wal and -shm, .db files remain)
+    # Glob the main database files (WAL cleanup above removed thread -wal and -shm, .db files remain)
     thread_temp_dbs = sorted(temp_dir.glob("thread_*.db"))
 
     # Give filesystem time to settle

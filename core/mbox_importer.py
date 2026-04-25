@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime
+import email.errors
 import email.utils
 import imaplib
 import mailbox
@@ -47,6 +48,22 @@ def _mbox_flags_to_imap(msg: mailbox.mboxMessage) -> Optional[str]:
     return "(" + " ".join(imap_flags) + ")"
 
 
+def _sanitize_message_headers(msg: mailbox.mboxMessage) -> None:
+    """Remove headers with embedded newlines or binary control chars.
+
+    Python 3.14+ raises HeaderWriteError for such headers. This strips them
+    in-place so flattening can proceed — the data was already corrupted.
+    """
+    bad_keys: set[str] = set()
+    for key, val in msg.items():
+        if "\n" in val or "\r" in val:
+            bad_keys.add(key)
+        elif any(ord(c) < 32 and c != "\t" for c in val):
+            bad_keys.add(key)
+    for key in bad_keys:
+        del msg[key]
+
+
 def _message_to_crlf_bytes(msg: mailbox.mboxMessage) -> bytes:
     """Convert mboxMessage to RFC-2822 bytes with CRLF line endings."""
     import io
@@ -57,10 +74,19 @@ def _message_to_crlf_bytes(msg: mailbox.mboxMessage) -> bytes:
         def write(self, s: str) -> None:
             self._fp.write(s.encode("utf-8", "surrogateescape"))
 
-    buf = io.BytesIO()
-    gen = _Utf8BytesGenerator(buf, mangle_from_=False)
-    gen.flatten(msg, unixfrom=False)
-    raw = buf.getvalue()
+    def _flatten(m: mailbox.mboxMessage) -> bytes:
+        buf = io.BytesIO()
+        gen = _Utf8BytesGenerator(buf, mangle_from_=False)
+        gen.flatten(m, unixfrom=False)
+        return buf.getvalue()
+
+    try:
+        raw = _flatten(msg)
+    except email.errors.HeaderWriteError:
+        # Corrupted header (e.g. binary data with embedded newlines).
+        # Strip the offending headers and retry.
+        _sanitize_message_headers(msg)
+        raw = _flatten(msg)
     return raw.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
 
 
@@ -354,7 +380,10 @@ def _append_folder_batch(
                            {"folder": folder, "resp": str(resp)})
                 if err_mbox is not None and msg is not None:
                     with (err_lock or _null_context()):
-                        err_mbox.add(msg)
+                        try:
+                            err_mbox.add(msg)
+                        except Exception:
+                            pass  # Message too corrupted to write to error mbox
                 msg_id = index_to_msgid.get(idx, "")
                 if msg_id:
                     with (progress_lock or _null_context()):
@@ -370,7 +399,10 @@ def _append_folder_batch(
                        {"folder": folder, "error": str(exc)})
             if err_mbox is not None and msg is not None:
                 with (err_lock or _null_context()):
-                    err_mbox.add(msg)
+                    try:
+                        err_mbox.add(msg)
+                    except Exception:
+                        pass  # Message too corrupted to write to error mbox
             msg_id = index_to_msgid.get(idx, "")
             if msg_id:
                 with (progress_lock or _null_context()):
