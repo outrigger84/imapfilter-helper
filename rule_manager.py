@@ -1288,6 +1288,10 @@ class RuleRecord:
         except (TypeError, ValueError):
             return 100
 
+    @property
+    def enabled(self) -> bool:
+        return bool(self.data.get("enabled", True))
+
 
 class RuleManager:
     """Interactive console orchestrator."""
@@ -1301,7 +1305,7 @@ class RuleManager:
     # ------------------------------------------------------------------ utils
     def refresh_rules(self) -> None:
         self.rules_dir.mkdir(parents=True, exist_ok=True)
-        rules = load_rules(self.rules_dir, self.logger)
+        rules = load_rules(self.rules_dir, self.logger, skip_disabled=False)
         self.rules: list[RuleRecord] = []
         for raw in rules:
             file_name = raw.pop("_file", None)
@@ -1352,6 +1356,7 @@ class RuleManager:
             return None
         rule_labels = [
             f"[{rule.priority:>4}] {rule.name} — {summarise_action(rule.data.get('actions', rule.data.get('action')))}"
+            + ("  [DISABLED]" if not rule.enabled else "")
             for rule in self.rules
         ]
         selection = choose_from_list("Available rules (sorted by priority):", rule_labels)
@@ -1491,7 +1496,9 @@ class RuleManager:
             comments = rule.data.get("comments") or []
             # Support both 'actions' (new) and 'action' (legacy) fields
             actions_field = rule.data.get('actions', rule.data.get('action'))
+            enabled_label = "Yes" if rule.enabled else "No"
             options = [
+                ("e", f"Enabled   : {enabled_label}"),
                 ("n", f"Name      : {rule.data.get('name', '<unnamed>')}"),
                 ("p", f"Priority  : {rule.priority}"),
                 ("c", f"Conditions: {summarise_condition(rule.data.get('conditions'))}"),
@@ -1502,10 +1509,10 @@ class RuleManager:
                 ("s", "Save & exit"),
                 ("b", "Back"),
             ]
-            action = choose_menu_option(
-                f"🛠️  Editing rule — {rule.file.name}",
-                options,
-            )
+            title = f"🛠️  Editing rule — {rule.file.name}"
+            if not rule.enabled:
+                title += "  [DISABLED]"
+            action = choose_menu_option(title, options,)
             if action in {None, "b"}:
                 if new_rule and confirm("Discard this new rule?", default=False):
                     self.rules.remove(rule)
@@ -1519,7 +1526,14 @@ class RuleManager:
                 if new_rule:
                     print("🎉 New rule created. Returning to main menu.")
                 return
-            if action == "n":
+            if action == "e":
+                if rule.enabled:
+                    rule.data["enabled"] = False
+                    print("  Rule disabled.")
+                else:
+                    rule.data.pop("enabled", None)
+                    print("  Rule enabled.")
+            elif action == "n":
                 rule.data["name"] = prompt("  Rule name: ")
             elif action == "p":
                 rule.data["priority"] = prompt_int("  Priority: ", default=rule.priority)
@@ -1534,14 +1548,11 @@ class RuleManager:
                 items = list(rule.data.get("comments") or [])
                 rule.data["comments"] = edit_comments_list(items)
             elif action == "x":
-                extras = {
-                    key: value
-                    for key, value in rule.data.items()
-                    if key not in {"name", "priority", "conditions", "actions", "action", "comments"}
-                }
+                _managed = {"name", "priority", "conditions", "actions", "action", "comments", "enabled"}
+                extras = {key: value for key, value in rule.data.items() if key not in _managed}
                 edit_generic_dict(extras)
                 for key in list(rule.data):
-                    if key not in {"name", "priority", "conditions", "actions", "action", "comments"}:
+                    if key not in _managed:
                         rule.data.pop(key)
                 rule.data.update(extras)
             elif action == "t":

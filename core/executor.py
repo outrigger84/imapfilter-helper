@@ -1,6 +1,7 @@
 """Execute queued actions."""
 from __future__ import annotations
 
+import base64
 import concurrent.futures
 import datetime
 import gc
@@ -28,17 +29,40 @@ from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 HEADER_PARSER = HeaderParser(policy=default)
 
 
-def _quote_mailbox(mailbox: str) -> str:
-    """
-    Quote a mailbox name for use in IMAP commands.
+def _encode_mailbox_utf7(mailbox: str) -> str:
+    """Encode a mailbox name to IMAP modified UTF-7 (mUTF-7, RFC 3501).
 
-    This properly escapes and quotes mailbox names that contain spaces,
-    quotes, backslashes, or other special characters.
+    The only ASCII character that must be encoded is '&', which becomes '&-'.
+    Non-ASCII characters are encoded as &<modified-base64>-.
     """
+    result = []
+    i = 0
+    while i < len(mailbox):
+        ch = mailbox[i]
+        if ch == '&':
+            result.append('&-')
+        elif ord(ch) < 0x20 or ord(ch) > 0x7e:
+            # Collect run of non-printable-ASCII characters
+            run = []
+            while i < len(mailbox) and (ord(mailbox[i]) < 0x20 or ord(mailbox[i]) > 0x7e):
+                run.append(mailbox[i])
+                i += 1
+            encoded = ''.join(run).encode('utf-16-be')
+            b64 = base64.b64encode(encoded).decode('ascii').rstrip('=').replace('/', ',')
+            result.append(f'&{b64}-')
+            continue
+        else:
+            result.append(ch)
+        i += 1
+    return ''.join(result)
+
+
+def _quote_mailbox(mailbox: str) -> str:
+    """Quote and mUTF-7-encode a mailbox name for use in IMAP commands."""
     if not mailbox:
         return '""'
-    # Escape backslashes and quotes, then wrap in quotes
-    escaped = mailbox.replace('\\', '\\\\').replace('"', '\\"')
+    encoded = _encode_mailbox_utf7(mailbox)
+    escaped = encoded.replace('\\', '\\\\').replace('"', '\\"')
     return f'"{escaped}"'
 
 
@@ -73,6 +97,12 @@ def _should_try_create_folder(response: Iterable[bytes | str] | None) -> bool:
         "nonexistent",
     )
     return any(keyword in text for keyword in keywords)
+
+
+def _is_invalid_mailbox_name_error(exc_str: str) -> bool:
+    """Return True if the error indicates the target mailbox name is permanently invalid."""
+    s = exc_str.lower()
+    return "character not allowed" in s or ("cannot" in s and "mailbox name" in s)
 
 
 # ============================================================================
@@ -459,7 +489,7 @@ def _perform_move_operation(
     action_id = action['id']
     uid = action['uid']
     folder = action['folder']
-    target = action.get('target')
+    target = _encode_mailbox_utf7(action['target']) if action.get('target') else None
     rule_name = action.get('rule_name')
 
     # Guard: Skip if email is already in target folder
@@ -1071,7 +1101,7 @@ def _verify_move_operation(
     action_id = action['id']
     uid = action['uid']
     folder = action['folder']
-    target = action.get('target')
+    target = _encode_mailbox_utf7(action['target']) if action.get('target') else None
 
     if not target:
         return True
@@ -1146,6 +1176,68 @@ def _verify_move_operation(
 # End Phase 2 Helper Functions
 # ============================================================================
 
+
+def resolve_pending_conflicts(db, logger: JsonLogger) -> int:
+    """
+    Cancel pending actions from lower-precedence rules when multiple rules have
+    queued actions for the same (uid, folder).
+
+    evaluate_rules is now first-match-wins, so conflicts should not arise from
+    new runs. This function cleans up stale conflicts left over from earlier runs
+    that used the old all-match behaviour.
+
+    Returns the number of actions cancelled.
+    """
+    conflict_cur = db.execute(
+        """
+        SELECT uid, folder
+        FROM actions
+        WHERE status = 'pending'
+        GROUP BY uid, folder
+        HAVING COUNT(DISTINCT rule_name) > 1
+        """
+    )
+    conflicts = conflict_cur.fetchall()
+    if not conflicts:
+        return 0
+
+    cancelled = 0
+    for uid, folder in conflicts:
+        # The action with the lowest priority number belongs to the winning rule (lower = higher precedence).
+        winner_cur = db.execute(
+            """
+            SELECT rule_name FROM actions
+            WHERE uid = ? AND folder = ? AND status = 'pending'
+            ORDER BY priority ASC
+            LIMIT 1
+            """,
+            (uid, folder),
+        )
+        winner_row = winner_cur.fetchone()
+        if not winner_row:
+            continue
+        winning_rule = winner_row[0]
+
+        cancel_cur = db.execute(
+            """
+            UPDATE actions SET status = 'cancelled', executed_at = ?
+            WHERE uid = ? AND folder = ? AND status = 'pending' AND rule_name != ?
+            """,
+            (now_iso(), uid, folder, winning_rule),
+        )
+        cancelled += cancel_cur.rowcount
+
+    if cancelled:
+        db.commit()
+        logger.log(
+            "INFO",
+            "resolve_conflicts",
+            {"cancelled": cancelled},
+            console=f"⚖️  Resolved rule conflicts: {cancelled} lower-precedence action(s) cancelled",
+        )
+    return cancelled
+
+
 def execute_actions(
     client: imaplib.IMAP4 | None,
     db,
@@ -1207,6 +1299,9 @@ def execute_actions(
             {"disabled": sorted(disabled_types)},
             console=f"⚙️  Skipping action types: {', '.join(sorted(disabled_types))}",
         )
+
+    # Resolve any conflicts left over from earlier all-match evaluation runs.
+    resolve_pending_conflicts(db, logger)
 
     where_params = folder_params + action_type_params
     pending_cur = db.cursor()
@@ -2411,6 +2506,22 @@ def execute_actions(
                                         chunk_ok = True
 
                         except imaplib.IMAP4.error as batch_exc:
+                            if _is_invalid_mailbox_name_error(str(batch_exc)):
+                                logger.log(
+                                    "ERROR",
+                                    "execute_batch_invalid_mailbox",
+                                    {"folder": folder, "target": target, "error": str(batch_exc)},
+                                    console=f"❌ Invalid folder name '{target}': rename the rule target to avoid '.' in the folder name",
+                                )
+                                for a_id, uid, _, _, _ in chunk:
+                                    db.execute(
+                                        "UPDATE actions SET status='failed', executed_at=? WHERE id=?",
+                                        (now_iso(), a_id),
+                                    )
+                                    stats["failed"] += 1
+                                batch_fallback.clear()
+                                batch_succeeded = True  # suppress per-message fallback loop
+                                break
                             logger.log(
                                 "WARN",
                                 "execute_batch_move_failed",
@@ -2607,11 +2718,25 @@ def execute_actions(
                                 )
                             except Exception:  # pragma: no cover - best effort cleanup
                                 pass
-                        message = str(exc).lower()
+                        message = str(exc)
+                        if _is_invalid_mailbox_name_error(message):
+                            db.execute(
+                                "UPDATE actions SET status='failed', executed_at=? WHERE id=?",
+                                (now_iso(), a_id),
+                            )
+                            db.commit()
+                            stats["failed"] += 1
+                            logger.log(
+                                "ERROR",
+                                "invalid_mailbox_name",
+                                {"uid": uid, "folder": folder, "target": target, "error": message},
+                                console=f"❌ Invalid folder name '{target}': rename the rule target to avoid '.' in the folder name",
+                            )
+                            continue
                         if (
-                            "no such message" in message
-                            or "uid command error" in message
-                            or "failed" in message
+                            "no such message" in message.lower()
+                            or "uid command error" in message.lower()
+                            or "failed" in message.lower()
                         ):
                             if strict:
                                 db.execute(
@@ -2814,7 +2939,8 @@ def execute_actions(
         rows = select_cur.fetchmany(chunk_size)
         if not rows:
             break
-        for a_id, uid, folder, target, rule_name, _priority, _created_at, action_type, action_data in rows:
+        for a_id, uid, folder, _raw_target, rule_name, _priority, _created_at, action_type, action_data in rows:
+            target = _encode_mailbox_utf7(_raw_target) if _raw_target else _raw_target
             # Group by (folder, target, action_type) to prevent mixing moves with keyword actions
             key = (folder, target, action_type)
             if current_key is not None and key != current_key:
@@ -3414,7 +3540,10 @@ def execute_actions_parallel(
                 logger=logger,
             )
         finally:
-            client.logout()
+            try:
+                client.logout()
+            except Exception:
+                pass
 
     # Group actions by source folder
     query = """

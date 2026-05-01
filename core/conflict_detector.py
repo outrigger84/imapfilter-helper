@@ -712,8 +712,8 @@ class ConflictDetector:
         """
         conflicts = []
 
-        # Sort rules by priority (higher first)
-        sorted_rules = sorted(self.rules, key=lambda r: r.get("priority", 100), reverse=True)
+        # Sort rules by priority (lower first)
+        sorted_rules = sorted(self.rules, key=lambda r: r.get("priority", 100))
 
         # For each rule, check if shadowed by higher priority
         for i, rule2 in enumerate(sorted_rules):

@@ -1,6 +1,7 @@
 """Stream-based message execution for IMAPFilter."""
 from __future__ import annotations
 
+import base64
 import imaplib
 import re
 from pathlib import Path
@@ -13,6 +14,32 @@ from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 from core.rule_engine import find_matching_rule, _parse_header_map
 from core.stream_processor import StreamMessage
 from core.stream_resume import ResumeLog
+
+
+def _encode_mailbox_utf7(mailbox: str) -> str:
+    """Encode a mailbox name to IMAP modified UTF-7 (mUTF-7, RFC 3501).
+
+    '&' must become '&-'; non-printable-ASCII characters use &<modified-base64>-.
+    """
+    result = []
+    i = 0
+    while i < len(mailbox):
+        ch = mailbox[i]
+        if ch == '&':
+            result.append('&-')
+        elif ord(ch) < 0x20 or ord(ch) > 0x7e:
+            run = []
+            while i < len(mailbox) and (ord(mailbox[i]) < 0x20 or ord(mailbox[i]) > 0x7e):
+                run.append(mailbox[i])
+                i += 1
+            encoded = ''.join(run).encode('utf-16-be')
+            b64 = base64.b64encode(encoded).decode('ascii').rstrip('=').replace('/', ',')
+            result.append(f'&{b64}-')
+            continue
+        else:
+            result.append(ch)
+        i += 1
+    return ''.join(result)
 
 
 def _format_imap_details(response) -> str:
@@ -63,7 +90,7 @@ def _update_folder_bars(
     for i, slot_bar in enumerate(folder_bars[1:MAX_FOLDER_LINES + 1], start=0):
         if i < len(display):
             folder, count = display[i]
-            short_name = folder.split(".")[-1]
+            short_name = folder.split("/")[-1]
             slot_bar.set_description_str(f"    {short_name:<30} {count}")
         elif i == len(display) and overflow > 0:
             slot_bar.set_description_str(f"    (+{overflow} more folders)")
@@ -111,8 +138,8 @@ def stream_execute(
 
     timer = PhaseTimer("stream-execute")
 
-    # Sort rules by priority (highest first) for consistent matching
-    sorted_rules = sorted(rules, key=lambda r: int(r.get("priority", 100)), reverse=True)
+    # Sort rules by priority (lowest first) for consistent matching
+    sorted_rules = sorted(rules, key=lambda r: int(r.get("priority", 100)))
 
     stats = {"done": 0, "skipped": 0, "failed": 0, "matched": 0}
     folder_move_counts: dict[str, int] = {}
@@ -180,6 +207,8 @@ def stream_execute(
                 if act.get("type") == "move":
                     target = act.get("target")
                     break
+            if target:
+                target = _encode_mailbox_utf7(target)
             if not target:
                 stats["skipped"] += 1
                 if verbose:

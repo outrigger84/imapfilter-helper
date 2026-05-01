@@ -758,7 +758,7 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
     finally:
         try:
             client.logout()
-        except (imaplib.IMAP4.abort, OSError, EOFError):
+        except (imaplib.IMAP4.error, imaplib.IMAP4.abort, OSError, EOFError):
             # Server may have closed connection or lost socket during long caching
             # This is safe to ignore since we're exiting anyway
             pass
@@ -935,7 +935,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             if client is not None:
                 try:
                     client.logout()
-                except (imaplib.IMAP4.abort, OSError, EOFError):
+                except (imaplib.IMAP4.error, imaplib.IMAP4.abort, OSError, EOFError):
                     # Server may have closed connection or lost socket
                     # Safe to ignore during exit
                     pass
@@ -1074,9 +1074,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
         if client is not None:
             try:
                 client.logout()
-            except (imaplib.IMAP4.abort, OSError, EOFError):
-                # Server may have closed connection or lost socket
-                # Safe to ignore during exit
+            except (imaplib.IMAP4.error, imaplib.IMAP4.abort, OSError, EOFError):
                 pass
     return 0
 
@@ -1194,7 +1192,7 @@ def handle_eval_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: Js
         if client is not None:
             try:
                 client.logout()
-            except (imaplib.IMAP4.abort, OSError, EOFError):
+            except (imaplib.IMAP4.error, imaplib.IMAP4.abort, OSError, EOFError):
                 # Server may have closed connection or lost socket
                 # Safe to ignore during exit
                 pass
@@ -1310,7 +1308,7 @@ def handle_stream(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogg
         if client is not None:
             try:
                 client.logout()
-            except (imaplib.IMAP4.abort, OSError, EOFError):
+            except (imaplib.IMAP4.error, imaplib.IMAP4.abort, OSError, EOFError):
                 # Server may have closed connection or lost socket
                 # Safe to ignore during exit
                 pass

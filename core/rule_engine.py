@@ -34,16 +34,20 @@ def _get_compiled_regex(pattern: str) -> re.Pattern:
     return re.compile(pattern, re.IGNORECASE)
 
 
-def load_rules(rule_dir: Path, logger: JsonLogger) -> list[dict]:
+def load_rules(rule_dir: Path, logger: JsonLogger, *, skip_disabled: bool = True) -> list[dict]:
     rule_dir = Path(rule_dir)
     rule_dir.mkdir(exist_ok=True)
     rules: list[dict] = []
+    skipped = 0
     for path in sorted(rule_dir.glob("*.json")):
         try:
             with path.open(encoding="utf-8") as handle:
                 rule = json.load(handle)
             rule["_file"] = path.name
             rule["priority"] = int(rule.get("priority", 100))
+            if skip_disabled and not rule.get("enabled", True):
+                skipped += 1
+                continue
             rules.append(rule)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.log(
@@ -52,7 +56,10 @@ def load_rules(rule_dir: Path, logger: JsonLogger) -> list[dict]:
                 {"file": str(path), "error": str(exc)},
                 console=f"❌ Failed to load {path.name}",
             )
-    logger.log("INFO", "rules_loaded", {"count": len(rules)}, console=f"📜 Loaded {len(rules)} rules")
+    msg = f"📜 Loaded {len(rules)} rules"
+    if skipped:
+        msg += f" ({skipped} disabled)"
+    logger.log("INFO", "rules_loaded", {"count": len(rules), "skipped_disabled": skipped}, console=msg)
     return rules
 
 
@@ -428,7 +435,9 @@ def evaluate_rules(
     folders: Sequence[str] | None = None,
     limit: int | None = None,
 ) -> tuple[PhaseTimer, int, int]:
-    rule_list = list(rules)
+    # Sort by priority ascending so lower numbers (higher precedence) are evaluated first.
+    # evaluate_rules is first-match-wins: it breaks after the first rule that matches each email.
+    rule_list = sorted(rules, key=lambda r: int(r.get("priority", 100)))
     timer = PhaseTimer("evaluate")
 
     cur = db.cursor()
@@ -624,11 +633,12 @@ def evaluate_rules(
                             continue
 
                         # Calculate effective priority to ensure execution order:
-                        # - Keywords (1000) execute before moves (500)
-                        # - Higher rule priority always wins
-                        # - effective_priority = rule_priority * 10000 + type_priority - action_index
+                        # - Keywords (1000) execute before moves (500) within the same rule
+                        # - Lower rule priority number wins (priority 10 beats priority 50)
+                        # - Invert base_priority so lower numbers yield higher effective_priority
+                        # - effective_priority = (1000 - rule_priority) * 10000 + type_priority - action_index
                         type_priority = 1000 if action_type in ("set_keywords", "remove_keywords") else 500
-                        effective_priority = base_priority * 10000 + type_priority - action_index
+                        effective_priority = (1000 - base_priority) * 10000 + type_priority - action_index
 
                         # Serialize action data (keywords, etc.) as JSON if present
                         action_data = None
@@ -679,6 +689,9 @@ def evaluate_rules(
                             },
                             console=console_msg,
                         )
+
+                    # First-match-wins: stop evaluating further rules for this email.
+                    break
 
             if email_matched:
                 matched_email_count += 1
