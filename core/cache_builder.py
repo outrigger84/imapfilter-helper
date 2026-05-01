@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import imaplib
 import json
 import os
 import random
@@ -31,6 +32,7 @@ def split_mega_folders(
     folders: Sequence[str],
     folder_sizes: dict[str, int] | None,
     threshold: int = MEGA_FOLDER_THRESHOLD,
+    max_chunks: int = 32,
 ) -> list[tuple[str, int | None, int | None]]:
     """
     Split large folders into multiple tasks for parallel processing.
@@ -64,9 +66,12 @@ def split_mega_folders(
             tasks.append((folder, None, None))
             continue
 
-        # Split into roughly equal chunks across ideal worker count (4-5)
-        # This ensures mega-folder is distributed across multiple workers
-        num_chunks = max(2, (size // threshold) + 1)
+        # Aim for ~50k messages per chunk; cap at max_chunks to avoid
+        # flooding the IMAP server with hundreds of concurrent SEARCH calls
+        # on the same mailbox (e.g. a 1.7M-message INBOX would otherwise
+        # produce 173 chunks, each issuing its own full UID SEARCH).
+        chunk_target = max(threshold, 50_000)
+        num_chunks = max(2, min(max_chunks, (size + chunk_target - 1) // chunk_target))
 
         # Create a task for each chunk
         # We'll filter UIDs at fetch time based on position in the list
@@ -370,16 +375,49 @@ def build_cache(
             )
 
             db_insert_count = 0
+            consecutive_imap_errors = 0
             for batch_start in range(0, len(limited_uids), FETCH_BATCH_SIZE):
                 batch = limited_uids[batch_start : batch_start + FETCH_BATCH_SIZE]
                 uid_set = b",".join(
                     uid if isinstance(uid, (bytes, bytearray)) else str(uid).encode()
                     for uid in batch
                 )
-                # Fetch BODY[HEADER], FLAGS, and INTERNALDATE for the whole batch
-                typ, msg_data = client.uid(
-                    "FETCH", uid_set, "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)"
-                )
+                # Fetch headers + metadata in one round trip.
+                # Folded FETCH responses from Dovecot are handled transparently
+                # by _FoldingAwareFile installed in imap_login().
+                try:
+                    typ, msg_data = client.uid(
+                        "FETCH", uid_set, "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)"
+                    )
+                    consecutive_imap_errors = 0
+                except OSError as exc:
+                    logger.log(
+                        "WARNING",
+                        "cache_fetch_socket_error",
+                        {"folder": folder, "batch_start": batch_start, "error": str(exc)},
+                        console=f"⚠️ {folder} batch@{batch_start}: network error (aborting folder): {exc}",
+                    )
+                    raise RuntimeError(
+                        f"Network/socket error in {folder}, aborting folder"
+                    ) from exc
+                except imaplib.IMAP4.error as exc:
+                    logger.log(
+                        "WARNING",
+                        "cache_fetch_imap_error",
+                        {"folder": folder, "batch_start": batch_start, "error": str(exc)},
+                        console=f"⚠️ {folder} batch@{batch_start}: IMAP error (skipping): {exc}",
+                    )
+                    msgs_bar.update(len(batch))
+                    consecutive_imap_errors += 1
+                    if consecutive_imap_errors >= 5:
+                        raise RuntimeError(
+                            f"Too many consecutive IMAP errors in {folder}, aborting folder"
+                        ) from exc
+                    try:
+                        client.select(f'"{folder}"', readonly=True)
+                    except Exception:
+                        pass
+                    continue
                 if typ != "OK":
                     logger.log(
                         "WARNING",
@@ -553,6 +591,27 @@ def build_cache_parallel(
     # Create connection pool with specified max workers
     pool = IMAPConnectionPool(secrets_path, max_workers, logger)
 
+    # Shared UID cache so mega-folder chunks share one UID SEARCH result.
+    # Without this, a 1.7M-message INBOX split into 32 chunks would issue
+    # 32 separate "UID SEARCH UNDELETED" commands, flooding the IMAP server.
+    _uid_cache: dict[str, list[bytes]] = {}
+    _uid_cache_locks: dict[str, threading.Lock] = {}
+    _uid_cache_meta_lock = threading.Lock()
+
+    def _get_uids_cached(folder: str, client) -> list[bytes]:
+        """Return cached UIDs for folder, fetching via SEARCH only on first call."""
+        if folder in _uid_cache:
+            return _uid_cache[folder]
+        with _uid_cache_meta_lock:
+            if folder not in _uid_cache_locks:
+                _uid_cache_locks[folder] = threading.Lock()
+        with _uid_cache_locks[folder]:
+            if folder in _uid_cache:
+                return _uid_cache[folder]
+            uids = safe_search_all(client, undeleted_only=True)
+            _uid_cache[folder] = list(uids)
+            return _uid_cache[folder]
+
     # Thread-safe counters
     total_msgs_lock = threading.Lock()
     total_msgs_count = 0
@@ -612,6 +671,7 @@ def build_cache_parallel(
         """
         client = None
         db = None
+        connection_ok = True  # Track whether the connection is still healthy
         try:
             # Acquire connection from pool
             client = pool.acquire()
@@ -645,8 +705,13 @@ def build_cache_parallel(
                 folders_bar.update(1)
                 return folder, 0, None
 
-            # Get undeleted messages
-            uids = safe_search_all(client, undeleted_only=True)
+            # Get undeleted messages — use shared cache so chunk workers for the
+            # same mega-folder don't each issue a full UID SEARCH.
+            try:
+                uids = _get_uids_cached(folder, client)
+            except OSError as exc:
+                connection_ok = False
+                raise RuntimeError(f"UID SEARCH failed (network error) in {folder}: {exc}") from exc
 
             # Filter by chunk if processing a mega-folder split
             if chunk_idx is not None and num_chunks is not None and num_chunks > 1:
@@ -702,16 +767,49 @@ def build_cache_parallel(
 
             # Fetch and cache headers in batches; commit every ~50 inserts
             db_insert_count = 0
+            consecutive_imap_errors = 0
             for batch_start in range(0, len(limited_uids), FETCH_BATCH_SIZE):
                 batch = limited_uids[batch_start : batch_start + FETCH_BATCH_SIZE]
                 uid_set = b",".join(
                     uid if isinstance(uid, (bytes, bytearray)) else str(uid).encode()
                     for uid in batch
                 )
-                # Fetch BODY[HEADER], FLAGS, and INTERNALDATE for the whole batch
-                typ, msg_data = client.uid(
-                    "FETCH", uid_set, "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)"
-                )
+                # Folded FETCH responses from Dovecot are handled transparently
+                # by _FoldingAwareFile installed in imap_login().
+                try:
+                    typ, msg_data = client.uid(
+                        "FETCH", uid_set, "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)"
+                    )
+                    consecutive_imap_errors = 0
+                except OSError as exc:
+                    connection_ok = False
+                    logger.log(
+                        "WARNING",
+                        "cache_fetch_socket_error",
+                        {"folder": folder, "batch_start": batch_start, "error": str(exc)},
+                        console=f"⚠️ {folder} batch@{batch_start}: network error (aborting folder): {exc}",
+                    )
+                    raise RuntimeError(
+                        f"Network/socket error in {folder}, aborting folder"
+                    ) from exc
+                except imaplib.IMAP4.error as exc:
+                    logger.log(
+                        "WARNING",
+                        "cache_fetch_imap_error",
+                        {"folder": folder, "batch_start": batch_start, "error": str(exc)},
+                        console=f"⚠️ {folder} batch@{batch_start}: IMAP error (skipping): {exc}",
+                    )
+                    worker_bar.update(len(batch))
+                    consecutive_imap_errors += 1
+                    if consecutive_imap_errors >= 5:
+                        raise RuntimeError(
+                            f"Too many consecutive IMAP errors in {folder}, aborting folder"
+                        ) from exc
+                    try:
+                        client.select(f'"{folder}"', readonly=True)
+                    except Exception:
+                        pass
+                    continue
                 if typ != "OK":
                     logger.log(
                         "WARNING",
@@ -797,7 +895,12 @@ def build_cache_parallel(
                 except Exception:
                     pass
             if client:
-                pool.release(client)
+                if connection_ok:
+                    pool.release(client)
+                else:
+                    # Connection is in a bad/unknown state after a network error;
+                    # discard it so the pool can create a fresh one next time.
+                    pool.discard(client)
 
     # Execute parallel processing with ThreadPoolExecutor
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:

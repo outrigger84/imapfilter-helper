@@ -68,6 +68,23 @@ class IMAPConnectionPool:
         """
         self._pool.put(conn)
 
+    def discard(self, conn: imaplib.IMAP4_SSL) -> None:
+        """
+        Discard a connection that is in a bad/corrupted state.
+
+        Closes the connection and decrements the created count so a fresh
+        connection can be created on the next acquire() call.
+
+        Args:
+            conn: The broken IMAP connection to close and discard
+        """
+        with self._lock:
+            self._created = max(0, self._created - 1)
+        try:
+            conn.shutdown()
+        except Exception:
+            pass
+
     def shutdown(self) -> None:
         """Close all connections in the pool."""
         while not self._pool.empty():

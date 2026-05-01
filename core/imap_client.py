@@ -12,15 +12,60 @@ from tqdm import tqdm
 from core.logging_utils import JsonLogger
 
 
-_IMAP_MAXLINE = 10_000_000
-
-
 def _ensure_large_imap_buffer() -> None:
-    """Increase imaplib's internal line buffer if the default is too small."""
+    """Remove imaplib's line-length cap so large SEARCH responses (e.g. huge INBOX) don't abort."""
+    imaplib._MAXLINE = sys.maxsize
 
-    current = getattr(imaplib, "_MAXLINE", 0)
-    if current < _IMAP_MAXLINE:
-        imaplib._MAXLINE = _IMAP_MAXLINE
+
+_FETCH_FOLD_RE = re.compile(rb"\bFETCH\b")
+_LITERAL_END_RE = re.compile(rb"\{\d+\}\r?\n?$")
+
+
+def _patch_fold_aware_readline(mail: imaplib.IMAP4) -> None:
+    """
+    Monkey-patch ``mail.readline`` to handle Dovecot's folded FETCH responses.
+
+    Dovecot folds long FETCH envelopes across multiple lines, e.g.:
+
+        * 1 FETCH (UID 1234567
+         BODY[HEADER] {4511}
+        <header bytes>
+        )
+
+    imaplib reads one line at a time and only looks for the literal-size
+    marker ``{N}`` at the *end* of that line.  When the line is folded, the
+    ``{N}`` appears on the *next* line, which imaplib treats as an
+    "unexpected response" and raises IMAP4.error — corrupting the connection.
+
+    This patch intercepts ``readline()`` at the instance level (avoiding the
+    read-only ``IMAP4.file`` property introduced in Python 3.12) and joins
+    any whitespace-prefixed continuation lines before imaplib sees them.
+    """
+    _orig = mail.readline
+    _buf: list[bytes] = []   # at most one look-ahead line
+
+    def _readline() -> bytes:
+        line = _buf.pop() if _buf else _orig()
+        for _ in range(20):   # cap to guard against pathological servers
+            stripped = line.rstrip(b"\r\n")
+            if not (
+                line.startswith(b"* ")
+                and _FETCH_FOLD_RE.search(line)
+                and not _LITERAL_END_RE.search(line)
+                and not stripped.endswith(b")")
+            ):
+                break
+            nxt = _orig()
+            if not nxt:
+                break
+            if nxt[:1] in (b" ", b"\t"):
+                line = stripped + b" " + nxt.lstrip(b" \t")
+            else:
+                _buf.append(nxt)   # not a continuation — return next time
+                break
+        return line
+
+    mail.readline = _readline
 
 
 def imap_login(secrets_path: Path, logger: JsonLogger) -> imaplib.IMAP4:
@@ -44,8 +89,9 @@ def imap_login(secrets_path: Path, logger: JsonLogger) -> imaplib.IMAP4:
         mail = imaplib.IMAP4_SSL(secrets_cfg["host"], secrets_cfg.get("port", default_port))
     else:
         mail = imaplib.IMAP4(secrets_cfg["host"], secrets_cfg.get("port", default_port))
-    mail.sock.settimeout(120)
+    mail.sock.settimeout(300)  # 5 min — large INBOX SEARCH/FETCH can be slow
     mail.login(secrets_cfg["username"], secrets_cfg["password"])
+    _patch_fold_aware_readline(mail)
     return mail
 
 
@@ -168,9 +214,19 @@ def safe_search_all(client: imaplib.IMAP4, undeleted_only: bool = False) -> Iter
 
     Returns:
         List of message UIDs
+
+    Raises:
+        OSError: If a socket/network error occurs (connection is in bad state, caller must discard it)
     """
+    import socket as _socket
     criteria = "UNDELETED" if undeleted_only else "ALL"
-    typ, data = client.uid("SEARCH", None, criteria)
+    try:
+        typ, data = client.uid("SEARCH", None, criteria)
+    except imaplib.IMAP4.error:
+        return []
+    except (_socket.timeout, OSError):
+        # Let socket/network errors propagate so the caller can discard the connection
+        raise
     if typ != "OK" or not data:
         return []
 
