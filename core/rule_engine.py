@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import email
+import email.header
 import json
 import re
 from datetime import datetime, timezone
@@ -83,10 +84,16 @@ def _extract_raw_header(data: str) -> str:
 
 
 def _parse_header_map(raw_header: str) -> dict[str, str]:
-    """Parse the raw header string into a lowercase-keyed mapping."""
+    """Parse the raw header string into a lowercase-keyed mapping, MIME-decoded."""
 
     message = email.message_from_string(raw_header or "")
-    return {key.lower(): value for key, value in message.items()}
+    result = {}
+    for key, value in message.items():
+        try:
+            result[key.lower()] = str(email.header.make_header(email.header.decode_header(value)))
+        except Exception:
+            result[key.lower()] = value
+    return result
 
 
 def _parse_internaldate(date_str: Optional[str]) -> Optional[datetime]:
