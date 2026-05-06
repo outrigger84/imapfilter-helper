@@ -1,0 +1,1422 @@
+# Rule Target Folders
+
+_1,267 unique targets across all rules — generated 2026-05-06_
+
+---
+
+## *ME
+- `*ME`
+
+---
+
+## 21 Cleveland Street
+- `21 Cleveland Street/Bills/Bay Cleaning`
+- `21 Cleveland Street/Bills/Bay Laundry`
+- `21 Cleveland Street/Bills/British Gas`
+- `21 Cleveland Street/Bills/Council Payments`
+- `21 Cleveland Street/Bills/Southwest Water`
+- `21 Cleveland Street/Bills/TV License`
+- `21 Cleveland Street/Bills/Virgin Media`
+- `21 Cleveland Street/Insurance`
+- `21 Cleveland Street/Lodger/Adverts/OpenRent`
+- `21 Cleveland Street/Lodger/Adverts/Spareroom`
+- `21 Cleveland Street/Lodger/Invoicing`
+- `21 Cleveland Street/Look After My Bills`
+- `21 Cleveland Street/MSE Energy Club`
+- `21 Cleveland Street/Nextdoor`
+- `21 Cleveland Street/Projects`
+- `21 Cleveland Street/Projects/Heating`
+- `21 Cleveland Street/Projects/Kitchen`
+- `21 Cleveland Street/Projects/Rewire`
+- `21 Cleveland Street/Projects/Security`
+- `21 Cleveland Street/Projects/Solar`
+- `21 Cleveland Street/Projects/Windows`
+- `21 Cleveland Street/Purchase`
+- `21 Cleveland Street/Purchase/Solicitors`
+- `21 Cleveland Street/Purchase/Surveyors`
+- `21 Cleveland Street/Renovations/Bark`
+- `21 Cleveland Street/Renovations/Book A Builder`
+- `21 Cleveland Street/Renovations/MPS Windows`
+- `21 Cleveland Street/Renovations/MyBuilder-com`
+- `21 Cleveland Street/Renovations/Rated People`
+- `21 Cleveland Street/Renovations/resi`
+
+---
+
+## Archives
+- `Archives/ESG`
+- `Archives/ESG-Sabb`
+- `Archives/Rowing`
+
+---
+
+## Cal Responses
+- `Cal Responses`
+
+---
+
+## Charity
+- `Charity/JustGiving`
+- `Charity/Swiftaid`
+- `Charity/Wikimedia`
+
+---
+
+## Complaints
+- `Complaints/Delay Repay/Avanti West Coast`
+- `Complaints/Delay Repay/CrossCountry`
+- `Complaints/Delay Repay/GWR`
+- `Complaints/Delay Repay/London North Western Railway`
+
+---
+
+## Correspondence
+- `Correspondence/Exeter City Council`
+- `Correspondence/writetothem-com`
+
+---
+
+## Deleted Messages
+- `Deleted Messages`
+
+---
+
+## Delivery Receipts
+- `Delivery Receipts`
+
+---
+
+## Events
+- `Events/07-02-25 Birthday Meal`
+- `Events/40th Birthday`
+- `Events/Soulcycle`
+- `Events/VenueScanner`
+- `Events/Wimbledon`
+
+---
+
+## Exeter Observer
+- `Exeter Observer`
+
+---
+
+## Family
+- `Family`
+
+---
+
+## Feedback
+- `Feedback/ABA Research`
+- `Feedback/Amex`
+- `Feedback/Apple Support`
+- `Feedback/Barclays`
+- `Feedback/Costa Coffee`
+- `Feedback/Data Bees`
+- `Feedback/Delighted`
+- `Feedback/Dominos`
+- `Feedback/easyJet`
+- `Feedback/FeedItBack`
+- `Feedback/Feefo`
+- `Feedback/GuestRevu`
+- `Feedback/Help Raise The Bar`
+- `Feedback/Marks and Spencer`
+- `Feedback/Maru Survey`
+- `Feedback/Medallia`
+- `Feedback/Okendo`
+- `Feedback/Papa John`
+- `Feedback/Restaurants/Cote`
+- `Feedback/SurveyMonkey`
+- `Feedback/Toolstation`
+- `Feedback/Trustpilot`
+- `Feedback/TUI`
+- `Feedback/Virgin Atlantic`
+- `Feedback/Virgin Media`
+- `Feedback/Wagamama`
+- `Feedback/Yumpingo`
+
+---
+
+## Fitness
+- `Fitness`
+- `Fitness/Aaron PT`
+- `Fitness/Athletic Greens`
+- `Fitness/Bath Half Marathon`
+- `Fitness/Ben Winn/Newsletters`
+- `Fitness/Ben Winn/Skool`
+- `Fitness/Ben Winn/TrueCoach`
+- `Fitness/Bikram Yoga London`
+- `Fitness/Body Coach`
+- `Fitness/BuddyBoost`
+- `Fitness/Climbing Hanger`
+- `Fitness/Concept2`
+- `Fitness/Domestiq`
+- `Fitness/Eventrac`
+- `Fitness/Exeter Leisure`
+- `Fitness/Fortis Transformations`
+- `Fitness/Garmin`
+- `Fitness/Golfshot`
+- `Fitness/Gym/Legend`
+- `Fitness/Gym/PureGym`
+- `Fitness/Lets Do This`
+- `Fitness/MyWellness`
+- `Fitness/Njuko`
+- `Fitness/Parkrun`
+- `Fitness/Peloton`
+- `Fitness/Psycle London`
+- `Fitness/PT Appointments`
+- `Fitness/Race the Distance`
+- `Fitness/Relive`
+- `Fitness/Ride With GPS`
+- `Fitness/SOS Athletic Excellence`
+- `Fitness/Spartan`
+- `Fitness/Team Wilpers`
+- `Fitness/The Gym Group`
+- `Fitness/Toptracer`
+- `Fitness/TrainingPeaks`
+
+---
+
+## Friends
+- `Friends`
+
+---
+
+## Gift Vouchers
+- `Gift Vouchers/CloudNine`
+- `Gift Vouchers/Cote`
+- `Gift Vouchers/Edenred`
+- `Gift Vouchers/Screwfix`
+- `Gift Vouchers/xexec`
+
+---
+
+## Health
+- `Health/Appointments/Cliniko`
+- `Health/Appointments/Timely`
+- `Health/Coronavirus Testing`
+- `Health/Excalibur Healthcare`
+- `Health/NHS/COVID-19`
+- `Health/Services/Hume Health`
+- `Health/Services/Simplyhealth`
+- `Health/SilverCloud`
+
+---
+
+## INBOX
+- `INBOX`
+
+---
+
+## Jobs
+- `Jobs`
+- `Jobs/Current/Met Office`
+- `Jobs/Current/UoE Exams`
+- `Jobs/Governors for Schools`
+- `Jobs/Search/CV Library`
+- `Jobs/Search/Linkedin Jobs`
+- `Jobs/Search/Microsoft Jobs`
+- `Jobs/Search/Otta`
+- `Jobs/Search/Product School`
+- `Jobs/Search/Venn Group`
+- `Jobs/Upwork`
+
+---
+
+## Memberships
+- `Memberships/BCS`
+- `Memberships/BorrowBox`
+- `Memberships/British Cycling`
+- `Memberships/British Rowing`
+- `Memberships/CIM`
+- `Memberships/Comic-Con`
+- `Memberships/EasyFundraising`
+- `Memberships/Global Yacht Racing`
+- `Memberships/Library/BorrowBox`
+- `Memberships/Library/Libraries Unlimited`
+- `Memberships/Lympstone SC`
+- `Memberships/Pearson VUE`
+- `Memberships/Railcard`
+- `Memberships/Royal Yachting Association`
+- `Memberships/Totum`
+- `Memberships/UoE Alumni`
+- `Memberships/Wimbledon`
+- `Memberships/YHA`
+
+---
+
+## Newsletters
+- `Newsletters/Entertainment/O2 Academy`
+- `Newsletters/Food/The Ivy Collection`
+- `Newsletters/Howabout`
+- `Newsletters/Retail/Huel`
+- `Newsletters/Marketing/Art/Castle Fine Art`
+- `Newsletters/Marketing/Art/Clarendon Fine Art`
+- `Newsletters/Marketing/Art/Lisa Holt Design`
+- `Newsletters/Marketing/Art/Masterworks`
+- `Newsletters/Marketing/Art/National Portrait Gallery`
+- `Newsletters/Marketing/Art/Tate`
+- `Newsletters/Marketing/BingoPort`
+- `Newsletters/Marketing/British Library`
+- `Newsletters/Marketing/Castle Galleries`
+- `Newsletters/Marketing/Coffee/Black Sheep Coffee`
+- `Newsletters/Marketing/Coffee/Caffe Nero`
+- `Newsletters/Marketing/Coffee/Costa`
+- `Newsletters/Marketing/Coffee/Grind`
+- `Newsletters/Marketing/Coffee/Starbucks`
+- `Newsletters/Marketing/Coffee/Wacacos`
+- `Newsletters/Marketing/Disney Holidays/Attractions Magazine`
+- `Newsletters/Marketing/Disney Holidays/Disney Food Blog`
+- `Newsletters/Marketing/Disney Holidays/Picture the Magic`
+- `Newsletters/Marketing/Disney Holidays/WDWMAGIC`
+- `Newsletters/Marketing/Disney Holidays/Ziggy Knows Disney`
+- `Newsletters/Marketing/Domestiq`
+- `Newsletters/Marketing/Entertainment/3LAU`
+- `Newsletters/Marketing/Entertainment/Brickwatch`
+- `Newsletters/Marketing/Entertainment/Bumble`
+- `Newsletters/Marketing/Entertainment/Collect Forever`
+- `Newsletters/Marketing/Entertainment/Comic Con`
+- `Newsletters/Marketing/Entertainment/Crooked Store`
+- `Newsletters/Marketing/Entertainment/Curiosity Stream`
+- `Newsletters/Marketing/Entertainment/Design My Night`
+- `Newsletters/Marketing/Entertainment/Disney+`
+- `Newsletters/Marketing/Entertainment/Dudesnude`
+- `Newsletters/Marketing/Entertainment/Exeter Phoenix`
+- `Newsletters/Marketing/Entertainment/Feeld`
+- `Newsletters/Marketing/Entertainment/Gala Bingo`
+- `Newsletters/Marketing/Entertainment/IMDB`
+- `Newsletters/Marketing/Entertainment/Metric`
+- `Newsletters/Marketing/Entertainment/Nintendo`
+- `Newsletters/Marketing/Entertainment/Odeon`
+- `Newsletters/Marketing/Entertainment/Omaze`
+- `Newsletters/Marketing/Entertainment/Paramount+`
+- `Newsletters/Marketing/Entertainment/Plex`
+- `Newsletters/Marketing/Entertainment/Prime Video`
+- `Newsletters/Marketing/Entertainment/Rock The Boat`
+- `Newsletters/Marketing/Entertainment/Soundcloud`
+- `Newsletters/Marketing/Entertainment/theory11`
+- `Newsletters/Marketing/Entertainment/Ticketmaster-fr`
+- `Newsletters/Marketing/Entertainment/Upperdeck`
+- `Newsletters/Marketing/Entertainment/Vue Cinema`
+- `Newsletters/Marketing/Entertainment/Xbox`
+- `Newsletters/Marketing/Finance/Aegon`
+- `Newsletters/Marketing/Finance/Airtime Rewards`
+- `Newsletters/Marketing/Finance/American Express`
+- `Newsletters/Marketing/Finance/Aro`
+- `Newsletters/Marketing/Finance/Cheddar`
+- `Newsletters/Marketing/Finance/Clearscore`
+- `Newsletters/Marketing/Finance/Coinbase`
+- `Newsletters/Marketing/Finance/Compare The Market`
+- `Newsletters/Marketing/Finance/Confused`
+- `Newsletters/Marketing/Finance/Confused-com`
+- `Newsletters/Marketing/Finance/Crypto-com`
+- `Newsletters/Marketing/Finance/Curve`
+- `Newsletters/Marketing/Finance/InvestEngine`
+- `Newsletters/Marketing/Finance/Klarna`
+- `Newsletters/Marketing/Finance/Legal and General`
+- `Newsletters/Marketing/Finance/Lottoland`
+- `Newsletters/Marketing/Finance/Moneybox`
+- `Newsletters/Marketing/Finance/National Lottery`
+- `Newsletters/Marketing/Finance/Nationwide`
+- `Newsletters/Marketing/Finance/Nude`
+- `Newsletters/Marketing/Finance/PayPal`
+- `Newsletters/Marketing/Finance/Quidco`
+- `Newsletters/Marketing/Finance/Revolut`
+- `Newsletters/Marketing/Finance/RocketMoney`
+- `Newsletters/Marketing/Finance/Sainsburys Bank`
+- `Newsletters/Marketing/Finance/Tembo`
+- `Newsletters/Marketing/Finance/The Mortgage Brain`
+- `Newsletters/Marketing/Finance/Unbiased`
+- `Newsletters/Marketing/Finance/Uphold`
+- `Newsletters/Marketing/Finance/V12`
+- `Newsletters/Marketing/Finance/Wealthify`
+- `Newsletters/Marketing/Finance/Zero`
+- `Newsletters/Marketing/Fitness/33 Fuel`
+- `Newsletters/Marketing/Fitness/AARMY`
+- `Newsletters/Marketing/Fitness/Active Devon`
+- `Newsletters/Marketing/Fitness/Airofit`
+- `Newsletters/Marketing/Fitness/Athletic Perks`
+- `Newsletters/Marketing/Fitness/box-co-uk`
+- `Newsletters/Marketing/Fitness/Buddyboost`
+- `Newsletters/Marketing/Fitness/Find What Feels Good`
+- `Newsletters/Marketing/Fitness/FitTrack`
+- `Newsletters/Marketing/Fitness/GOWOD`
+- `Newsletters/Marketing/Fitness/Gymshark`
+- `Newsletters/Marketing/Fitness/INOV8`
+- `Newsletters/Marketing/Fitness/Komooot`
+- `Newsletters/Marketing/Fitness/Lets Do This`
+- `Newsletters/Marketing/Fitness/Macros+`
+- `Newsletters/Marketing/Fitness/Muscle and Strength`
+- `Newsletters/Marketing/Fitness/Musclefood`
+- `Newsletters/Marketing/Fitness/MyFitnessPal`
+- `Newsletters/Marketing/Fitness/Myprotein`
+- `Newsletters/Marketing/Fitness/Nutracheck`
+- `Newsletters/Marketing/Fitness/Peloton`
+- `Newsletters/Marketing/Fitness/Pure Gym`
+- `Newsletters/Marketing/Fitness/Results Plan`
+- `Newsletters/Marketing/Fitness/Slendertone`
+- `Newsletters/Marketing/Fitness/SoulCycle`
+- `Newsletters/Marketing/Fitness/Sweatcoin`
+- `Newsletters/Marketing/Fitness/The Climbing Hanger`
+- `Newsletters/Marketing/Fitness/The Feed`
+- `Newsletters/Marketing/Fitness/The Gym Group`
+- `Newsletters/Marketing/Fitness/Tribe`
+- `Newsletters/Marketing/Fitness/Whoop`
+- `Newsletters/Marketing/Fitness/Yoga with Adriene`
+- `Newsletters/Marketing/Fitness/Zoe`
+- `Newsletters/Marketing/Food/Beer52`
+- `Newsletters/Marketing/Food/BrewDog`
+- `Newsletters/Marketing/Food/Costa Coffee`
+- `Newsletters/Marketing/Food/Deliveroo`
+- `Newsletters/Marketing/Food/Domino's`
+- `Newsletters/Marketing/Food/Eat This Much`
+- `Newsletters/Marketing/Food/Food Talk Daily`
+- `Newsletters/Marketing/Food/Good Pair Days`
+- `Newsletters/Marketing/Food/Gousto`
+- `Newsletters/Marketing/Food/Greggs`
+- `Newsletters/Marketing/Food/HelloFresh`
+- `Newsletters/Marketing/Food/Hop Burns and Black`
+- `Newsletters/Marketing/Food/Huel`
+- `Newsletters/Marketing/Food/Just Eat`
+- `Newsletters/Marketing/Food/Nacho Daddy`
+- `Newsletters/Marketing/Food/Nandos`
+- `Newsletters/Marketing/Food/Papa John's`
+- `Newsletters/Marketing/Food/Prepped Pots`
+- `Newsletters/Marketing/Food/SimplyCook`
+- `Newsletters/Marketing/Food/St Austell Brewery`
+- `Newsletters/Marketing/Food/Uber Eats`
+- `Newsletters/Marketing/Food/Wine52`
+- `Newsletters/Marketing/Garden/Bents`
+- `Newsletters/Marketing/Garden/Boston Seeds`
+- `Newsletters/Marketing/Gifts/Draw Names`
+- `Newsletters/Marketing/Health/Calm`
+- `Newsletters/Marketing/Health/ClubTan`
+- `Newsletters/Marketing/Health/Health Service Discounts`
+- `Newsletters/Marketing/Health/hims`
+- `Newsletters/Marketing/Health/Holland and Barrett`
+- `Newsletters/Marketing/Health/Hume Health`
+- `Newsletters/Marketing/Health/Livestrong`
+- `Newsletters/Marketing/Health/Manual`
+- `Newsletters/Marketing/Health/Therabody`
+- `Newsletters/Marketing/Hotels/Accor`
+- `Newsletters/Marketing/Hotels/Bloc Hotels`
+- `Newsletters/Marketing/Hotels/Blue Lagoon`
+- `Newsletters/Marketing/Hotels/Catalonia Hotels`
+- `Newsletters/Marketing/Hotels/Hilton Honors`
+- `Newsletters/Marketing/Hotels/IHG One Rewards`
+- `Newsletters/Marketing/Hotels/Marriot Bonvoy`
+- `Newsletters/Marketing/Hotels/Marriott Bonvoy`
+- `Newsletters/Marketing/Hotels/Point A Hotels`
+- `Newsletters/Marketing/Hotels/Premier Inn`
+- `Newsletters/Marketing/Hotels/Radisson Rewards`
+- `Newsletters/Marketing/Hotels/Travelodge`
+- `Newsletters/Marketing/House Sales Direct`
+- `Newsletters/Marketing/Mention Me`
+- `Newsletters/Marketing/Mixergy`
+- `Newsletters/Marketing/New Scientist`
+- `Newsletters/Marketing/O2`
+- `Newsletters/Marketing/Outdoors/Blithfield SC`
+- `Newsletters/Marketing/Outdoors/Chain Reaction Cycles`
+- `Newsletters/Marketing/Outdoors/Clubhouse Golf`
+- `Newsletters/Marketing/Outdoors/Cotswold Outdoor`
+- `Newsletters/Marketing/Outdoors/Dartmoor Classic`
+- `Newsletters/Marketing/Outdoors/Exeter Chiefs`
+- `Newsletters/Marketing/Outdoors/PADI`
+- `Newsletters/Marketing/Outdoors/Rock the Boat`
+- `Newsletters/Marketing/Outdoors/West Marine`
+- `Newsletters/Marketing/Photo/FreePrints`
+- `Newsletters/Marketing/Photo/Instantprint`
+- `Newsletters/Marketing/Photo/JPEGmini`
+- `Newsletters/Marketing/Photo/PixDiscount`
+- `Newsletters/Marketing/Photo/PrinterPix`
+- `Newsletters/Marketing/Podia`
+- `Newsletters/Marketing/Property/Loop`
+- `Newsletters/Marketing/Property/OpenRent`
+- `Newsletters/Marketing/Property/Peek Home`
+- `Newsletters/Marketing/Property/SpareRoonm`
+- `Newsletters/Marketing/Property/St Leonards Quarter`
+- `Newsletters/Marketing/Property/Zoopla`
+- `Newsletters/Marketing/Restaurants/Bistro Pierre`
+- `Newsletters/Marketing/Restaurants/Boatyard Bakery`
+- `Newsletters/Marketing/Restaurants/Boston Tea Party`
+- `Newsletters/Marketing/Restaurants/Chopstix`
+- `Newsletters/Marketing/Restaurants/City Pubs`
+- `Newsletters/Marketing/Restaurants/Cote`
+- `Newsletters/Marketing/Restaurants/Dennys Rewards`
+- `Newsletters/Marketing/Restaurants/Dominos`
+- `Newsletters/Marketing/Restaurants/Ember Inns`
+- `Newsletters/Marketing/Restaurants/Franco Manca`
+- `Newsletters/Marketing/Restaurants/Gourmet Society`
+- `Newsletters/Marketing/Restaurants/Granary Square Brasserie`
+- `Newsletters/Marketing/Restaurants/Hall and Woodhouse`
+- `Newsletters/Marketing/Restaurants/Itsu`
+- `Newsletters/Marketing/Restaurants/Landini's Pizzeria`
+- `Newsletters/Marketing/Restaurants/Leon`
+- `Newsletters/Marketing/Restaurants/Marstons Pubs`
+- `Newsletters/Marketing/Restaurants/McDonalds`
+- `Newsletters/Marketing/Restaurants/Nandos`
+- `Newsletters/Marketing/Restaurants/Pho`
+- `Newsletters/Marketing/Restaurants/Pizza Express`
+- `Newsletters/Marketing/Restaurants/Popeyes`
+- `Newsletters/Marketing/Restaurants/Rockfish`
+- `Newsletters/Marketing/Restaurants/Slug And Lettuce`
+- `Newsletters/Marketing/Restaurants/Subway`
+- `Newsletters/Marketing/Restaurants/Taco Bell`
+- `Newsletters/Marketing/Restaurants/The Brunswick`
+- `Newsletters/Marketing/Restaurants/Three Brothers Burgers`
+- `Newsletters/Marketing/Restaurants/Turks Head Exeter`
+- `Newsletters/Marketing/Restaurants/YO! Sushi`
+- `Newsletters/Marketing/Restaurants/Youngs Pubs`
+- `Newsletters/Marketing/Restaurants/Zizzi`
+- `Newsletters/Marketing/Retail/B and Q`
+- `Newsletters/Marketing/Retail/Brooksdale`
+- `Newsletters/Marketing/Retail/Cards/Thortful`
+- `Newsletters/Marketing/Retail/Clothing/Abercrombie`
+- `Newsletters/Marketing/Retail/Clothing/Box Menswear`
+- `Newsletters/Marketing/Retail/Clothing/Crew Clothing`
+- `Newsletters/Marketing/Retail/Clothing/Eastpak`
+- `Newsletters/Marketing/Retail/Clothing/GAP`
+- `Newsletters/Marketing/Retail/Clothing/H&M`
+- `Newsletters/Marketing/Retail/Clothing/Harvey Nichols`
+- `Newsletters/Marketing/Retail/Clothing/Hollister`
+- `Newsletters/Marketing/Retail/Clothing/Moss Bros`
+- `Newsletters/Marketing/Retail/Clothing/Nike`
+- `Newsletters/Marketing/Retail/Clothing/Stitchfix`
+- `Newsletters/Marketing/Retail/Clothing/XPOSED`
+- `Newsletters/Marketing/Retail/DIY/DeWalt`
+- `Newsletters/Marketing/Retail/DIY/Screwfix`
+- `Newsletters/Marketing/Retail/DIY/Toolstation`
+- `Newsletters/Marketing/Retail/Drinkstuff`
+- `Newsletters/Marketing/Retail/Food/Iceland`
+- `Newsletters/Marketing/Retail/Food/Morrisons`
+- `Newsletters/Marketing/Retail/General/AliExpress`
+- `Newsletters/Marketing/Retail/General/Amazon`
+- `Newsletters/Marketing/Retail/General/Boots`
+- `Newsletters/Marketing/Retail/General/Buy It Direct`
+- `Newsletters/Marketing/Retail/General/Copycat Fragrances`
+- `Newsletters/Marketing/Retail/General/Currys`
+- `Newsletters/Marketing/Retail/General/eBay`
+- `Newsletters/Marketing/Retail/General/Etsy`
+- `Newsletters/Marketing/Retail/General/John Lewis`
+- `Newsletters/Marketing/Retail/General/London Luggage`
+- `Newsletters/Marketing/Retail/General/Marks and Spencer`
+- `Newsletters/Marketing/Retail/General/Maverick and Co`
+- `Newsletters/Marketing/Retail/General/Monos`
+- `Newsletters/Marketing/Retail/General/Muji`
+- `Newsletters/Marketing/Retail/General/Oliver Bonas`
+- `Newsletters/Marketing/Retail/General/Poundland`
+- `Newsletters/Marketing/Retail/General/Specsavers`
+- `Newsletters/Marketing/Retail/General/The Bridge`
+- `Newsletters/Marketing/Retail/General/TK Maxx`
+- `Newsletters/Marketing/Retail/General/Waitrose`
+- `Newsletters/Marketing/Retail/General/Waterstones`
+- `Newsletters/Marketing/Retail/General/Wowcher`
+- `Newsletters/Marketing/Retail/Gifts/Beards and Daisies`
+- `Newsletters/Marketing/Retail/Gifts/Bloom and Wild`
+- `Newsletters/Marketing/Retail/Gifts/Card Factory`
+- `Newsletters/Marketing/Retail/Gifts/Moonpig`
+- `Newsletters/Marketing/Retail/Gifts/Snapfish`
+- `Newsletters/Marketing/Retail/Gifts/Thorful`
+- `Newsletters/Marketing/Retail/Handmade Candle Co`
+- `Newsletters/Marketing/Retail/Holister`
+- `Newsletters/Marketing/Retail/Home/Blinds2Go`
+- `Newsletters/Marketing/Retail/Home/Hillarys`
+- `Newsletters/Marketing/Retail/Home/Ikea`
+- `Newsletters/Marketing/Retail/Home/Kon Mari`
+- `Newsletters/Marketing/Retail/Home/Neville Johnson`
+- `Newsletters/Marketing/Retail/Home/Online Carpets`
+- `Newsletters/Marketing/Retail/Home/Smol`
+- `Newsletters/Marketing/Retail/Home/Swyft`
+- `Newsletters/Marketing/Retail/Home/Wayfair`
+- `Newsletters/Marketing/Retail/Home/Wren Kitchens`
+- `Newsletters/Marketing/Retail/Homesense`
+- `Newsletters/Marketing/Retail/IKEA`
+- `Newsletters/Marketing/Retail/Ikea Family`
+- `Newsletters/Marketing/Retail/Karmanow`
+- `Newsletters/Marketing/Retail/Kickstarter`
+- `Newsletters/Marketing/Retail/OutSpot`
+- `Newsletters/Marketing/Retail/Princesshay`
+- `Newsletters/Marketing/Retail/PuzzleYou`
+- `Newsletters/Marketing/Retail/South West Water`
+- `Newsletters/Marketing/Retail/Tevaplanter`
+- `Newsletters/Marketing/Retail/TouchNote`
+- `Newsletters/Marketing/Retail/UPS`
+- `Newsletters/Marketing/Retail/Utterly Printable`
+- `Newsletters/Marketing/Retail/Zebuci`
+- `Newsletters/Marketing/Richard Millington`
+- `Newsletters/Marketing/Student Discount/Student Beans`
+- `Newsletters/Marketing/Student Discount/Totum`
+- `Newsletters/Marketing/Student Discount/Unidays`
+- `Newsletters/Marketing/Tech/Amazon Web Services`
+- `Newsletters/Marketing/Tech/Backerpledge`
+- `Newsletters/Marketing/Tech/BackerTrend`
+- `Newsletters/Marketing/Tech/Bitnami`
+- `Newsletters/Marketing/Tech/Brio`
+- `Newsletters/Marketing/Tech/CES`
+- `Newsletters/Marketing/Tech/Creatable`
+- `Newsletters/Marketing/Tech/dbrand`
+- `Newsletters/Marketing/Tech/Dyson`
+- `Newsletters/Marketing/Tech/EasyUsenet`
+- `Newsletters/Marketing/Tech/Fastmail`
+- `Newsletters/Marketing/Tech/Good Gadget Deals`
+- `Newsletters/Marketing/Tech/Hardware/AEG`
+- `Newsletters/Marketing/Tech/Hardware/Affordable Mobiles`
+- `Newsletters/Marketing/Tech/Hardware/Anker`
+- `Newsletters/Marketing/Tech/Hardware/ao-com`
+- `Newsletters/Marketing/Tech/Hardware/BlackmoreIT`
+- `Newsletters/Marketing/Tech/Hardware/CCL`
+- `Newsletters/Marketing/Tech/Hardware/dbrand`
+- `Newsletters/Marketing/Tech/Hardware/DJI`
+- `Newsletters/Marketing/Tech/Hardware/e-support`
+- `Newsletters/Marketing/Tech/Hardware/Ebuyer`
+- `Newsletters/Marketing/Tech/Hardware/Elegoo`
+- `Newsletters/Marketing/Tech/Hardware/eSpares`
+- `Newsletters/Marketing/Tech/Hardware/EUFY`
+- `Newsletters/Marketing/Tech/Hardware/Laptops Direct`
+- `Newsletters/Marketing/Tech/Hardware/LG`
+- `Newsletters/Marketing/Tech/Hardware/Logitech`
+- `Newsletters/Marketing/Tech/Hardware/Mous`
+- `Newsletters/Marketing/Tech/Hardware/Orbitkey`
+- `Newsletters/Marketing/Tech/Hardware/Phillips Hue`
+- `Newsletters/Marketing/Tech/Hardware/PiHut`
+- `Newsletters/Marketing/Tech/Hardware/Rolling Square`
+- `Newsletters/Marketing/Tech/Hardware/Synology`
+- `Newsletters/Marketing/Tech/Hardware/Ubiquity`
+- `Newsletters/Marketing/Tech/Homelabbers Hangout`
+- `Newsletters/Marketing/Tech/HP`
+- `Newsletters/Marketing/Tech/Mac DVD Ripper Pro`
+- `Newsletters/Marketing/Tech/Microsoft`
+- `Newsletters/Marketing/Tech/NZB Finder`
+- `Newsletters/Marketing/Tech/NZBgeek`
+- `Newsletters/Marketing/Tech/Ona`
+- `Newsletters/Marketing/Tech/OpenAI`
+- `Newsletters/Marketing/Tech/ownCloud`
+- `Newsletters/Marketing/Tech/Parabola`
+- `Newsletters/Marketing/Tech/Philips`
+- `Newsletters/Marketing/Tech/Raylo`
+- `Newsletters/Marketing/Tech/RS Components`
+- `Newsletters/Marketing/Tech/Software/Contacts+`
+- `Newsletters/Marketing/Tech/Software/Evernote`
+- `Newsletters/Marketing/Tech/Software/eversign`
+- `Newsletters/Marketing/Tech/Software/Honey`
+- `Newsletters/Marketing/Tech/Software/IFTTT`
+- `Newsletters/Marketing/Tech/Software/Lollipop`
+- `Newsletters/Marketing/Tech/Software/Mailbuttler`
+- `Newsletters/Marketing/Tech/Software/Micromat`
+- `Newsletters/Marketing/Tech/Software/Microsoft`
+- `Newsletters/Marketing/Tech/Software/Monday-com`
+- `Newsletters/Marketing/Tech/Software/RealVNC`
+- `Newsletters/Marketing/Tech/Software/Rogue Amoeba`
+- `Newsletters/Marketing/Tech/Software/Setapp`
+- `Newsletters/Marketing/Tech/Software/TAAFT`
+- `Newsletters/Marketing/Tech/Software/VMware`
+- `Newsletters/Marketing/Tech/Software/Webhosting`
+- `Newsletters/Marketing/Tech/Software/Witt Software`
+- `Newsletters/Marketing/Tech/WeBuyAnyPhone`
+- `Newsletters/Marketing/The Brunswick`
+- `Newsletters/Marketing/Thursday Work`
+- `Newsletters/Marketing/Tools/DEWALT`
+- `Newsletters/Marketing/Tools/Screwfix`
+- `Newsletters/Marketing/Tools/Toolstation`
+- `Newsletters/Marketing/Tools/Ultimate Tool Competitions`
+- `Newsletters/Marketing/Tools/Woodworkers Guild`
+- `Newsletters/Marketing/Travel/AerLingus`
+- `Newsletters/Marketing/Travel/Air France`
+- `Newsletters/Marketing/Travel/Airalo`
+- `Newsletters/Marketing/Travel/AirBnB`
+- `Newsletters/Marketing/Travel/Amtrak`
+- `Newsletters/Marketing/Travel/Avanti`
+- `Newsletters/Marketing/Travel/Blue Bay Travel`
+- `Newsletters/Marketing/Travel/Blue Islands`
+- `Newsletters/Marketing/Travel/Blue Water Holidays`
+- `Newsletters/Marketing/Travel/Booking-com`
+- `Newsletters/Marketing/Travel/Bristol Airport`
+- `Newsletters/Marketing/Travel/CrossCountry`
+- `Newsletters/Marketing/Travel/Easyjet`
+- `Newsletters/Marketing/Travel/EasyVoyage`
+- `Newsletters/Marketing/Travel/Flight Centre`
+- `Newsletters/Marketing/Travel/Flightaware`
+- `Newsletters/Marketing/Travel/GO Airport Shuttle`
+- `Newsletters/Marketing/Travel/Grand Central Terminal`
+- `Newsletters/Marketing/Travel/Hampton Luxury Liner`
+- `Newsletters/Marketing/Travel/Headout`
+- `Newsletters/Marketing/Travel/Heathrow Express`
+- `Newsletters/Marketing/Travel/Holiday Exclusives`
+- `Newsletters/Marketing/Travel/Hopper`
+- `Newsletters/Marketing/Travel/Hostelworld`
+- `Newsletters/Marketing/Travel/ITS`
+- `Newsletters/Marketing/Travel/Jet2`
+- `Newsletters/Marketing/Travel/LNER`
+- `Newsletters/Marketing/Travel/Loveholidays`
+- `Newsletters/Marketing/Travel/Lufthansa`
+- `Newsletters/Marketing/Travel/Lyft`
+- `Newsletters/Marketing/Travel/Mapstr`
+- `Newsletters/Marketing/Travel/No1 Lounges`
+- `Newsletters/Marketing/Travel/Owner Time Charters`
+- `Newsletters/Marketing/Travel/Priority Pass`
+- `Newsletters/Marketing/Travel/Railcard`
+- `Newsletters/Marketing/Travel/Ryanair`
+- `Newsletters/Marketing/Travel/SBB`
+- `Newsletters/Marketing/Travel/SeatFrog`
+- `Newsletters/Marketing/Travel/Sell My Miles`
+- `Newsletters/Marketing/Travel/Stagecoach`
+- `Newsletters/Marketing/Travel/Sunsail`
+- `Newsletters/Marketing/Travel/ThinkVilla`
+- `Newsletters/Marketing/Travel/Trainpal`
+- `Newsletters/Marketing/Travel/Trip Advisor`
+- `Newsletters/Marketing/Travel/Trip-com`
+- `Newsletters/Marketing/Travel/TripIt`
+- `Newsletters/Marketing/Travel/TUI`
+- `Newsletters/Marketing/Travel/Tuscanyall`
+- `Newsletters/Marketing/Travel/Uber`
+- `Newsletters/Marketing/Travel/Virgin Atlantic Holidays`
+- `Newsletters/Marketing/Travel/Voi`
+- `Newsletters/Marketing/Travel/Voyage Prive`
+- `Newsletters/Marketing/Virgin/Virgin`
+- `Newsletters/Marketing/Virgin/Virgin Media`
+- `Newsletters/Marketing/Virgin/Virgin Red`
+- `Newsletters/Marketing/Vouchers/VoucherCloud`
+- `Newsletters/Marketing/Vouchers/VoucherCodes`
+- `Newsletters/Marketing/Walmart`
+- `Newsletters/Marketing/William Hill`
+- `Newsletters/Marketing/Wine/Darts Farm`
+- `Newsletters/Marketing/Wine/Majestic Wine`
+- `Newsletters/Marketing/Wine/Naked Wines`
+- `Newsletters/Marketing/Work/Grafter`
+- `Newsletters/Marketing/Work/LinkedIn`
+- `Newsletters/Marketing/Work/Made Tech`
+- `Newsletters/Marketing/Work/RocketReach`
+- `Newsletters/Marketing/Work/Working In`
+- `Newsletters/Topics/Charity/Alzheimers Society`
+- `Newsletters/Topics/Charity/Battersea`
+- `Newsletters/Topics/Charity/Cancer Research UK`
+- `Newsletters/Topics/Charity/Crowdfunder`
+- `Newsletters/Topics/Charity/easyfundraising`
+- `Newsletters/Topics/Charity/Freecycle`
+- `Newsletters/Topics/Charity/Hope For Children`
+- `Newsletters/Topics/Charity/Hospiscare`
+- `Newsletters/Topics/Charity/KindLink`
+- `Newsletters/Topics/Charity/Lib Dems`
+- `Newsletters/Topics/Charity/Movember`
+- `Newsletters/Topics/Charity/Open Britain`
+- `Newsletters/Topics/Finance & Economics/Loqbox`
+- `Newsletters/Topics/Finance and Economics/MSE Money Tips`
+- `Newsletters/Topics/Finance/Mortgage Ladder`
+- `Newsletters/Topics/Investing/EIS Centre`
+- `Newsletters/Topics/Learning/12manage`
+- `Newsletters/Topics/Learning/16 Personalities`
+- `Newsletters/Topics/Learning/BCS`
+- `Newsletters/Topics/Learning/Coursera`
+- `Newsletters/Topics/Learning/Create and Cultivate`
+- `Newsletters/Topics/Learning/Duolingo`
+- `Newsletters/Topics/Learning/Goal Plans`
+- `Newsletters/Topics/Learning/MBA Exchange`
+- `Newsletters/Topics/Learning/NetImpact`
+- `Newsletters/Topics/Learning/Productive Flourishing`
+- `Newsletters/Topics/Learning/Productivity Flourising`
+- `Newsletters/Topics/Learning/Scrum-org`
+- `Newsletters/Topics/Learning/Skillshare`
+- `Newsletters/Topics/Learning/Udemy`
+- `Newsletters/Topics/Learning/Yellowbrick`
+- `Newsletters/Topics/Media/BBC`
+- `Newsletters/Topics/Media/Books/AbeBooks`
+- `Newsletters/Topics/Media/Books/BookBub`
+- `Newsletters/Topics/Media/Books/Goodreads`
+- `Newsletters/Topics/Media/Books/Kobo`
+- `Newsletters/Topics/Media/Books/Packt`
+- `Newsletters/Topics/Media/Books/StackSocial`
+- `Newsletters/Topics/Media/Democracy Club`
+- `Newsletters/Topics/Media/Economist`
+- `Newsletters/Topics/Media/Evening Standard`
+- `Newsletters/Topics/Media/Exe Estuary`
+- `Newsletters/Topics/Media/HBR`
+- `Newsletters/Topics/Media/Independent`
+- `Newsletters/Topics/Media/Infographia`
+- `Newsletters/Topics/Media/Jacks Flight Club`
+- `Newsletters/Topics/Media/Medium`
+- `Newsletters/Topics/Media/New York Times`
+- `Newsletters/Topics/Media/Quora`
+- `Newsletters/Topics/Media/Reddit`
+- `Newsletters/Topics/Media/Royal Family`
+- `Newsletters/Topics/Media/The Futurist`
+- `Newsletters/Topics/Media/The Guardian`
+- `Newsletters/Topics/Media/The Points Guy`
+- `Newsletters/Topics/Media/The Times`
+- `Newsletters/Topics/Media/Time and Date`
+- `Newsletters/Topics/Media/Which?`
+- `Newsletters/Topics/Media/Wikipedia`
+- `Newsletters/Topics/Product Management/Agile Rabbit`
+- `Newsletters/Topics/Product Management/AJ Smart`
+- `Newsletters/Topics/Product Management/Allan Kelly`
+- `Newsletters/Topics/Product Management/Mind the Product`
+- `Newsletters/Topics/Product Management/Product School`
+- `Newsletters/Topics/Surveys/LifePoints`
+- `Newsletters/Topics/Tech/Made Tech`
+- `Newsletters/Topics/Tech/Parabola`
+
+---
+
+## Notifications
+- `Notifications/7BR-NAS`
+- `Notifications/Account Verification`
+- `Notifications/Aer Lingus`
+- `Notifications/Afternic`
+- `Notifications/AG1`
+- `Notifications/Airalo`
+- `Notifications/AirBnB`
+- `Notifications/Airtable`
+- `Notifications/Amazon`
+- `Notifications/American Express`
+- `Notifications/AnyVan`
+- `Notifications/Apple/Account`
+- `Notifications/Apple/Apple ID`
+- `Notifications/Apple/Feedback`
+- `Notifications/Apple/Find My`
+- `Notifications/Apple/iCloud`
+- `Notifications/Apple/Subscriptions`
+- `Notifications/Apple/Testflight`
+- `Notifications/Argos`
+- `Notifications/ASOS`
+- `Notifications/Atlast`
+- `Notifications/Auctiva`
+- `Notifications/Avios Shopping`
+- `Notifications/AXS`
+- `Notifications/Bark`
+- `Notifications/Bitwarden`
+- `Notifications/BlueStacks`
+- `Notifications/Booking-com`
+- `Notifications/Bookwhen`
+- `Notifications/Boxpark`
+- `Notifications/British Gas PeakSave`
+- `Notifications/Chatfuel`
+- `Notifications/Co-Op`
+- `Notifications/Commonplace`
+- `Notifications/Costa`
+- `Notifications/Dashlane`
+- `Notifications/Deliveroo`
+- `Notifications/Delivery Status`
+- `Notifications/Devon and Cornwall Police`
+- `Notifications/DHL Parcel`
+- `Notifications/Discord`
+- `Notifications/Doodle`
+- `Notifications/DPD`
+- `Notifications/DVLA`
+- `Notifications/Dyson`
+- `Notifications/eBay`
+- `Notifications/Ebuyer`
+- `Notifications/Edenred`
+- `Notifications/Energy Saving Trust`
+- `Notifications/Environment Agency`
+- `Notifications/Eufy`
+- `Notifications/Eventbrite`
+- `Notifications/Evri`
+- `Notifications/Exeter University`
+- `Notifications/Expedia`
+- `Notifications/Fab`
+- `Notifications/Facebook`
+- `Notifications/FedEx`
+- `Notifications/Fiverr`
+- `Notifications/FluCamp`
+- `Notifications/GitHub`
+- `Notifications/Glow Green`
+- `Notifications/Google`
+- `Notifications/Google Flights`
+- `Notifications/gov-uk`
+- `Notifications/Greggs/Account`
+- `Notifications/Habitify`
+- `Notifications/HelloFresh`
+- `Notifications/Hive`
+- `Notifications/Hornet`
+- `Notifications/Howbout`
+- `Notifications/Huel`
+- `Notifications/Hushed`
+- `Notifications/Icomera Train WiFi`
+- `Notifications/IFTTT`
+- `Notifications/IKEA`
+- `Notifications/IMDB`
+- `Notifications/Imgur`
+- `Notifications/Incogni`
+- `Notifications/Innocam`
+- `Notifications/Instagram`
+- `Notifications/InvestEngine`
+- `Notifications/JFF`
+- `Notifications/Kickstar Tech`
+- `Notifications/Loom`
+- `Notifications/Matchbox`
+- `Notifications/McDonald's`
+- `Notifications/Meetup`
+- `Notifications/Microsoft`
+- `Notifications/Mine`
+- `Notifications/Monica HQ`
+- `Notifications/Moonpig`
+- `Notifications/Mozilla Monitor`
+- `Notifications/National Grid`
+- `Notifications/Netflix`
+- `Notifications/Nintendo`
+- `Notifications/Nominet`
+- `Notifications/O2`
+- `Notifications/OF`
+- `Notifications/Panasonic Aero`
+- `Notifications/Paperless Post`
+- `Notifications/Patreon`
+- `Notifications/PayPal`
+- `Notifications/Peloton`
+- `Notifications/Pinterest`
+- `Notifications/Plex`
+- `Notifications/Police UK`
+- `Notifications/QuickBooks`
+- `Notifications/Raindrop`
+- `Notifications/Recon`
+- `Notifications/Royal`
+- `Notifications/Royal Mail`
+- `Notifications/Sainsburys`
+- `Notifications/Sched`
+- `Notifications/Seagate`
+- `Notifications/Shop App`
+- `Notifications/Snapchat`
+- `Notifications/Solar Guide`
+- `Notifications/Songkick`
+- `Notifications/Sovendus`
+- `Notifications/Specsavers`
+- `Notifications/Spotify`
+- `Notifications/Sq`
+- `Notifications/Strava`
+- `Notifications/Surge`
+- `Notifications/Surveys`
+- `Notifications/Synology`
+- `Notifications/TableAgent`
+- `Notifications/Tado`
+- `Notifications/Tailscale`
+- `Notifications/Tesco`
+- `Notifications/TextMe`
+- `Notifications/The Cloud WiFi`
+- `Notifications/The Gym Group`
+- `Notifications/The League`
+- `Notifications/The Liven`
+- `Notifications/Tile`
+- `Notifications/Too Good To Go`
+- `Notifications/Toolstation`
+- `Notifications/Trakt`
+- `Notifications/Trello`
+- `Notifications/Trusted Shops`
+- `Notifications/Tumblr`
+- `Notifications/Uber`
+- `Notifications/UK Government`
+- `Notifications/UNiDAYS`
+- `Notifications/University of Exeter`
+- `Notifications/UPS`
+- `Notifications/Venue Scanner`
+- `Notifications/Vinted`
+- `Notifications/Virgin WiFi`
+- `Notifications/Vistaprint`
+- `Notifications/Wealthify`
+- `Notifications/WeBuyAnyPhone`
+- `Notifications/Whoop`
+- `Notifications/X`
+- `Notifications/Xero`
+- `Notifications/Yodel`
+- `Notifications/YouTube`
+- `Notifications/Zoho`
+
+---
+
+## Personal Development
+- `Personal Development`
+- `Personal Development/DailyOM`
+- `Personal Development/Life Pilot`
+- `Personal Development/Productive Flourishing`
+
+---
+
+## Personal
+- `Personal/Finance/Aegon`
+- `Personal/Finance/Aldermore Savings`
+- `Personal/Finance/Banking/Barclays`
+- `Personal/Finance/Banking/Chase`
+- `Personal/Finance/Banking/Chip`
+- `Personal/Finance/Banking/HSBC`
+- `Personal/Finance/Banking/Monzo`
+- `Personal/Finance/Banking/Nationwide`
+- `Personal/Finance/Banking/Revolut`
+- `Personal/Finance/Banking/Sainsburys Bank`
+- `Personal/Finance/Banking/Santander`
+- `Personal/Finance/Banking/Shawbrook`
+- `Personal/Finance/Banking/Skipton`
+- `Personal/Finance/Banking/Starling`
+- `Personal/Finance/Banking/TSB`
+- `Personal/Finance/Comparison/Compare The Market`
+- `Personal/Finance/Comparison/MoneySupermarket`
+- `Personal/Finance/Credit Cards/American Express`
+- `Personal/Finance/Credit Cards/Barclaycard`
+- `Personal/Finance/Credit Cards/Barclaycard/Barclaycard Cashback Rewards`
+- `Personal/Finance/Credit Cards/TSB`
+- `Personal/Finance/Credit Rating/CheckMyFile`
+- `Personal/Finance/Credit Rating/ClearScore`
+- `Personal/Finance/Credit Rating/CreditLadder`
+- `Personal/Finance/Credit Rating/Experian`
+- `Personal/Finance/Credit Rating/Money Supermarket`
+- `Personal/Finance/Credit Rating/MSE Credit Club`
+- `Personal/Finance/Curve`
+- `Personal/Finance/DriveWealth`
+- `Personal/Finance/HSBC`
+- `Personal/Finance/Insurance/Assetsure`
+- `Personal/Finance/Insurance/Cedar Tree`
+- `Personal/Finance/Insurance/Churchill`
+- `Personal/Finance/Insurance/Direct Line`
+- `Personal/Finance/Intuit QuickBooks`
+- `Personal/Finance/Investments/Moneybox`
+- `Personal/Finance/Investments/Robinhood`
+- `Personal/Finance/Investments/Trading212`
+- `Personal/Finance/Investments/Wealthify`
+- `Personal/Finance/Little Fin`
+- `Personal/Finance/Loans/HCCF`
+- `Personal/Finance/Loans/Ikano Bank`
+- `Personal/Finance/Loans/Santander`
+- `Personal/Finance/Loans/V12 Art Loan`
+- `Personal/Finance/Mortgage`
+- `Personal/Finance/NS&I`
+- `Personal/Finance/Pensions`
+- `Personal/Finance/Pensions/Aegon`
+- `Personal/Finance/Pensions/Aegon Guild`
+- `Personal/Finance/Pensions/Civil Service Pension`
+- `Personal/Finance/Pensions/Legal and General`
+- `Personal/Finance/Pensions/USS`
+- `Personal/Finance/Quidco`
+- `Personal/Finance/Shares/Pennon`
+- `Personal/Finance/Store Credit/HCCF`
+- `Personal/Finance/Store Credit/Klarna`
+- `Personal/Finance/Store Credit/New Day`
+- `Personal/Finance/Store Credit/Next Pay`
+- `Personal/Finance/Store Credit/Paypal`
+- `Personal/Finance/Store Credit/Splitit`
+- `Personal/Finance/Store Credit/V12 Finance`
+- `Personal/Finance/Store Credit/Very`
+- `Personal/Finance/Store Credit/Verypay`
+- `Personal/Finance/Trading/eToro`
+- `Personal/Finance/Trading/Trading212`
+- `Personal/Finance/Trading/Trading212/Dividend Experiment`
+- `Personal/Finance/Trading/Uphold`
+- `Personal/Finance/Updraft`
+- `Personal/Finance/Wealthify`
+- `Personal/Health/Barnfield Hill Surgery`
+- `Personal/Health/Magdalen Health`
+- `Personal/Health/Patient Access`
+- `Personal/Health/Presecription Certificate`
+- `Personal/Health/Randox`
+- `Personal/Health/Thriva`
+- `Personal/Legal`
+- `Personal/LPA/JG`
+
+---
+
+## Property
+- `Property/Purchase/21 Cleveland St/Conveyancing`
+- `Property/Purchase/21 Cleveland St/Survey`
+- `Property/reallymoving`
+- `Property/Renovations`
+- `Property/Renovations/Anglian`
+- `Property/Renovations/Cracking Energy`
+- `Property/Renovations/DES Renewables`
+- `Property/Renovations/Gosforth Handyman`
+- `Property/Renovations/Howdens`
+- `Property/Renovations/IKEA Kitchen`
+- `Property/Renovations/South West Water`
+- `Property/Rental/4 St Edmonds Court`
+- `Property/Rental/86 Alphington Road`
+- `Property/Rental/Docusign`
+- `Property/Rental/PropertyFile`
+- `Property/Rental/Tenancy Deposit Scheme`
+- `Property/Rental/Vouch`
+- `Property/Rightmove`
+- `Property/Stags`
+- `Property/Zoopla`
+
+---
+
+## Receipts
+- `Receipts`
+- `Receipts/AARMY`
+- `Receipts/Abebooks`
+- `Receipts/Airalo`
+- `Receipts/AirVPN`
+- `Receipts/AliExpress`
+- `Receipts/Amazon`
+- `Receipts/Anthropic`
+- `Receipts/ao-com`
+- `Receipts/Apple`
+- `Receipts/Apple Store`
+- `Receipts/Argos`
+- `Receipts/ASOS`
+- `Receipts/AWD-IT`
+- `Receipts/B and Q`
+- `Receipts/Bills/OrderPay`
+- `Receipts/Bistrot Pierre`
+- `Receipts/Bloom and Wild`
+- `Receipts/Box Menswear`
+- `Receipts/box-co-uk`
+- `Receipts/BrewDog`
+- `Receipts/Burger King`
+- `Receipts/Calm`
+- `Receipts/Card Factory`
+- `Receipts/CCL Online`
+- `Receipts/City Pub Company`
+- `Receipts/consol-eu`
+- `Receipts/Copycat Fragrances`
+- `Receipts/Costa`
+- `Receipts/Darts Farm`
+- `Receipts/Dashlane`
+- `Receipts/Dropbox`
+- `Receipts/Ebuyer`
+- `Receipts/Entertainment/Vue`
+- `Receipts/Etsy`
+- `Receipts/Events/AXS`
+- `Receipts/Events/Eventim`
+- `Receipts/Events/Its Your Day`
+- `Receipts/Events/Service Seats`
+- `Receipts/Events/The Hall Exeter`
+- `Receipts/Fab`
+- `Receipts/Feedbin`
+- `Receipts/Food/Preoday`
+- `Receipts/Fresha`
+- `Receipts/Grafterr`
+- `Receipts/Greggs`
+- `Receipts/Health/Lumin`
+- `Receipts/HP Instant Ink`
+- `Receipts/Hutch House Plants`
+- `Receipts/ITS`
+- `Receipts/iTunes`
+- `Receipts/JD Wetherspoon`
+- `Receipts/John Lewis`
+- `Receipts/Just Eat`
+- `Receipts/JustRide`
+- `Receipts/Kobo`
+- `Receipts/Loungers`
+- `Receipts/Lovehoney`
+- `Receipts/Man and Van`
+- `Receipts/McDonalds`
+- `Receipts/Microsoft`
+- `Receipts/MyCommerce`
+- `Receipts/Next`
+- `Receipts/Okdo`
+- `Receipts/Paddle`
+- `Receipts/Parcel2Go`
+- `Receipts/Parking/MiPermit`
+- `Receipts/Parking/NCP`
+- `Receipts/Patreon`
+- `Receipts/Photo Printing/Snapfish`
+- `Receipts/PiHut`
+- `Receipts/Plan to Eat`
+- `Receipts/Raylo`
+- `Receipts/Restaurants/Bistro Pierre`
+- `Receipts/Restaurants/Boston Tea Party`
+- `Receipts/Restaurants/BrewDog`
+- `Receipts/Restaurants/Burger King`
+- `Receipts/Restaurants/Cafe Mangos`
+- `Receipts/Restaurants/Candlemaker`
+- `Receipts/Restaurants/Dionysos Zonars`
+- `Receipts/Restaurants/Ember Inns`
+- `Receipts/Restaurants/Fullers Pubs`
+- `Receipts/Restaurants/Hall and Woodhouse`
+- `Receipts/Restaurants/Harland Brewing`
+- `Receipts/Restaurants/Landinis Pizzeria`
+- `Receipts/Restaurants/Leon`
+- `Receipts/Restaurants/me&u`
+- `Receipts/Restaurants/OpenTable`
+- `Receipts/Restaurants/Papa Johns`
+- `Receipts/Restaurants/Park & Rec`
+- `Receipts/Restaurants/Quayside Distillery`
+- `Receipts/Restaurants/Teign House Inn`
+- `Receipts/Restaurants/The Duck at Yeoford`
+- `Receipts/Restaurants/Wagamama`
+- `Receipts/Retail/AbeBooks`
+- `Receipts/Retail/Boots Photo`
+- `Receipts/Retail/Clothing/FatFace`
+- `Receipts/Retail/Clothing/Gymshark`
+- `Receipts/Retail/Clothing/Hollister`
+- `Receipts/Retail/Food/COOK`
+- `Receipts/Retail/FreePrints`
+- `Receipts/Retail/Grocery/Tesco`
+- `Receipts/Retail/Highgrade Comics`
+- `Receipts/Retail/Hutch Houseplants`
+- `Receipts/Retail/Marks and Spencer`
+- `Receipts/Retail/Nike`
+- `Receipts/Retail/Outdoor/Cotswold Outdoors`
+- `Receipts/Retail/Play-com`
+- `Receipts/Retail/Podback`
+- `Receipts/Retail/Sendcloud`
+- `Receipts/Retail/Sports/Wiggle`
+- `Receipts/Retail/Tech/Flexx Memory`
+- `Receipts/Retail/Tech/Laptops Direct`
+- `Receipts/Retail/Therabody`
+- `Receipts/RingGo`
+- `Receipts/Sainsburys`
+- `Receipts/Screwfix`
+- `Receipts/Services/Giftcloud`
+- `Receipts/Services/Pullo`
+- `Receipts/Services/ShareIt`
+- `Receipts/Services/Star Lettings`
+- `Receipts/Setapp`
+- `Receipts/SoulCycle`
+- `Receipts/Square`
+- `Receipts/Stagecoach Bus`
+- `Receipts/Starbucks`
+- `Receipts/Stripe`
+- `Receipts/Tech/CoolNewMobile`
+- `Receipts/Tech/Scan`
+- `Receipts/Tesco`
+- `Receipts/Thortful`
+- `Receipts/Toolstation`
+- `Receipts/Travel/Delta`
+- `Receipts/Uber Eats`
+- `Receipts/Udemy`
+- `Receipts/Wayfair`
+- `Receipts/Who Gives A Crap`
+- `Receipts/WorldPay`
+- `Receipts/Xposed`
+- `Receipts/Yo Sushi`
+- `Receipts/Youngs Pubs`
+
+---
+
+## Registrations
+- `Registrations`
+
+---
+
+## Sent Messages
+- `Sent Messages`
+- `Sent Messages/Away From Computer`
+- `Sent Messages/Tripit`
+
+---
+
+## Server
+- `Server/123 Reg`
+- `Server/CO2 Signal`
+- `Server/Domains/123 Reg`
+- `Server/Domains/Domains By Proxy`
+- `Server/Hetzner`
+- `Server/imapsync`
+- `Server/Invoices`
+- `Server/Linode`
+- `Server/News/BlockNews`
+- `Server/NZB/NZB Finder`
+- `Server/Outrigger`
+- `Server/Support`
+- `Server/Twingate`
+- `Server/WHUK`
+
+---
+
+## Socials
+- `Socials/Bluesky`
+- `Socials/Linkedin`
+- `Socials/Mastodon`
+- `Socials/Twitter`
+
+---
+
+## Software Keys
+- `Software Keys`
+
+---
+
+## Subscriptions
+- `Subscriptions/Co-Cars`
+- `Subscriptions/CodeShy`
+- `Subscriptions/CuriosityStream`
+- `Subscriptions/EcardForest`
+- `Subscriptions/Edenred`
+- `Subscriptions/Edison Mail`
+- `Subscriptions/Fluid App`
+- `Subscriptions/Gadget Discovery Club`
+- `Subscriptions/Gusto`
+- `Subscriptions/Headspace`
+- `Subscriptions/HP Instant Ink`
+- `Subscriptions/Incogni`
+- `Subscriptions/LottoGo`
+- `Subscriptions/MendIT`
+- `Subscriptions/MoneyWiz`
+- `Subscriptions/Noodlesoft Hazel`
+- `Subscriptions/O2`
+- `Subscriptions/On That Ass`
+- `Subscriptions/Perfect Data Software`
+- `Subscriptions/PhoneCopy`
+- `Subscriptions/SmartyPlants`
+- `Subscriptions/Software/Backblaze`
+- `Subscriptions/Software/Filestack`
+- `Subscriptions/Software/Flexibits`
+- `Subscriptions/Software/GoodSync`
+- `Subscriptions/Software/KeepSolid`
+- `Subscriptions/Software/LastPass`
+- `Subscriptions/Software/Markspace`
+- `Subscriptions/Software/MEGA`
+- `Subscriptions/Software/Objective Development`
+- `Subscriptions/Software/PikaPods`
+- `Subscriptions/Software/Raindrop`
+- `Subscriptions/Software/Spark`
+- `Subscriptions/Software/Termius`
+- `Subscriptions/The Times`
+- `Subscriptions/Three`
+- `Subscriptions/Usenet/Eweka`
+- `Subscriptions/Usenet/Giganews`
+- `Subscriptions/Usenet/sickrage`
+- `Subscriptions/Usenet/Usenet Express`
+- `Subscriptions/Virgin Red`
+
+---
+
+## Substack
+- `Substack`
+
+---
+
+## Support
+- `Support/Anker`
+- `Support/Apple`
+- `Support/AXS`
+- `Support/Beer52`
+- `Support/Booking-com`
+- `Support/Chip`
+- `Support/Moneybox`
+- `Support/Raylo`
+- `Support/Tinder`
+- `Support/Uber`
+
+---
+
+## The Economist / The New York Times
+- `The Economist`
+- `The New York Times`
+
+---
+
+## Tickets
+- `Tickets/Vue`
+
+---
+
+## Tools
+- `Tools/Unroll-Me`
+
+---
+
+## Travel
+- `Travel/Accommodation/Agoda`
+- `Travel/Accommodation/AirBnB`
+- `Travel/Accommodation/Booking-com`
+- `Travel/Accommodation/Catalonia Hotels`
+- `Travel/Accommodation/City Gate Hotel`
+- `Travel/Accommodation/Hilton`
+- `Travel/Accommodation/Lodgify`
+- `Travel/Accommodation/Marriott`
+- `Travel/Accommodation/Point A Hotel`
+- `Travel/Accommodation/The Hollies Hotel`
+- `Travel/Accommodation/Travelodge`
+- `Travel/Agents/Disney`
+- `Travel/Agents/Jet2holidays`
+- `Travel/Agents/Large Outdoors`
+- `Travel/Agents/Magic Travel`
+- `Travel/Agents/Virgin Holidays`
+- `Travel/Airalo`
+- `Travel/Bookings/Loveholidays`
+- `Travel/Car Hire`
+- `Travel/ESTA`
+- `Travel/Finance/Fly Now Pay Later`
+- `Travel/Flights/Aer Lingus`
+- `Travel/Flights/Air Asia`
+- `Travel/Flights/Air Malta`
+- `Travel/Flights/American Airlines`
+- `Travel/Flights/Blue Islands`
+- `Travel/Flights/Breeze Airways`
+- `Travel/Flights/British Airways`
+- `Travel/Flights/Cayman Airways`
+- `Travel/Flights/Delta`
+- `Travel/Flights/EasyJet`
+- `Travel/Flights/Flybe`
+- `Travel/Flights/General`
+- `Travel/Flights/JetBlue`
+- `Travel/Flights/KLM`
+- `Travel/Flights/Qatar Airways`
+- `Travel/Flights/Ryanair`
+- `Travel/Flights/Southwest Airlines`
+- `Travel/Flights/Virgin Atlantic`
+- `Travel/Flights/Wizz Air`
+- `Travel/Flights/Wow Air`
+- `Travel/Flying Club`
+- `Travel/Ground Transport/A1 Rushmoor Radio Taxis`
+- `Travel/Ground Transport/Amtrak`
+- `Travel/Ground Transport/Apple Taxies`
+- `Travel/Ground Transport/Avanti West Coast`
+- `Travel/Ground Transport/Clarity BT`
+- `Travel/Ground Transport/CrossCountry`
+- `Travel/Ground Transport/Curb`
+- `Travel/Ground Transport/DB Bahn`
+- `Travel/Ground Transport/FastRail`
+- `Travel/Ground Transport/Freenow`
+- `Travel/Ground Transport/FreeNow`
+- `Travel/Ground Transport/GWR`
+- `Travel/Ground Transport/Hampton Jitney`
+- `Travel/Ground Transport/Hampton Luxury Liner`
+- `Travel/Ground Transport/LNER`
+- `Travel/Ground Transport/Long Island Ferry`
+- `Travel/Ground Transport/Lyft`
+- `Travel/Ground Transport/Megabus`
+- `Travel/Ground Transport/MTA`
+- `Travel/Ground Transport/MyTrainPal`
+- `Travel/Ground Transport/National Rail`
+- `Travel/Ground Transport/Ola`
+- `Travel/Ground Transport/Peter Pan Bus`
+- `Travel/Ground Transport/Pronto`
+- `Travel/Ground Transport/Raileasy`
+- `Travel/Ground Transport/Stansted Express`
+- `Travel/Ground Transport/TfL`
+- `Travel/Ground Transport/Trainline`
+- `Travel/Ground Transport/TrainPal`
+- `Travel/Ground Transport/Trainsplit`
+- `Travel/Ground Transport/Uber`
+- `Travel/Ground Transport/Uber Train`
+- `Travel/Ground Transport/Virgin Trains`
+- `Travel/Hotels`
+- `Travel/Insurance`
+- `Travel/Jet2`
+- `Travel/Mopak`
+- `Travel/Planning`
+- `Travel/Priority Pass`
+- `Travel/Splitwise`
+- `Travel/Tel Aviv`
+- `Travel/Travel Agents/Crystal Travel`
+- `Travel/Travel Agents/Destination2`
+- `Travel/Travel Agents/Destination2 Cruise`
+- `Travel/Travel Agents/easyJet Holidays`
+- `Travel/Travel Agents/Easyjet Holidays`
+- `Travel/Travel Agents/Expedia`
+- `Travel/Travel Agents/Loveholidays`
+- `Travel/Travel Agents/Major Travel`
+- `Travel/Travel Agents/Omega Flightstore`
+- `Travel/Travel Agents/Omega Travel`
+- `Travel/Travel Agents/Travel Trolley`
+- `Travel/Travel Agents/Virgin Holidays`
+- `Travel/Travel Alerts/Expertflyer`
+- `Travel/Travel Alerts/GOV-UK`
+- `Travel/Travel Alerts/SeatSpy`
+- `Travel/Travel Alerts/TripIt`
+- `Travel/Travel Loyalty/Amtrak Guest Rewards`
+- `Travel/Travel Loyalty/BA Executive Club`
+- `Travel/Travel Loyalty/LH Miles and More`
+- `Travel/Travel Loyalty/VA Flying Club`
+- `Travel/Trips/2018 - Corfu`
+- `Travel/Trips/2021 - Malta`
+- `Travel/Trips/2022 - Crete`
+- `Travel/Trips/2023 - Comic Con`
+- `Travel/Trips/2024 - Athens`
+- `Travel/Trips/2024 - Cyprus`
+- `Travel/Trips/2024 - Dubrovnik`
+- `Travel/Trips/2024 - Jan NYC`
+- `Travel/Trips/2024 - Tenerife`
+- `Travel/Trips/2025 - Disney`
+- `Travel/Trips/2025 - New York`
+- `Travel/Trips/2025 - Palma`
+- `Travel/Trips/2026 - Riga Hyrox`
+- `Travel/TUI/Delays`
+- `Travel/Visas/Cambodia`
+- `Travel/Work Travel`

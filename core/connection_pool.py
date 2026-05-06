@@ -50,14 +50,30 @@ class IMAPConnectionPool:
         except queue.Empty:
             pass
 
-        # Try to create a new connection if under the limit
+        # Reserve a slot under the lock, then create the connection outside it.
+        # imap_login() must NOT be called while holding _lock: it is slow and
+        # if it raises, incrementing _created inside the lock would leave the
+        # counter permanently wrong, causing waiters on _pool.get() to deadlock.
         with self._lock:
             if self._created < self.max_connections:
                 self._created += 1
-                return imap_login(self.secrets_path, self.logger)
+                should_create = True
+            else:
+                should_create = False
 
-        # Wait for a connection to be returned to the pool
-        return self._pool.get()
+        if should_create:
+            try:
+                return imap_login(self.secrets_path, self.logger)
+            except Exception:
+                with self._lock:
+                    self._created -= 1
+                raise
+
+        # Wait for a connection to be returned to the pool (120 s safety cap)
+        try:
+            return self._pool.get(timeout=120)
+        except queue.Empty:
+            raise RuntimeError("Timed out waiting for an IMAP connection from the pool")
 
     def release(self, conn: imaplib.IMAP4_SSL) -> None:
         """

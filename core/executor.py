@@ -3026,6 +3026,24 @@ def _count_unique_source_folders(db_path: Path) -> int:
         conn.close()
 
 
+def _pending_folder_stats(db_path: Path) -> tuple[int, int]:
+    """Return (folder_count, max_actions_in_any_folder) for pending actions."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(DISTINCT folder), MAX(cnt) "
+            "FROM (SELECT folder, COUNT(*) AS cnt FROM actions "
+            "WHERE status='pending' GROUP BY folder)"
+        )
+        row = cur.fetchone()
+        if row and row[0]:
+            return int(row[0]), int(row[1] or 0)
+        return 0, 0
+    finally:
+        conn.close()
+
+
 def _precreate_target_folders(
     client: imaplib.IMAP4,
     db_path: Path,
@@ -3141,6 +3159,7 @@ def _execute_folder_worker(
     backup_all: bool = False,
     backup_dir: Path | None = None,
     logger: JsonLogger | None = None,
+    defer_expunge: bool = False,
 ) -> tuple[str, int, int]:
     """
     Process all actions for a single source folder (runs in worker thread).
@@ -3165,6 +3184,7 @@ def _execute_folder_worker(
         backup_all: Backup all cached messages
         backup_dir: Directory for backups
         logger: JsonLogger for logging
+        defer_expunge: When True, skip EXPUNGE (caller will issue it after all chunks complete)
 
     Returns:
         Tuple of (folder_name, actions_done, actions_failed)
@@ -3343,8 +3363,10 @@ def _execute_folder_worker(
                         if strict:
                             raise
 
-                # EXPUNGE folder (delete flagged messages)
-                if not dry_run:
+                # EXPUNGE folder (delete flagged messages).
+                # Skipped when defer_expunge=True: caller will issue a single
+                # EXPUNGE after all chunk workers for this folder complete.
+                if not dry_run and not defer_expunge:
                     try:
                         client.expunge()
                     except Exception:
@@ -3628,18 +3650,37 @@ def execute_actions_parallel(
             console=("📂 Execution plan:" + (f"\n{lines}" if lines else "")),
         )
 
+    # Split large folders into per-worker chunks (mirrors cache builder mega-folder approach).
+    # Each chunk becomes its own future; workers within the same folder use defer_expunge=True
+    # so EXPUNGE is issued once by the coordinator after all chunks complete.
+    _MIN_CHUNK_SIZE = 10  # minimum actions per chunk before splitting makes sense
+    chunk_tasks: list[tuple[str, int, int, list[dict]]] = []  # (folder, chunk_idx, n_chunks, actions)
+    expunge_folders: list[str] = []  # folders whose EXPUNGE must be deferred
+
+    for folder in sorted_folders:
+        actions = folder_actions[folder]
+        n_chunks = min(max_workers, (len(actions) + _MIN_CHUNK_SIZE - 1) // _MIN_CHUNK_SIZE)
+        if n_chunks > 1:
+            chunk_size = (len(actions) + n_chunks - 1) // n_chunks
+            chunks = [actions[i:i + chunk_size] for i in range(0, len(actions), chunk_size)]
+            expunge_folders.append(folder)
+        else:
+            chunks = [actions]
+        for chunk_idx, chunk in enumerate(chunks):
+            chunk_tasks.append((folder, chunk_idx, len(chunks), chunk))
+
     logger.log(
         "INFO",
         "execute_parallel_folders",
-        {"folder_count": len(sorted_folders), "max_workers": max_workers},
-        console=f"🔧 Processing {len(sorted_folders)} folders with {max_workers} workers",
+        {"folder_count": len(sorted_folders), "task_count": len(chunk_tasks), "max_workers": max_workers},
+        console=f"🔧 Processing {len(sorted_folders)} folders ({len(chunk_tasks)} tasks) with {max_workers} workers",
     )
 
-    # Set up progress bar: main folder progress
+    # Set up progress bar: one tick per completed chunk task
     folders_bar = tqdm(
-        total=len(sorted_folders),
+        total=len(chunk_tasks),
         desc="📦 Processing folders",
-        unit="folder",
+        unit="task",
         dynamic_ncols=True,
         leave=True,
         position=0,
@@ -3653,20 +3694,21 @@ def execute_actions_parallel(
     total_failed = 0
 
     try:
-        # Create ThreadPoolExecutor and spawn workers
-        logger.log("DEBUG", "executor_creating_pool", {"max_workers": max_workers, "folder_count": len(sorted_folders)})
+        logger.log("DEBUG", "executor_creating_pool", {"max_workers": max_workers, "task_count": len(chunk_tasks)})
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {}
-            for folder in sorted_folders:
-                actions = folder_actions[folder]
+            futures: dict[concurrent.futures.Future, tuple[str, int, int]] = {}
+            for folder, chunk_idx, n_chunks, chunk in chunk_tasks:
                 worker_id = len(futures) % max_workers
-                logger.log("DEBUG", "executor_submitting_worker", {"worker_id": worker_id, "folder": folder, "action_count": len(actions)})
+                logger.log("DEBUG", "executor_submitting_worker", {
+                    "worker_id": worker_id, "folder": folder,
+                    "chunk": chunk_idx, "n_chunks": n_chunks, "action_count": len(chunk),
+                })
                 future = executor.submit(
                     _execute_folder_worker,
                     pool=pool,
                     db_path=db_path,
                     folder=folder,
-                    actions=actions,
+                    actions=chunk,
                     worker_id=worker_id,
                     dry_run=dry_run,
                     strict=strict,
@@ -3675,14 +3717,13 @@ def execute_actions_parallel(
                     backup_all=backup_all,
                     backup_dir=backup_dir,
                     logger=logger,
+                    defer_expunge=(n_chunks > 1),
                 )
-                futures[future] = folder
-                logger.log("DEBUG", "executor_worker_submitted", {"worker_id": worker_id, "folder": folder})
+                futures[future] = (folder, chunk_idx, n_chunks)
 
-            # Track results as they complete
             logger.log("DEBUG", "executor_waiting_for_results", {"future_count": len(futures)})
             for future in concurrent.futures.as_completed(futures):
-                folder = futures[future]
+                folder, chunk_idx, n_chunks = futures[future]
                 try:
                     folder_name, actions_done, actions_failed = future.result()
                     total_done += actions_done
@@ -3693,12 +3734,11 @@ def execute_actions_parallel(
                     logger.log(
                         "ERROR",
                         "execute_folder_worker_failed",
-                        {"folder": folder, "error": str(exc)},
-                        console=f"❌ Worker failed for {folder}: {exc}",
+                        {"folder": folder, "chunk": chunk_idx, "error": str(exc)},
+                        console=f"❌ Worker failed for {folder} (chunk {chunk_idx}): {exc}",
                     )
                     folders_bar.update(1)
                     if strict:
-                        # In strict mode, cancel remaining workers
                         for f in futures:
                             f.cancel()
                         raise
@@ -3706,13 +3746,39 @@ def execute_actions_parallel(
         folders_bar.close()
 
     finally:
-        # Clean up connection pool
         pool.shutdown()
+
+    # Deferred EXPUNGE: issue one EXPUNGE per folder that was split into chunks.
+    # Workers used defer_expunge=True so \Deleted flags are set but not yet purged.
+    if expunge_folders and not dry_run:
+        from core.imap_client import imap_login as _imap_login
+        logger.log(
+            "INFO",
+            "execute_deferred_expunge",
+            {"folders": expunge_folders},
+            console=f"🗑️  Expunging {len(expunge_folders)} chunked folder(s)...",
+        )
+        expunge_client = _imap_login(secrets_path, logger)
+        try:
+            for folder in expunge_folders:
+                try:
+                    expunge_client.select(f'"{folder}"', readonly=False)
+                    expunge_client.expunge()
+                except Exception as exc:
+                    logger.log(
+                        "WARN",
+                        "execute_deferred_expunge_failed",
+                        {"folder": folder, "error": str(exc)},
+                    )
+        finally:
+            try:
+                expunge_client.logout()
+            except Exception:
+                pass
 
     timer.stop()
     timer.count = total_done
 
-    # Build stats dict compatible with existing code
     stats = {
         "done": total_done,
         "failed": total_failed,
@@ -3734,6 +3800,7 @@ def should_use_parallel_mode(
     db_path: Path,
     parallel_workers: int | None,
     logger: JsonLogger | None = None,
+    _min_chunk_size: int = 10,
 ) -> bool:
     """
     Determine if parallel execution should be used.
@@ -3741,46 +3808,60 @@ def should_use_parallel_mode(
     Rules:
     - parallel_workers == 0: Force sequential (return False)
     - parallel_workers > 0: Force parallel (return True)
-    - parallel_workers is None: Auto-detect based on folder count
-      - ≥5 unique source folders: Use parallel (return True)
-      - <5 folders: Use sequential (return False)
+    - parallel_workers is None: Auto-detect:
+      - ≥5 unique source folders → parallel
+      - single folder with enough actions to chunk across workers → parallel
+      - otherwise → sequential
 
     Args:
         db_path: Path to the SQLite database
-        parallel_workers: Optional override for worker count (0=sequential, >0=parallel, None=auto)
+        parallel_workers: Override (0=sequential, >0=parallel, None=auto)
         logger: Optional logger for diagnostic messages
+        _min_chunk_size: Minimum actions per chunk (must match execute_actions_parallel)
 
     Returns:
         True if parallel mode should be used, False otherwise
     """
-    # TEMPORARY: Parallel execution has a deadlock issue - force sequential for reliability
-    # TODO: Debug and fix the parallel executor's database/IMAP contention issues
-    if logger:
-        logger.log(
-            "INFO",
-            "parallel_disabled_temporary",
-            {"reason": "deadlock investigation"},
-            console="📂 Using sequential execution (parallel mode temporarily disabled for debugging)",
-        )
-    return False
+    if parallel_workers == 0:
+        if logger:
+            logger.log("INFO", "sequential_forced", {}, console="📂 Sequential mode (--parallel-workers 0)")
+        return False
 
-    # Auto-detect: count unique source folders in pending actions
-    count = _count_unique_source_folders(db_path)
-    if count >= 5:
+    if parallel_workers is not None and parallel_workers > 0:
         if logger:
             logger.log(
-                "INFO",
-                "parallel_auto",
-                {"folders": count},
-                console=f"🚀 Auto-detecting parallel mode: {count} folders found (≥5 threshold)",
+                "INFO", "parallel_forced",
+                {"workers": parallel_workers},
+                console=f"🚀 Parallel mode ({parallel_workers} workers)",
             )
         return True
-    else:
+
+    # Auto-detect: use parallel if there are enough folders or one very large folder
+    folder_count, max_folder_actions = _pending_folder_stats(db_path)
+
+    if folder_count >= 5:
         if logger:
             logger.log(
-                "INFO",
-                "sequential_auto",
-                {"folders": count},
-                console=f"📂 Auto-detecting sequential mode: {count} folders (<5 threshold)",
+                "INFO", "parallel_auto",
+                {"folders": folder_count},
+                console=f"🚀 Auto-parallel: {folder_count} source folders (≥5 threshold)",
             )
-        return False
+        return True
+
+    # A single large folder can be chunked across workers
+    if max_folder_actions >= 2 * _min_chunk_size:
+        if logger:
+            logger.log(
+                "INFO", "parallel_auto_large_folder",
+                {"folders": folder_count, "max_actions": max_folder_actions},
+                console=f"🚀 Auto-parallel: folder with {max_folder_actions} actions (large enough to chunk)",
+            )
+        return True
+
+    if logger:
+        logger.log(
+            "INFO", "sequential_auto",
+            {"folders": folder_count, "max_actions": max_folder_actions},
+            console=f"📂 Sequential mode: {folder_count} folder(s), {max_folder_actions} max actions",
+        )
+    return False
