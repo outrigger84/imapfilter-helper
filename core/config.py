@@ -222,7 +222,7 @@ class LoggingConfig:
 class CacheConfig:
     limit: Optional[int] = None
     order: str = "newest"
-    parallel_workers: int = 5  # Default worker count for auto-detection
+    parallel_workers: int = 1  # Default worker count for auto-detection
 
 
 @dataclass
@@ -232,7 +232,7 @@ class ExecutorConfig:
     strict: bool = False
     limit: Optional[int] = None
     verify_moves: bool = False
-    parallel_workers: Optional[int] = None  # None=auto-detect, 0=sequential, N>0=parallel with N workers
+    parallel_workers: Optional[int] = 0  # None=auto-detect, 0=sequential, N>0=parallel with N workers
     max_retries: int = 2  # Number of retry attempts for parallel execution
     retry_delay_base: float = 5.0  # Initial retry delay in seconds
 

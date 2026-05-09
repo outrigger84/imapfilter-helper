@@ -11,7 +11,7 @@ from core.cache_builder import build_cache, build_cache_parallel, compact_cache,
 from core.config import AppConfig, build_default_config
 from core.database import init_db
 from core.executor import execute_actions, execute_actions_parallel, should_use_parallel_mode
-from core.imap_client import imap_login, list_all_folders, get_folder_sizes, expand_folders_recursive
+from core.imap_client import imap_login, list_all_folders, get_folder_sizes, expand_folders_recursive, prune_empty_folders
 from core.keywords import KeywordManager
 from core.logging_utils import JsonLogger, PhaseTimer
 from core.rule_engine import evaluate_rules, load_rules
@@ -206,6 +206,16 @@ def build_parser() -> argparse.ArgumentParser:
         default="alpha",
         help="Order folders by destination match count: most-first (most matches first), least-first, or alpha (default)",
     )
+    p_exec.add_argument(
+        "--prune-empty-folders",
+        action="store_true",
+        help="After execution, scan all IMAP folders and delete empty leaf folders (no sub-folders, no messages)",
+    )
+    p_exec.add_argument(
+        "--yes",
+        action="store_true",
+        help="Auto-confirm all --prune-empty-folders deletions without prompting",
+    )
 
     p_run = sub.add_parser("run-all", help="Build cache, evaluate, and execute")
     p_run.add_argument("--dry-run", action="store_true", help="Simulate everything (no IMAP writes)")
@@ -294,6 +304,16 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["most-first", "least-first", "alpha"],
         default="alpha",
         help="Order folders by destination match count during execute: most-first (most matches first), least-first, or alpha (default)",
+    )
+    p_run.add_argument(
+        "--prune-empty-folders",
+        action="store_true",
+        help="After execution, scan all IMAP folders and delete empty leaf folders (no sub-folders, no messages)",
+    )
+    p_run.add_argument(
+        "--yes",
+        action="store_true",
+        help="Auto-confirm all --prune-empty-folders deletions without prompting",
     )
 
     p_eval_exec = sub.add_parser("eval-execute", help="Evaluate rules and execute actions (requires existing cache)")
@@ -484,6 +504,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--folder",
         type=str,
         help="Filter by folder name",
+    )
+
+    p_review = sub.add_parser("review", help="Wizard-style review of cached emails for rule refinement")
+    p_review.add_argument(
+        "--folder",
+        action="append",
+        dest="folders",
+        help="Limit to specific source folder(s) (can be repeated)",
+    )
+    p_review.add_argument(
+        "--limit",
+        type=int,
+        default=200,
+        help="Max emails per folder to load (default: 200)",
+    )
+    p_review.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output .md path (default: data/review_YYYYMMDD_HHMMSS.md)",
     )
 
     p_mbox = sub.add_parser(
@@ -679,7 +719,7 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
         parallel_workers = args.parallel_workers
         if parallel_workers is None:
             # Auto-detect: use parallelization for 5+ folders
-            parallel_workers = 8 if len(folders) >= 5 else 1
+            parallel_workers = cfg.cache.parallel_workers if len(folders) >= 5 else 1
 
         # Choose implementation based on worker count
         if parallel_workers > 1:
@@ -864,8 +904,10 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
         default_scope=cfg.executor.default_run_scope,
     )
 
-    # Get parallel_workers setting from CLI args
+    # Get parallel_workers setting from CLI args, fall back to config default
     parallel_workers = getattr(args, "parallel_workers", None)
+    if parallel_workers is None:
+        parallel_workers = cfg.executor.parallel_workers
     disabled_action_types = _build_disabled_action_types(args)
     folder_order = getattr(args, "folder_order", "alpha")
 
@@ -939,6 +981,25 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                     # Server may have closed connection or lost socket
                     # Safe to ignore during exit
                     pass
+
+    if getattr(args, "prune_empty_folders", False):
+        prune_client = None
+        if not args.dry_run:
+            prune_client = imap_login(cfg.paths.secrets_file, logger)
+        try:
+            prune_empty_folders(
+                prune_client,
+                auto=getattr(args, "yes", False),
+                dry_run=args.dry_run,
+                logger=logger,
+            )
+        finally:
+            if prune_client is not None:
+                try:
+                    prune_client.logout()
+                except (imaplib.IMAP4.error, imaplib.IMAP4.abort, OSError, EOFError):
+                    pass
+
     return 0
 
 
@@ -999,8 +1060,10 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             debug_headers=args.debug_headers,
             folders=eval_folders,
         )
-        # Get parallel_workers setting from CLI args
+        # Get parallel_workers setting from CLI args, fall back to config default
         parallel_workers = getattr(args, "parallel_workers", None)
+        if parallel_workers is None:
+            parallel_workers = cfg.executor.parallel_workers
         disabled_action_types = _build_disabled_action_types(args)
         folder_order = getattr(args, "folder_order", "alpha")
 
@@ -1122,6 +1185,8 @@ def handle_eval_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: Js
 
         # Phase 2: Execute actions
         parallel_workers = getattr(args, "parallel_workers", None)
+        if parallel_workers is None:
+            parallel_workers = cfg.executor.parallel_workers
         disabled_action_types = _build_disabled_action_types(args)
         folder_order = getattr(args, "folder_order", "alpha")
 
@@ -1482,6 +1547,25 @@ def handle_view_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Json
     return launch_cache_viewer(cfg, limit=args.limit, folder=args.folder)
 
 
+def handle_review(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
+    """Handle the ``review`` command for wizard-style email review."""
+
+    del db, logger  # Unused – kept for consistent handler signature
+
+    from core.tools.review_tool import launch_review_tool
+
+    from datetime import datetime
+    output_path = args.output or (
+        cfg.paths.data_dir / f"review_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+    )
+    return launch_review_tool(
+        cfg=cfg,
+        output_path=output_path,
+        folders=getattr(args, "folders", None),
+        limit=getattr(args, "limit", 200),
+    )
+
+
 def handle_mbox_import(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
     """Handle the ``mbox-import`` command."""
     from core.mbox_importer import run_mbox_import
@@ -1726,6 +1810,7 @@ COMMAND_HANDLERS: dict[str, Handler] = {
     "keywords": handle_keywords,
     "check-conflicts": handle_check_conflicts,
     "view-cache": handle_view_cache,
+    "review": handle_review,
     "mbox-import": handle_mbox_import,
 }
 
@@ -1780,7 +1865,7 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
     logger = JsonLogger(cfg.paths.log_file, notifier=notifier)
 
     # Validate cache access based on command
-    read_only_commands = {"evaluate", "execute", "eval-execute", "check-conflicts", "view-cache"}
+    read_only_commands = {"evaluate", "execute", "eval-execute", "check-conflicts", "view-cache", "review"}
     write_commands = {"build-cache", "run-all", "stream"}
 
     try:
@@ -1819,5 +1904,6 @@ __all__ = [
     "handle_keywords",
     "handle_check_conflicts",
     "handle_view_cache",
+    "handle_review",
     "handle_mbox_import",
 ]

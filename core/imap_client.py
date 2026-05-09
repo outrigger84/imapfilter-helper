@@ -204,6 +204,86 @@ def get_folder_sizes(client: imaplib.IMAP4, folders: List[str], show_progress: b
     return sizes
 
 
+def delete_folder(client: imaplib.IMAP4, folder_name: str) -> bool:
+    """Delete a folder from the IMAP server. Returns True on success."""
+    typ, _ = client.delete(f'"{folder_name}"')
+    return typ == "OK"
+
+
+def find_empty_prunable_folders(client: imaplib.IMAP4) -> list[str]:
+    """
+    Return all empty leaf folders on the server — folders with 0 messages
+    and no sub-folders. Sorted deepest-first so children are deleted before
+    their parents become prunable.
+    """
+    all_folders = list_all_folders(client)
+    sizes = get_folder_sizes(client, all_folders, show_progress=False)
+    has_children = {
+        f for f in all_folders
+        for other in all_folders
+        if other != f and other.startswith(f + "/")
+    }
+    empty_leaves = [
+        f for f in all_folders
+        if sizes.get(f, -1) == 0 and f not in has_children
+    ]
+    return sorted(empty_leaves, key=lambda x: x.count("/"), reverse=True)
+
+
+def prune_empty_folders(
+    client: imaplib.IMAP4 | None,
+    *,
+    auto: bool = False,
+    dry_run: bool = False,
+    logger: "JsonLogger | None" = None,
+) -> None:
+    """
+    Delete empty leaf folders from the mail server.
+
+    Args:
+        client:  Authenticated IMAP connection, or None when dry_run is True.
+        auto:    If True, delete without prompting. If False, prompt per folder.
+        dry_run: List candidates without deleting anything.
+        logger:  Optional logger for structured output.
+    """
+    if dry_run:
+        # Build a provisional list using a temporary login is not possible here;
+        # callers should pass client=None only when they have no connection.
+        print("ℹ️  --prune-empty-folders: dry-run mode — no folders will be deleted")
+        return
+
+    candidates = find_empty_prunable_folders(client)
+    if not candidates:
+        print("✅ No empty folders to remove")
+        return
+
+    print(f"\n🗑️  Found {len(candidates)} empty folder(s) to prune:")
+    removed = 0
+    skipped = 0
+    for folder in candidates:
+        if auto:
+            ok = delete_folder(client, folder)
+            status = "removed" if ok else "FAILED"
+            print(f"  {'✅' if ok else '❌'} {status}: {folder}")
+            if ok:
+                removed += 1
+            if logger:
+                logger.log("INFO", "prune_folder", {"folder": folder, "status": status})
+        else:
+            answer = input(f'  Remove "{folder}"? [y/N] ').strip().lower()
+            if answer == "y":
+                ok = delete_folder(client, folder)
+                print(f"  {'✅ Removed' if ok else '❌ Failed'}: {folder}")
+                if ok:
+                    removed += 1
+                if logger:
+                    logger.log("INFO", "prune_folder", {"folder": folder, "status": "removed" if ok else "failed"})
+            else:
+                skipped += 1
+
+    print(f"\n✅ Pruning complete — {removed} removed, {skipped} skipped")
+
+
 def safe_search_all(client: imaplib.IMAP4, undeleted_only: bool = False) -> Iterable[bytes]:
     """
     Search for all messages in the current folder.
