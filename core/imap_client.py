@@ -225,7 +225,7 @@ def find_empty_prunable_folders(client: imaplib.IMAP4) -> list[str]:
     }
     empty_leaves = [
         f for f in all_folders
-        if sizes.get(f, -1) == 0 and f not in has_children
+        if sizes.get(f, -1) == 0 and f not in has_children and f.upper() != "INBOX"
     ]
     return sorted(empty_leaves, key=lambda x: x.count("/"), reverse=True)
 

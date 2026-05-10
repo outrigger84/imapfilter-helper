@@ -168,19 +168,31 @@ class ReviewTool:
             pass
         stdscr.keypad(True)
 
-        while self.folder_idx < len(self.folder_list):
-            action = self._screen_folder(stdscr)
-            if action == "quit":
-                break
-            elif action == "browse":
-                self._screen_emails(stdscr, self.folder_list[self.folder_idx][0])
-                self.folder_idx += 1
-            elif action == "ok":
-                self.folder_idx += 1
-            elif action == "skip":
-                self.folder_idx += 1
-            elif action == "prev":
-                self.folder_idx = max(0, self.folder_idx - 1)
+        show_browse = False
+
+        while 0 <= self.folder_idx < len(self.folder_list):
+            if show_browse:
+                action = self._screen_emails(stdscr, self.folder_list[self.folder_idx][0])
+                if action == "quit":
+                    break
+                elif action in ("next", "ok", "skip"):
+                    self.folder_idx += 1
+                elif action == "prev":
+                    self.folder_idx = max(0, self.folder_idx - 1)
+                elif action == "menu":
+                    show_browse = False
+            else:
+                action = self._screen_folder(stdscr)
+                if action == "quit":
+                    break
+                elif action == "browse":
+                    show_browse = True
+                elif action == "ok":
+                    self.folder_idx += 1
+                elif action == "skip":
+                    self.folder_idx += 1
+                elif action == "prev":
+                    self.folder_idx = max(0, self.folder_idx - 1)
 
         if self.folder_idx >= len(self.folder_list):
             self._screen_complete(stdscr)
@@ -237,13 +249,14 @@ class ReviewTool:
 
     # ── Screen B: Email list ───────────────────────────────────────────────
 
-    def _screen_emails(self, stdscr: Any, folder_name: str) -> None:
+    def _screen_emails(self, stdscr: Any, folder_name: str) -> str:
         stdscr.erase()
         height, width = stdscr.getmaxyx()
         stdscr.addnstr(0, 0, f"Loading {folder_name}...", width - 1, curses.A_DIM)
         stdscr.refresh()
 
         emails = self._get_folder_emails(folder_name)
+        total_folders = len(self.folder_list)
 
         scroll_offset = 0
         cursor = 0
@@ -254,10 +267,14 @@ class ReviewTool:
             height, width = stdscr.getmaxyx()
 
             HEADER_ROWS = 4
-            FOOTER_ROWS = 2
+            FOOTER_ROWS = 3
             list_height = max(1, height - HEADER_ROWS - FOOTER_ROWS)
 
-            stdscr.addnstr(0, 0, f"  {folder_name}  ({len(emails):,} emails)", width - 1, curses.A_BOLD)
+            hdr = (
+                f"  {folder_name}  ({len(emails):,} emails)"
+                f"  —  Folder {self.folder_idx + 1}/{total_folders}"
+            )
+            stdscr.addnstr(0, 0, hdr[:width - 1], width - 1, curses.A_BOLD)
 
             # Subtitle: most-matched rule
             rule_counts: dict[str, tuple[int, str]] = {}
@@ -318,9 +335,9 @@ class ReviewTool:
                 status = f"  {cursor + 1}/{len(emails)}{no_rule}"
             else:
                 status = "  (no emails in this folder)"
-            stdscr.addnstr(height - 2, 0, status[:width - 1], width - 1, curses.A_DIM)
-            help_text = "  ↑/↓  f flag  SPACE select  a flag-all  d done  ESC back"
-            stdscr.addnstr(height - 1, 0, help_text[:width - 1], width - 1, curses.A_DIM)
+            stdscr.addnstr(height - 3, 0, status[:width - 1], width - 1, curses.A_DIM)
+            help_text = "  ↑/↓  f=flag  SPACE=select  F=flag-selected  n=next  p=prev  a=ok  s=skip  q=quit  m=menu"
+            stdscr.addnstr(height - 2, 0, help_text[:width - 1], width - 1, curses.A_DIM)
 
             stdscr.refresh()
             key = stdscr.getch()
@@ -349,18 +366,52 @@ class ReviewTool:
                     if flag is not None:
                         self._replace_flag(flag)
                 selected.clear()
-            elif key in (ord("a"), ord("A")) and emails:
-                bulk_flag = self._dialog_flag(stdscr, emails[cursor], bulk_count=len(emails))
-                if bulk_flag is not None:
-                    for em in emails:
-                        self._replace_flag(Flag(
-                            email=em,
-                            category=bulk_flag.category,
-                            target_suggestion=bulk_flag.target_suggestion,
-                            note=bulk_flag.note,
-                        ))
-            elif key in (ord("d"), ord("D"), 27, ord("q"), ord("Q")):
-                break
+            elif key in (curses.KEY_ENTER, 10, 13, ord("n"), ord("N"), curses.KEY_RIGHT):
+                return "next"
+            elif key in (ord("p"), ord("P"), curses.KEY_LEFT):
+                return "prev"
+            elif key in (ord("a"), ord("A")):
+                return "ok"
+            elif key in (ord("s"), ord("S")):
+                return "skip"
+            elif key in (ord("q"), ord("Q")):
+                return "quit"
+            elif key in (ord("m"), ord("M"), 27):
+                return "menu"
+
+    @staticmethod
+    def _read_text(win: Any, y: int, x: int, display_w: int) -> str:
+        """Read unlimited text with a scrolling single-line display."""
+        chars: list[str] = []
+        view_start = 0
+        curses.curs_set(1)
+        try:
+            while True:
+                visible = "".join(chars)[view_start:view_start + display_w]
+                win.addnstr(y, x, visible.ljust(display_w), display_w)
+                cur_col = min(len(chars) - view_start, display_w - 1)
+                try:
+                    win.move(y, x + cur_col)
+                except Exception:
+                    pass
+                win.refresh()
+                key = win.getch()
+                if key in (curses.KEY_ENTER, 10, 13):
+                    break
+                elif key == 27:
+                    break
+                elif key in (curses.KEY_BACKSPACE, 127, 8):
+                    if chars:
+                        chars.pop()
+                        if view_start > 0 and len(chars) - view_start < display_w // 2:
+                            view_start = max(0, len(chars) - display_w // 2)
+                elif 32 <= key <= 126:
+                    chars.append(chr(key))
+                    if len(chars) - view_start >= display_w:
+                        view_start = len(chars) - display_w + 1
+        finally:
+            curses.curs_set(0)
+        return "".join(chars)
 
     def _replace_flag(self, flag: Flag) -> None:
         self.flags = [
@@ -423,38 +474,20 @@ class ReviewTool:
 
         target_suggestion = ""
         note = ""
-        input_x = len(prompt) + 2  # column after the prompt text
 
         if category == 1:
             folder_prompt = "  Correct folder: "
-            win.addnstr(13, 2, folder_prompt + " " * (dialog_w - len(folder_prompt) - 3), dialog_w - 3)
             win.addnstr(13, 2, folder_prompt, dialog_w - 3)
             win.refresh()
-            curses.curs_set(1)
-            curses.echo()
-            try:
-                raw = win.getstr(13, len(folder_prompt) + 2, dialog_w - len(folder_prompt) - 6)
-                target_suggestion = raw.decode("utf-8", errors="replace").strip()
-            except Exception:
-                pass
-            finally:
-                curses.noecho()
-                curses.curs_set(0)
+            input_x = 2 + len(folder_prompt)
+            target_suggestion = self._read_text(win, 13, input_x, dialog_w - input_x - 2)
 
-        note_prompt = "  Note (Enter to skip): "
+        note_prompt = "  Note: "
         win.addnstr(14, 2, note_prompt + " " * (dialog_w - len(note_prompt) - 3), dialog_w - 3)
         win.addnstr(14, 2, note_prompt, dialog_w - 3)
         win.refresh()
-        curses.curs_set(1)
-        curses.echo()
-        try:
-            raw = win.getstr(14, len(note_prompt) + 2, dialog_w - len(note_prompt) - 6)
-            note = raw.decode("utf-8", errors="replace").strip()
-        except Exception:
-            pass
-        finally:
-            curses.noecho()
-            curses.curs_set(0)
+        input_x = 2 + len(note_prompt)
+        note = self._read_text(win, 14, input_x, dialog_w - input_x - 2)
 
         win.addnstr(15, 2, "  Flagged. Press any key...", dialog_w - 3, curses.A_DIM)
         win.refresh()
