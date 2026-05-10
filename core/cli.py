@@ -1726,7 +1726,7 @@ def handle_check_conflicts(args: argparse.Namespace, cfg: AppConfig, db, logger:
     if args.auto_fix and conflicts:
         from core.conflict_detector import ConflictResolver
 
-        resolver = ConflictResolver(conflicts, cfg.paths.rules_dir, logger)
+        resolver = ConflictResolver(conflicts, cfg.paths.rules_dir, logger, rules=rules)
         resolver.interactive_resolve()
 
         # Log applied fixes

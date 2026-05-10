@@ -981,6 +981,7 @@ class ConflictResolver:
         conflicts: list[ConflictResult],
         rules_dir: Path,
         logger: Optional[JsonLogger] = None,
+        rules: Optional[list[dict]] = None,
     ) -> None:
         """Initialize resolver.
 
@@ -988,11 +989,13 @@ class ConflictResolver:
             conflicts: List of ConflictResult objects
             rules_dir: Path to rules directory
             logger: Optional JSON logger
+            rules: Already-loaded rules list (used to build name→path index without re-reading files)
         """
         self.conflicts = conflicts
         self.rules_dir = rules_dir
         self.logger = logger
         self.applied_fixes: list[str] = []
+        self._rule_name_to_path = self._build_name_index(rules)
 
     def suggest_fixes(self, conflict: ConflictResult) -> list[dict[str, Any]]:
         """Generate fix suggestions for a conflict.
@@ -1070,25 +1073,31 @@ class ConflictResolver:
 
         return fixes
 
-    def _find_rule_file(self, rule_name: str) -> Optional[Path]:
-        """Find the file path for a rule by name.
-
-        Args:
-            rule_name: Name of the rule to find
-
-        Returns:
-            Path to rule file or None if not found
-        """
+    def _build_name_index(self, rules: Optional[list[dict]]) -> dict[str, Path]:
+        """Build a name→path index.  Uses already-loaded rules when available to avoid re-reading files."""
+        if rules:
+            return {
+                rule["name"]: self.rules_dir / rule["_file"]
+                for rule in rules
+                if rule.get("name") and rule.get("_file")
+            }
+        # Fallback: single glob+parse pass (still O(n) but only done once)
+        import json as _json
+        index: dict[str, Path] = {}
         for rule_file in self.rules_dir.glob("*.json"):
             try:
-                import json
                 with open(rule_file) as f:
-                    rule_data = json.load(f)
-                    if rule_data.get("name") == rule_name:
-                        return rule_file
+                    data = _json.load(f)
+                name = data.get("name")
+                if name:
+                    index[name] = rule_file
             except Exception:
                 pass
-        return None
+        return index
+
+    def _find_rule_file(self, rule_name: str) -> Optional[Path]:
+        """Find the file path for a rule by name."""
+        return self._rule_name_to_path.get(rule_name)
 
     def apply_fix(
         self,

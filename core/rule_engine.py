@@ -6,6 +6,7 @@ import email.header
 import json
 import re
 from datetime import datetime, timezone
+from email.parser import HeaderParser as _HeaderParser
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional, Sequence, Tuple
@@ -14,20 +15,12 @@ from tqdm import tqdm
 
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 
+_HEADER_PARSER = _HeaderParser()
 
-@lru_cache(maxsize=1024)
+
+@lru_cache(maxsize=None)
 def _get_compiled_regex(pattern: str) -> re.Pattern:
-    """Get a compiled regex pattern, with caching to avoid recompilation.
-
-    This function caches compiled regex objects to improve performance
-    when the same patterns are used repeatedly (e.g., during coverage
-    analysis where rules are evaluated against many messages).
-
-    Args:
-        pattern: Regex pattern string to compile
-
-    Returns:
-        Compiled regex pattern object
+    """Get a compiled regex pattern, cached without eviction.
 
     Raises:
         re.error: If the pattern is invalid
@@ -61,7 +54,28 @@ def load_rules(rule_dir: Path, logger: JsonLogger, *, skip_disabled: bool = True
     if skipped:
         msg += f" ({skipped} disabled)"
     logger.log("INFO", "rules_loaded", {"count": len(rules), "skipped_disabled": skipped}, console=msg)
+    _prime_regex_cache(rules)
     return rules
+
+
+def _prime_regex_cache(rules: list[dict]) -> None:
+    """Pre-compile all regex patterns found in the rule set into the LRU cache."""
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key in ("regex", "not_regex"):
+                if key in node and isinstance(node[key], str):
+                    try:
+                        _get_compiled_regex(node[key])
+                    except re.error:
+                        pass
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    for rule in rules:
+        _walk(rule.get("conditions"))
 
 
 def _extract_raw_header(data: str) -> str:
@@ -86,7 +100,7 @@ def _extract_raw_header(data: str) -> str:
 def _parse_header_map(raw_header: str) -> dict[str, str]:
     """Parse the raw header string into a lowercase-keyed mapping, MIME-decoded."""
 
-    message = email.message_from_string(raw_header or "")
+    message = _HEADER_PARSER.parsestr(raw_header or "", headersonly=True)
     result = {}
     for key, value in message.items():
         try:

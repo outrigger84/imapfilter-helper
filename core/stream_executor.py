@@ -98,6 +98,121 @@ def _update_folder_bars(
             slot_bar.set_description_str("")
 
 
+_MOVE_BATCH = 500  # UIDs per batched IMAP COPY/MOVE command
+
+
+def _flush_batch_moves(
+    client: imaplib.IMAP4,
+    source_folder: str,
+    batch: dict[tuple[str, str], list[tuple[str, str]]],
+    *,
+    stats: dict[str, int],
+    resume_log: ResumeLog | None,
+    logger: JsonLogger,
+    verbose: bool,
+    supports_uid_move: bool,
+) -> None:
+    """Execute all buffered moves for source_folder as batched IMAP commands.
+
+    Issues a single SELECT, then one COPY+STORE (or MOVE) per target folder
+    covering all buffered UIDs, then EXPUNGE+CLOSE.
+    """
+    targets = {
+        tgt: uid_rule_pairs
+        for (src, tgt), uid_rule_pairs in batch.items()
+        if src == source_folder
+    }
+    if not targets:
+        return
+
+    try:
+        sel_typ, sel_resp = client.select(f'"{source_folder}"')
+    except imaplib.IMAP4.error as exc:
+        for uid_rule_pairs in targets.values():
+            stats["failed"] += len(uid_rule_pairs)
+        logger.log("ERROR", "stream_batch_select_error", {"folder": source_folder, "error": str(exc)})
+        return
+
+    if sel_typ != "OK":
+        for uid_rule_pairs in targets.values():
+            stats["failed"] += len(uid_rule_pairs)
+        logger.log("ERROR", "stream_batch_select_failed", {"folder": source_folder, "error": _format_imap_details(sel_resp)})
+        return
+
+    need_expunge = False
+
+    for target, uid_rule_pairs in targets.items():
+        uids = [uid for uid, _ in uid_rule_pairs]
+        for chunk_start in range(0, len(uids), _MOVE_BATCH):
+            chunk = uids[chunk_start : chunk_start + _MOVE_BATCH]
+            uid_set = ",".join(chunk)
+            moved = False
+
+            if supports_uid_move:
+                try:
+                    move_typ, move_resp = client.uid("MOVE", uid_set, f'"{target}"')
+                except imaplib.IMAP4.error:
+                    move_typ, move_resp = "NO", None
+
+                if move_typ != "OK" and _should_try_create_folder(move_resp):
+                    try:
+                        cre_typ, _ = client.create(f'"{target}"')
+                        if cre_typ == "OK":
+                            move_typ, move_resp = client.uid("MOVE", uid_set, f'"{target}"')
+                    except imaplib.IMAP4.error:
+                        pass
+
+                if move_typ == "OK":
+                    moved = True
+
+            if not moved:
+                try:
+                    copy_typ, copy_resp = client.uid("COPY", uid_set, f'"{target}"')
+                except imaplib.IMAP4.error as exc:
+                    logger.log("ERROR", "stream_batch_copy_error", {"folder": source_folder, "target": target, "count": len(chunk), "error": str(exc)},
+                               console=f"   ❌ Batch COPY error: {source_folder} → {target} ({len(chunk)} msgs): {exc}")
+                    stats["failed"] += len(chunk)
+                    continue
+
+                if copy_typ != "OK" and _should_try_create_folder(copy_resp):
+                    try:
+                        cre_typ, _ = client.create(f'"{target}"')
+                        if cre_typ == "OK":
+                            copy_typ, copy_resp = client.uid("COPY", uid_set, f'"{target}"')
+                    except imaplib.IMAP4.error:
+                        pass
+
+                if copy_typ != "OK":
+                    error_detail = _format_imap_details(copy_resp)
+                    logger.log("ERROR", "stream_batch_copy_failed", {"folder": source_folder, "target": target, "count": len(chunk), "error": error_detail},
+                               console=f"   ❌ Batch copy failed: {source_folder} → {target} ({len(chunk)} msgs){error_detail}")
+                    stats["failed"] += len(chunk)
+                    continue
+
+                store_typ, store_resp = client.uid("STORE", uid_set, "+FLAGS", "(\\Deleted)")
+                need_expunge = True
+                if store_typ != "OK":
+                    logger.log("WARN", "stream_batch_store_failed", {"folder": source_folder, "count": len(chunk), "error": _format_imap_details(store_resp)})
+
+            stats["done"] += len(chunk)
+            if verbose:
+                logger.log("INFO", "stream_batch_moved", {"folder": source_folder, "target": target, "count": len(chunk)},
+                           console=f"   ✅ Moved {len(chunk)} msgs {source_folder} → {target}")
+            if resume_log:
+                for uid in chunk:
+                    resume_log.mark_processed(source_folder, uid)
+
+    if need_expunge:
+        try:
+            client.expunge()
+        except (imaplib.IMAP4.error, AttributeError):
+            pass
+    try:
+        client.close()
+    except (imaplib.IMAP4.error, AttributeError):
+        pass
+
+
 def stream_execute(
     client: imaplib.IMAP4 | None,
     rules: Sequence[dict],
@@ -152,6 +267,9 @@ def stream_execute(
         and b"MOVE" in getattr(client, "capabilities", ())
     )
     processed_count = 0
+    # Batch buffering for the non-backup execution path
+    pending_batch: dict[tuple[str, str], list[tuple[str, str]]] = {}  # (src, tgt) -> [(uid, rule)]
+    last_batch_src: str | None = None
 
     progress_bar = tqdm(
         messages,
@@ -271,206 +389,170 @@ def stream_execute(
             # Actual execution
             assert client is not None
 
-            # Ensure we have the source folder selected
-            if current_folder != msg.folder:
-                if folder_open:
-                    # Flush deferred EXPUNGE before leaving the folder
-                    if pending_expunge:
+            if backup_moved:
+                # Per-message path: manage folder state, backup, then move
+
+                # Ensure we have the source folder selected
+                if current_folder != msg.folder:
+                    if folder_open:
+                        # Flush deferred EXPUNGE before leaving the folder
+                        if pending_expunge:
+                            try:
+                                client.expunge()
+                            except imaplib.IMAP4.error:
+                                pass
+                            pending_expunge = False
                         try:
-                            client.expunge()
+                            client.close()
                         except imaplib.IMAP4.error:
                             pass
-                        pending_expunge = False
-                    try:
-                        client.close()
-                    except imaplib.IMAP4.error:
-                        pass
-                    folder_open = False
+                        folder_open = False
 
-                sel_typ, sel_resp = client.select(f'"{msg.folder}"')
-                if sel_typ != "OK":
-                    logger.log(
-                        "ERROR",
-                        "stream_select_failed",
-                        {"folder": msg.folder, "status": sel_typ},
-                        console=f"   ❌ Failed to select {msg.folder}",
-                    )
-                    stats["failed"] += 1
-                    continue
-
-                current_folder = msg.folder
-                folder_open = True
-
-            # Backup message if requested
-            if backup_moved and backup_dir is not None:
-                try:
-                    backup_result = backup_messages(
-                        client=client,
-                        folder=msg.folder,
-                        uids=[msg.uid],
-                        backup_dir=backup_dir,
-                        backup_type="pre_move",
-                        logger=logger,
-                        show_progress=False,  # Don't show progress for single message
-                        rule_name=rule_name,
-                        target_folder=target,
-                    )
-                    if backup_result.backed_up == 0:
+                    sel_typ, sel_resp = client.select(f'"{msg.folder}"')
+                    if sel_typ != "OK":
                         logger.log(
                             "ERROR",
-                            "stream_backup_failed",
-                            {
-                                "folder": msg.folder,
-                                "uid": msg.uid,
-                                "target": target,
-                            },
-                            console=f"   ❌ Backup failed: {msg.folder}/{msg.uid}",
+                            "stream_select_failed",
+                            {"folder": msg.folder, "status": sel_typ},
+                            console=f"   ❌ Failed to select {msg.folder}",
                         )
                         stats["failed"] += 1
                         continue
-                    if backup_result.failed > 0:
-                        logger.log(
-                            "WARN",
-                            "stream_backup_partial",
-                            {
-                                "folder": msg.folder,
-                                "uid": msg.uid,
-                                "failed": backup_result.failed,
-                            },
-                        )
-                except Exception as exc:
-                    logger.log(
-                        "ERROR",
-                        "stream_backup_error",
-                        {
-                            "folder": msg.folder,
-                            "uid": msg.uid,
-                            "error": str(exc),
-                        },
-                        console=f"   ❌ Backup error: {msg.folder}/{msg.uid}: {exc}",
-                    )
-                    stats["failed"] += 1
-                    continue
 
-            # Move message to target folder
-            try:
-                move_succeeded = False
+                    current_folder = msg.folder
+                    folder_open = True
 
-                if supports_uid_move:
-                    # Single atomic UID MOVE — no STORE or EXPUNGE needed
+                # Backup message
+                if backup_dir is not None:
                     try:
-                        move_typ, move_resp = client.uid("MOVE", msg.uid, f'"{target}"')
-                    except imaplib.IMAP4.error:
-                        move_typ = "NO"
-                        move_resp = None
-
-                    if move_typ != "OK" and _should_try_create_folder(move_resp):
-                        logger.log(
-                            "INFO",
-                            "stream_create_folder",
-                            {"target": target},
-                            console=f"   📂 Creating folder: {target}",
+                        backup_result = backup_messages(
+                            client=client,
+                            folder=msg.folder,
+                            uids=[msg.uid],
+                            backup_dir=backup_dir,
+                            backup_type="pre_move",
+                            logger=logger,
+                            show_progress=False,
+                            rule_name=rule_name,
+                            target_folder=target,
                         )
-                        create_typ, _cr = client.create(f'"{target}"')
-                        if create_typ == "OK":
-                            move_typ, move_resp = client.uid("MOVE", msg.uid, f'"{target}"')
-
-                    if move_typ == "OK":
-                        move_succeeded = True
-
-                if not move_succeeded:
-                    # COPY + STORE + deferred EXPUNGE fallback
-                    copy_typ, copy_resp = client.uid("COPY", msg.uid, f'"{target}"')
-
-                    if copy_typ != "OK":
-                        if _should_try_create_folder(copy_resp):
-                            logger.log(
-                                "INFO",
-                                "stream_create_folder",
-                                {"target": target},
-                                console=f"   📂 Creating folder: {target}",
-                            )
-                            create_typ, _cr = client.create(f'"{target}"')
-                            if create_typ == "OK":
-                                copy_typ, copy_resp = client.uid("COPY", msg.uid, f'"{target}"')
-
-                        if copy_typ != "OK":
-                            error_detail = _format_imap_details(copy_resp)
+                        if backup_result.backed_up == 0:
                             logger.log(
                                 "ERROR",
-                                "stream_copy_failed",
-                                {
-                                    "folder": msg.folder,
-                                    "uid": msg.uid,
-                                    "target": target,
-                                    "error": error_detail,
-                                },
-                                console=f"   ❌ Copy failed: {msg.folder}/{msg.uid} → {target}{error_detail}",
+                                "stream_backup_failed",
+                                {"folder": msg.folder, "uid": msg.uid, "target": target},
+                                console=f"   ❌ Backup failed: {msg.folder}/{msg.uid}",
                             )
                             stats["failed"] += 1
                             continue
-
-                    store_typ, store_resp = client.uid("STORE", msg.uid, "+FLAGS", "(\\Deleted)")
-                    if store_typ != "OK":
-                        error_detail = _format_imap_details(store_resp)
+                        if backup_result.failed > 0:
+                            logger.log(
+                                "WARN",
+                                "stream_backup_partial",
+                                {"folder": msg.folder, "uid": msg.uid, "failed": backup_result.failed},
+                            )
+                    except Exception as exc:
                         logger.log(
                             "ERROR",
-                            "stream_store_failed",
-                            {
-                                "folder": msg.folder,
-                                "uid": msg.uid,
-                                "error": error_detail,
-                            },
-                            console=f"   ⚠️ Failed to mark deleted: {msg.folder}/{msg.uid}{error_detail}",
+                            "stream_backup_error",
+                            {"folder": msg.folder, "uid": msg.uid, "error": str(exc)},
+                            console=f"   ❌ Backup error: {msg.folder}/{msg.uid}: {exc}",
                         )
-                        # Copy succeeded so count as done; expunge not needed
-                        stats["done"] += 1
-                        folder_move_counts[target] = folder_move_counts.get(target, 0) + 1
-                        _update_folder_bars(folder_bars, folder_move_counts)
-                        if verbose:
-                            logger.log(
-                                "INFO",
-                                "stream_success",
-                                {"folder": msg.folder, "uid": msg.uid, "target": target, "rule": rule_name},
-                                console=f"   ✅ Moved {msg.folder}/{msg.uid} → {target}",
-                            )
-                        if resume_log:
-                            resume_log.mark_processed(msg.folder, msg.uid)
+                        stats["failed"] += 1
                         continue
 
-                    # STORE succeeded — defer EXPUNGE to folder boundary
-                    pending_expunge = True
-                    move_succeeded = True
+                # Move message to target folder
+                try:
+                    move_succeeded = False
 
-                # Common success path
-                stats["done"] += 1
+                    if supports_uid_move:
+                        try:
+                            move_typ, move_resp = client.uid("MOVE", msg.uid, f'"{target}"')
+                        except imaplib.IMAP4.error:
+                            move_typ = "NO"
+                            move_resp = None
+
+                        if move_typ != "OK" and _should_try_create_folder(move_resp):
+                            logger.log("INFO", "stream_create_folder", {"target": target}, console=f"   📂 Creating folder: {target}")
+                            create_typ, _cr = client.create(f'"{target}"')
+                            if create_typ == "OK":
+                                move_typ, move_resp = client.uid("MOVE", msg.uid, f'"{target}"')
+
+                        if move_typ == "OK":
+                            move_succeeded = True
+
+                    if not move_succeeded:
+                        copy_typ, copy_resp = client.uid("COPY", msg.uid, f'"{target}"')
+
+                        if copy_typ != "OK":
+                            if _should_try_create_folder(copy_resp):
+                                logger.log("INFO", "stream_create_folder", {"target": target}, console=f"   📂 Creating folder: {target}")
+                                create_typ, _cr = client.create(f'"{target}"')
+                                if create_typ == "OK":
+                                    copy_typ, copy_resp = client.uid("COPY", msg.uid, f'"{target}"')
+
+                            if copy_typ != "OK":
+                                error_detail = _format_imap_details(copy_resp)
+                                logger.log(
+                                    "ERROR", "stream_copy_failed",
+                                    {"folder": msg.folder, "uid": msg.uid, "target": target, "error": error_detail},
+                                    console=f"   ❌ Copy failed: {msg.folder}/{msg.uid} → {target}{error_detail}",
+                                )
+                                stats["failed"] += 1
+                                continue
+
+                        store_typ, store_resp = client.uid("STORE", msg.uid, "+FLAGS", "(\\Deleted)")
+                        if store_typ != "OK":
+                            error_detail = _format_imap_details(store_resp)
+                            logger.log(
+                                "ERROR", "stream_store_failed",
+                                {"folder": msg.folder, "uid": msg.uid, "error": error_detail},
+                                console=f"   ⚠️ Failed to mark deleted: {msg.folder}/{msg.uid}{error_detail}",
+                            )
+                            stats["done"] += 1
+                            folder_move_counts[target] = folder_move_counts.get(target, 0) + 1
+                            _update_folder_bars(folder_bars, folder_move_counts)
+                            if verbose:
+                                logger.log("INFO", "stream_success", {"folder": msg.folder, "uid": msg.uid, "target": target, "rule": rule_name},
+                                           console=f"   ✅ Moved {msg.folder}/{msg.uid} → {target}")
+                            if resume_log:
+                                resume_log.mark_processed(msg.folder, msg.uid)
+                            continue
+
+                        pending_expunge = True
+                        move_succeeded = True
+
+                    stats["done"] += 1
+                    folder_move_counts[target] = folder_move_counts.get(target, 0) + 1
+                    _update_folder_bars(folder_bars, folder_move_counts)
+                    if resume_log:
+                        resume_log.mark_processed(msg.folder, msg.uid)
+                    if verbose:
+                        logger.log("INFO", "stream_success", {"folder": msg.folder, "uid": msg.uid, "target": target, "rule": rule_name},
+                                   console=f"   ✅ Moved {msg.folder}/{msg.uid} → {target}")
+
+                except imaplib.IMAP4.error as exc:
+                    logger.log(
+                        "ERROR", "stream_imap_error",
+                        {"folder": msg.folder, "uid": msg.uid, "target": target, "error": str(exc)},
+                        console=f"   ❌ IMAP error: {msg.folder}/{msg.uid} → {target}: {exc}",
+                    )
+                    stats["failed"] += 1
+
+            else:
+                # Batching path: buffer by (source_folder, target), flush at source folder boundary
+                if last_batch_src is not None and msg.folder != last_batch_src:
+                    _flush_batch_moves(
+                        client, last_batch_src, pending_batch,
+                        stats=stats, resume_log=resume_log, logger=logger,
+                        verbose=verbose, supports_uid_move=supports_uid_move,
+                    )
+                    pending_batch = {k: v for k, v in pending_batch.items() if k[0] != last_batch_src}
+                last_batch_src = msg.folder
+                pending_batch.setdefault((msg.folder, target), []).append((msg.uid, rule_name))
+                # Update display optimistically — moves happen at folder boundary
                 folder_move_counts[target] = folder_move_counts.get(target, 0) + 1
                 _update_folder_bars(folder_bars, folder_move_counts)
-
-                if resume_log:
-                    resume_log.mark_processed(msg.folder, msg.uid)
-
-                if verbose:
-                    logger.log(
-                        "INFO",
-                        "stream_success",
-                        {"folder": msg.folder, "uid": msg.uid, "target": target, "rule": rule_name},
-                        console=f"   ✅ Moved {msg.folder}/{msg.uid} → {target}",
-                    )
-
-            except imaplib.IMAP4.error as exc:
-                logger.log(
-                    "ERROR",
-                    "stream_imap_error",
-                    {
-                        "folder": msg.folder,
-                        "uid": msg.uid,
-                        "target": target,
-                        "error": str(exc),
-                    },
-                    console=f"   ❌ IMAP error: {msg.folder}/{msg.uid} → {target}: {exc}",
-                )
-                stats["failed"] += 1
 
         except Exception as exc:
             logger.log(
@@ -485,7 +567,15 @@ def stream_execute(
         bar.close()
     progress_bar.close()
 
-    # Flush deferred EXPUNGE and close folder if open
+    # Flush remaining batched moves (non-backup path)
+    if pending_batch and last_batch_src is not None and client is not None:
+        _flush_batch_moves(
+            client, last_batch_src, pending_batch,
+            stats=stats, resume_log=resume_log, logger=logger,
+            verbose=verbose, supports_uid_move=supports_uid_move,
+        )
+
+    # Flush deferred EXPUNGE and close folder if open (backup path only)
     if folder_open:
         if pending_expunge:
             try:

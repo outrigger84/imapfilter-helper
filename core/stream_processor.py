@@ -7,6 +7,7 @@ from typing import Generator, NamedTuple
 from core.logging_utils import JsonLogger
 from core.imap_client import safe_search_all
 from core.stream_resume import ResumeLog
+from core.cache_builder import FETCH_BATCH_SIZE, _parse_batch_fetch_response
 
 
 class StreamMessage(NamedTuple):
@@ -14,21 +15,6 @@ class StreamMessage(NamedTuple):
     folder: str
     uid: str
     header_text: str
-
-
-def _coalesce_fetch_payload(msg_data) -> bytes:
-    """Extract header bytes from FETCH response."""
-    if not msg_data:
-        return b""
-    parts: list[bytes] = []
-    for item in msg_data:
-        if isinstance(item, tuple) and len(item) >= 2:
-            payload = item[1]
-            if isinstance(payload, (bytes, bytearray)):
-                parts.append(bytes(payload))
-        elif isinstance(item, (bytes, bytearray)):
-            continue
-    return b"".join(parts)
 
 
 def count_stream_messages(
@@ -159,46 +145,42 @@ def stream_messages(
                 console=f"📂 {folder}: processing {len(uids_to_process)} messages",
             )
 
-            # Stream each message
-            for uid in uids_to_process:
-                uid_value = (
-                    uid.decode("ascii", "ignore")
-                    if isinstance(uid, (bytes, bytearray))
-                    else str(uid)
+            # Fetch headers in batches to minimise IMAP round-trips
+            for batch_start in range(0, len(uids_to_process), FETCH_BATCH_SIZE):
+                batch = uids_to_process[batch_start : batch_start + FETCH_BATCH_SIZE]
+                uid_set = b",".join(
+                    uid if isinstance(uid, (bytes, bytearray)) else str(uid).encode()
+                    for uid in batch
                 )
-                if not uid_value:
+                try:
+                    typ, msg_data = client.uid("FETCH", uid_set, "(BODY.PEEK[HEADER])")
+                except Exception as exc:
+                    logger.log(
+                        "WARN",
+                        "stream_batch_fetch_error",
+                        {"folder": folder, "batch_start": batch_start, "error": str(exc)},
+                    )
                     continue
 
-                try:
-                    typ, msg_data = client.uid("FETCH", uid_value, "(BODY.PEEK[HEADER])")
-                    if typ != "OK":
-                        logger.log(
-                            "WARN",
-                            "stream_message_fetch_failed",
-                            {"folder": folder, "uid": uid_value},
-                        )
-                        continue
+                if typ != "OK":
+                    logger.log(
+                        "WARN",
+                        "stream_batch_fetch_failed",
+                        {"folder": folder, "batch_start": batch_start},
+                    )
+                    continue
 
-                    raw_hdr = _coalesce_fetch_payload(msg_data)
+                parsed = _parse_batch_fetch_response(msg_data)
+                for uid_str, (raw_hdr, _flags, _date) in parsed.items():
                     if not raw_hdr:
                         logger.log(
                             "WARN",
                             "stream_message_empty_header",
-                            {"folder": folder, "uid": uid_value},
+                            {"folder": folder, "uid": uid_str},
                         )
                         continue
-
-                    header_text = raw_hdr.decode(errors="ignore")
-                    yield StreamMessage(folder=folder, uid=uid_value, header_text=header_text)
+                    yield StreamMessage(folder=folder, uid=uid_str, header_text=raw_hdr.decode(errors="ignore"))
                     msg_count += 1
-
-                except Exception as exc:
-                    logger.log(
-                        "WARN",
-                        "stream_message_error",
-                        {"folder": folder, "uid": uid_value, "error": str(exc)},
-                    )
-                    continue
 
             logger.log(
                 "INFO",

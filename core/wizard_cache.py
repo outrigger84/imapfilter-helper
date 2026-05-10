@@ -34,6 +34,9 @@ class WizardCache:
         self.cache_path = cache_path
         self._lock = Lock()
         self._cache: Optional[Dict[str, Any]] = None
+        self._mtime_cache: Dict[str, Tuple[float, float]] = {}  # path -> (mtime, computed_at)
+
+    _MTIME_CACHE_TTL = 5.0  # seconds
 
     def load(self) -> Dict[str, Any]:
         """
@@ -182,14 +185,19 @@ class WizardCache:
             self._cache = self._empty_cache()
             self.save()
 
-    @staticmethod
-    def _rules_effective_mtime(rules_dir: Path) -> float:
-        """Return the effective mtime for the rules directory.
+    def _rules_effective_mtime(self, rules_dir: Path) -> float:
+        """Return the effective mtime for the rules directory, with TTL caching.
 
         Uses the max of the directory mtime and all individual .json file mtimes
         so that edits to existing rule files (which don't update the dir mtime on
         Linux) are detected correctly.
         """
+        key = str(rules_dir)
+        if key in self._mtime_cache:
+            result, computed_at = self._mtime_cache[key]
+            if time.time() - computed_at < self._MTIME_CACHE_TTL:
+                return result
+
         dir_mtime = os.path.getmtime(str(rules_dir))
         try:
             file_mtimes = [
@@ -198,7 +206,9 @@ class WizardCache:
             ]
         except (OSError, ValueError):
             file_mtimes = []
-        return max([dir_mtime] + file_mtimes) if file_mtimes else dir_mtime
+        result = max([dir_mtime] + file_mtimes) if file_mtimes else dir_mtime
+        self._mtime_cache[key] = (result, time.time())
+        return result
 
     def get_coverage(self, rules_dir: Path, cache_db: Path) -> Optional[Dict[str, Any]]:
         """
