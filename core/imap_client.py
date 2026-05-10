@@ -14,7 +14,8 @@ from core.logging_utils import JsonLogger
 
 def _ensure_large_imap_buffer() -> None:
     """Remove imaplib's line-length cap so large SEARCH responses (e.g. huge INBOX) don't abort."""
-    imaplib._MAXLINE = sys.maxsize
+    # sys.maxsize + 1 overflows Py_ssize_t when imaplib calls readline(_MAXLINE + 1)
+    imaplib._MAXLINE = sys.maxsize - 1
 
 
 _FETCH_FOLD_RE = re.compile(rb"\bFETCH\b")
