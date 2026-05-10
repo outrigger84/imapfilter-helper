@@ -1139,6 +1139,25 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                 client.logout()
             except (imaplib.IMAP4.error, imaplib.IMAP4.abort, OSError, EOFError):
                 pass
+
+    if getattr(args, "prune_empty_folders", False):
+        prune_client = None
+        if not args.dry_run:
+            prune_client = imap_login(cfg.paths.secrets_file, logger)
+        try:
+            prune_empty_folders(
+                prune_client,
+                auto=getattr(args, "yes", False),
+                dry_run=args.dry_run,
+                logger=logger,
+            )
+        finally:
+            if prune_client is not None:
+                try:
+                    prune_client.logout()
+                except (imaplib.IMAP4.error, imaplib.IMAP4.abort, OSError, EOFError):
+                    pass
+
     return 0
 
 
