@@ -694,7 +694,7 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
 
         # Resolve folder selection (handles --all-folders, --folder, and --folder-recursive)
         selected = _normalize_folder_list(args.folder)
-        recursive = _normalize_folder_list(args.folder_recursive)
+        recursive = _normalize_folder_list(getattr(args, "folder_recursive", None))
         resolved_folders = _resolve_folders_with_recursion(
             client=client,
             all_folders=args.all_folders,
@@ -716,7 +716,7 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
 
         # Smart auto-detection: parallelize if 5+ folders
         # User can override with --parallel-workers
-        parallel_workers = args.parallel_workers
+        parallel_workers = getattr(args, "parallel_workers", None)
         if parallel_workers is None:
             # Auto-detect: use parallelization for 5+ folders
             parallel_workers = cfg.cache.parallel_workers if len(folders) >= 5 else 1
@@ -839,7 +839,7 @@ def handle_evaluate(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLo
     cfg.executor.dry_run = args.dry_run
     cfg.logging.verbose = args.verbose
     selected = _normalize_folder_list(args.folder)
-    recursive = _normalize_folder_list(args.folder_recursive)
+    recursive = _normalize_folder_list(getattr(args, "folder_recursive", None))
 
     # Expand recursive folders using database
     expanded_recursive = _expand_folders_from_db(db, recursive) if recursive else []
@@ -888,7 +888,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     cfg.executor.verify_moves = getattr(args, "verify_moves", False)
     cfg.logging.verbose = args.verbose
     selected = _normalize_folder_list(args.folder)
-    recursive = _normalize_folder_list(args.folder_recursive)
+    recursive = _normalize_folder_list(getattr(args, "folder_recursive", None))
 
     # Expand recursive folders using database
     expanded_recursive = _expand_folders_from_db(db, recursive) if recursive else []
@@ -1017,7 +1017,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
     client = None if args.dry_run else imap_login(cfg.paths.secrets_file, logger)
     try:
         selected = _normalize_folder_list(args.folder)
-        recursive = _normalize_folder_list(args.folder_recursive)
+        recursive = _normalize_folder_list(getattr(args, "folder_recursive", None))
 
         # For build-cache phase, expand folders using IMAP
         if args.all_folders and client is not None:
@@ -1172,7 +1172,7 @@ def handle_eval_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: Js
     client = None if args.dry_run else imap_login(cfg.paths.secrets_file, logger)
     try:
         selected = _normalize_folder_list(args.folder)
-        recursive = _normalize_folder_list(args.folder_recursive)
+        recursive = _normalize_folder_list(getattr(args, "folder_recursive", None))
 
         # Expand recursive folders using database
         expanded_recursive = _expand_folders_from_db(db, recursive) if recursive else []
@@ -1292,7 +1292,7 @@ def handle_stream(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogg
 
     # Determine which folders to process
     selected = _normalize_folder_list(args.folder)
-    recursive = _normalize_folder_list(args.folder_recursive)
+    recursive = _normalize_folder_list(getattr(args, "folder_recursive", None))
 
     if args.all_folders:
         client_init = imap_login(cfg.paths.secrets_file, logger)
