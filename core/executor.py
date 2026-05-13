@@ -3650,16 +3650,23 @@ def execute_actions_parallel(
             console=("📂 Execution plan:" + (f"\n{lines}" if lines else "")),
         )
 
-    # Split large folders into per-worker chunks (mirrors cache builder mega-folder approach).
-    # Each chunk becomes its own future; workers within the same folder use defer_expunge=True
-    # so EXPUNGE is issued once by the coordinator after all chunks complete.
+    # Split large folders into per-worker chunks only when there are fewer source
+    # folders than workers.  When folders >= workers, each worker handles a
+    # different folder and chunking would only cause multiple workers to compete
+    # on the same IMAP mailbox — the server serializes concurrent writes to the
+    # same folder, so chunks of the same folder never run faster in parallel.
     _MIN_CHUNK_SIZE = 10  # minimum actions per chunk before splitting makes sense
     chunk_tasks: list[tuple[str, int, int, list[dict]]] = []  # (folder, chunk_idx, n_chunks, actions)
     expunge_folders: list[str] = []  # folders whose EXPUNGE must be deferred
 
+    should_chunk = len(sorted_folders) < max_workers
+
     for folder in sorted_folders:
         actions = folder_actions[folder]
-        n_chunks = min(max_workers, (len(actions) + _MIN_CHUNK_SIZE - 1) // _MIN_CHUNK_SIZE)
+        if should_chunk:
+            n_chunks = min(max_workers, (len(actions) + _MIN_CHUNK_SIZE - 1) // _MIN_CHUNK_SIZE)
+        else:
+            n_chunks = 1
         if n_chunks > 1:
             chunk_size = (len(actions) + n_chunks - 1) // n_chunks
             chunks = [actions[i:i + chunk_size] for i in range(0, len(actions), chunk_size)]
