@@ -906,6 +906,143 @@ def _perform_batch_keyword_operations(
     return actions_done, actions_failed
 
 
+def _perform_batch_move_operations(
+    client: imaplib.IMAP4,
+    main_db: sqlite3.Connection,
+    folder: str,
+    target: str | None,
+    actions: list[dict],
+    *,
+    supports_uid_move: bool,
+    backup_moved: bool = False,
+    backup_dir: Path | None = None,
+    logger: JsonLogger | None = None,
+) -> tuple[int, int, list[tuple[dict, str | None]]]:
+    """
+    Move all UIDs in *actions* from *folder* to *target* with O(1) IMAP round-trips.
+
+    The caller must have already SELECT-ed *folder*.  Returns
+    (done_count, failed_count, successful_moves) where each successful_moves entry
+    is (action, None) — message_id is omitted because _verify_move_operation skips
+    verification when message_id is None, which is acceptable for batch moves.
+
+    Falls back to per-message _perform_move_operation when backup is enabled or
+    when the batch IMAP command fails.
+    """
+    _BATCH_SIZE = 500  # stay within ~8 KB IMAP command line limit
+
+    if not actions:
+        return 0, 0, []
+
+    # When there is no target or backup is needed, fall back to per-message so
+    # _perform_move_operation can fetch and save each body before deletion.
+    if not target or (backup_moved and backup_dir is not None):
+        done = failed = 0
+        successful_moves: list[tuple[dict, str | None]] = []
+        for action in actions:
+            status, _ = _perform_move_operation(
+                client=client,
+                main_db=main_db,
+                action=action,
+                verify_moves=False,
+                backup_moved=backup_moved,
+                backup_dir=backup_dir,
+                dry_run=False,
+                supports_uid_move=supports_uid_move,
+                logger=logger,
+                verbose=False,
+            )
+            if status == "done":
+                done += 1
+                successful_moves.append((action, None))
+            else:
+                failed += 1
+        return done, failed, successful_moves
+
+    encoded_target = _encode_mailbox_utf7(target)
+
+    # Filter out same-folder no-ops before building the UID set.
+    to_move: list[dict] = []
+    for action in actions:
+        if action["folder"] == target:
+            main_db.execute(
+                "UPDATE actions SET status='skipped', executed_at=?, error_message=? WHERE id=?",
+                (now_iso(), "Already in target folder", action["id"]),
+            )
+        else:
+            to_move.append(action)
+    if not to_move:
+        main_db.commit()
+        return 0, 0, []
+
+    done = failed = 0
+    successful_moves = []
+    fallback_actions: list[dict] = []
+    chunks = [to_move[i : i + _BATCH_SIZE] for i in range(0, len(to_move), _BATCH_SIZE)]
+
+    for chunk in chunks:
+        uid_set = ",".join(a["uid"] for a in chunk if a.get("uid"))
+        if not uid_set:
+            continue
+
+        chunk_ok = False
+        try:
+            if supports_uid_move:
+                b_typ, _ = client.uid("MOVE", uid_set, f'"{encoded_target}"')
+                chunk_ok = b_typ == "OK"
+            else:
+                b_typ, _ = client.uid("COPY", uid_set, f'"{encoded_target}"')
+                if b_typ == "OK":
+                    s_typ, _ = client.uid("STORE", uid_set, "+FLAGS", "(\\Deleted)")
+                    chunk_ok = s_typ == "OK"
+        except imaplib.IMAP4.error as exc:
+            if logger:
+                logger.log(
+                    "WARN",
+                    "worker_batch_move_failed",
+                    {"folder": folder, "target": target, "uid_count": len(chunk), "error": str(exc)},
+                )
+
+        if chunk_ok:
+            ts = now_iso()
+            for action in chunk:
+                main_db.execute(
+                    "UPDATE actions SET status='done', executed_at=? WHERE id=?",
+                    (ts, action["id"]),
+                )
+                main_db.execute(
+                    "DELETE FROM headers WHERE folder=? AND uid=?",
+                    (folder, action["uid"]),
+                )
+                successful_moves.append((action, None))
+            main_db.commit()
+            done += len(chunk)
+        else:
+            fallback_actions.extend(chunk)
+
+    # Per-message fallback for any chunks the batch command rejected.
+    for action in fallback_actions:
+        status, _ = _perform_move_operation(
+            client=client,
+            main_db=main_db,
+            action=action,
+            verify_moves=False,
+            backup_moved=False,
+            backup_dir=None,
+            dry_run=False,
+            supports_uid_move=supports_uid_move,
+            logger=logger,
+            verbose=False,
+        )
+        if status == "done":
+            done += 1
+            successful_moves.append((action, None))
+        else:
+            failed += 1
+
+    return done, failed, successful_moves
+
+
 def _perform_keyword_operation(
     client: imaplib.IMAP4,
     temp_db: sqlite3.Connection,
@@ -3197,6 +3334,7 @@ def _execute_folder_worker(
     # Open main database with 30-second busy timeout
     main_db = None
     client = None
+    client_healthy = True  # set False on SSL/socket error so we discard rather than recycle
     actions_done = 0
     actions_failed = 0
 
@@ -3312,68 +3450,28 @@ def _execute_folder_worker(
                 # Collect successful move actions for verification
                 successful_moves: list[tuple[dict, str | None]] = []
 
-                # Process move actions individually (they need selective logic)
+                # Process move actions in batch (one IMAP command per folder/target pair
+                # instead of one command per message).
                 logger.log("DEBUG", "worker_processing_moves_start", {"worker_id": worker_id, "folder": grp_folder, "count": len(move_actions)})
-                for action in move_actions:
-                    uid = action["uid"]
-                    action_type = action.get("action_type", "move")
-
-                    try:
-                        status, error_msg = _perform_move_operation(
-                            client=client,
-                            main_db=main_db,
-                            action=action,
-                            verify_moves=False,  # Verification done in main thread before EXPUNGE
-                            backup_moved=backup_moved,
-                            backup_dir=backup_dir,
-                            dry_run=False,  # Real execution
-                            supports_uid_move=supports_uid_move,
-                            logger=logger,
-                            verbose=False,  # Avoid excessive logging in worker
-                        )
-
-                        if tick_callback:
+                if move_actions:
+                    batch_done, batch_failed, batch_successful = _perform_batch_move_operations(
+                        client=client,
+                        main_db=main_db,
+                        folder=grp_folder,
+                        target=target,
+                        actions=move_actions,
+                        supports_uid_move=supports_uid_move,
+                        backup_moved=backup_moved,
+                        backup_dir=backup_dir,
+                        logger=logger,
+                    )
+                    if tick_callback:
+                        for _ in range(batch_done + batch_failed):
                             tick_callback(worker_id)
-                        if status == "done":
-                            actions_done += 1
-                            # Track for verification if needed
-                            if verify_moves and target:
-                                # Get Message-ID from main database if available
-                                message_id = None
-                                try:
-                                    row = main_db.execute(
-                                        "SELECT data FROM headers WHERE folder=? AND uid=?",
-                                        (grp_folder, uid)
-                                    ).fetchone()
-                                    if row and row[0]:
-                                        data = json.loads(row[0])
-                                        header_text = data.get("header", "")
-                                        # Extract Message-ID with regex
-                                        match = re.search(
-                                            r'Message-I[Dd]:\s*<?(\[?[^\]>\s]+\]?)>?',
-                                            header_text,
-                                            re.IGNORECASE | re.MULTILINE
-                                        )
-                                        if match:
-                                            message_id = match.group(1).strip()
-                                except Exception:
-                                    pass
-                                successful_moves.append((action, message_id))
-                        else:
-                            actions_failed += 1
-
-                    except Exception as exc:
-                        if tick_callback:
-                            tick_callback(worker_id)
-                        error_msg = str(exc)
-                        main_db.execute(
-                            "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
-                            ("failed", now_iso(), error_msg, action["id"]),
-                        )
-                        main_db.commit()
-                        actions_failed += 1
-                        if strict:
-                            raise
+                    actions_done += batch_done
+                    actions_failed += batch_failed
+                    if verify_moves and target:
+                        successful_moves.extend(batch_successful)
 
                 # EXPUNGE folder (delete flagged messages).
                 # Skipped when defer_expunge=True: caller will issue a single
@@ -3413,6 +3511,9 @@ def _execute_folder_worker(
                 main_db.commit()
 
             except Exception as exc:
+                # SSL/socket errors mean the connection is unrecoverable.
+                if isinstance(exc, (imaplib.IMAP4.abort, OSError)):
+                    client_healthy = False
                 logger.log(
                     "ERROR",
                     "execute_folder_group_failed",
@@ -3420,6 +3521,9 @@ def _execute_folder_worker(
                 )
                 if strict:
                     raise
+                if not client_healthy:
+                    # No point trying remaining groups on a broken connection.
+                    break
 
     except Exception as exc:
         logger.log(
@@ -3438,7 +3542,10 @@ def _execute_folder_worker(
                 pass
         if client and not dry_run:
             try:
-                pool.release(client)
+                if client_healthy:
+                    pool.release(client)
+                else:
+                    pool.discard(client)
             except Exception:
                 pass
 
