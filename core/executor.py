@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import base64
-import concurrent.futures
 import datetime
 import gc
 import json
 import os
+import queue as _queue
 import re
 import sqlite3
 import tempfile
@@ -21,7 +21,6 @@ from typing import Any, Callable, Dict, Iterable, Sequence
 from tqdm import tqdm
 
 from core.backup import backup_messages, backup_all_cached_messages, BackupResult
-from core.connection_pool import IMAPConnectionPool
 from core.database import init_db
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 
@@ -3284,7 +3283,7 @@ def _precreate_target_folders(
 
 
 def _execute_folder_worker(
-    pool: IMAPConnectionPool,
+    conn: imaplib.IMAP4 | None,
     db_path: Path,
     folder: str,
     actions: list[dict],
@@ -3296,34 +3295,27 @@ def _execute_folder_worker(
     backup_all: bool = False,
     backup_dir: Path | None = None,
     logger: JsonLogger | None = None,
-    defer_expunge: bool = False,
-    status_callback: Callable[[int, str, int], None] | None = None,
-    tick_callback: Callable[[int], None] | None = None,
 ) -> tuple[str, int, int]:
     """
     Process all actions for a single source folder (runs in worker thread).
 
-    Each worker:
-    1. Opens the main SQLite database with 30-second busy timeout
-    2. Acquires an IMAP connection from the pool
-    3. Processes all actions for this folder
-    4. Updates main database directly with results
-    5. Returns success/failure counts
+    The caller owns the IMAP connection lifetime — this function never
+    creates or closes connections.  Connection errors (IMAP4.abort, OSError)
+    are re-raised so the caller can reconnect and retry the folder.
 
     Args:
-        pool: IMAP connection pool
+        conn: IMAP connection owned by the caller (None in dry-run mode)
         db_path: Path to main SQLite database
         folder: Source folder to process
         actions: List of action dicts for this folder
         worker_id: Worker ID for logging
         dry_run: Preview actions without executing
         strict: Abort on first error
-        verify_moves: Verify moves before EXPUNGE (to prevent accidental deletion)
+        verify_moves: Verify moves with Message-ID searches
         backup_moved: Backup messages before moving
-        backup_all: Backup all cached messages
+        backup_all: Backup all cached messages (unused in worker; handled by caller)
         backup_dir: Directory for backups
         logger: JsonLogger for logging
-        defer_expunge: When True, skip EXPUNGE (caller will issue it after all chunks complete)
 
     Returns:
         Tuple of (folder_name, actions_done, actions_failed)
@@ -3331,24 +3323,16 @@ def _execute_folder_worker(
     if logger is None:
         logger = JsonLogger(Path("imapfilter.log"))
 
-    # Open main database with 30-second busy timeout
     main_db = None
-    client = None
-    client_healthy = True  # set False on SSL/socket error so we discard rather than recycle
     actions_done = 0
     actions_failed = 0
 
     try:
         logger.log("DEBUG", "worker_start", {"worker_id": worker_id, "folder": folder})
-        # Use 60-second timeout to allow time for other workers' transactions to complete
         main_db = sqlite3.connect(str(db_path), timeout=60.0)
         logger.log("DEBUG", "worker_db_opened", {"worker_id": worker_id, "folder": folder})
 
-        # Acquire IMAP connection from pool
-        if not dry_run:
-            logger.log("DEBUG", "worker_acquiring_connection", {"worker_id": worker_id, "folder": folder})
-            client = pool.acquire()
-            logger.log("DEBUG", "worker_connection_acquired", {"worker_id": worker_id, "folder": folder})
+        client = conn
 
         # Group actions by (folder, target) tuple for batch processing
         logger.log("DEBUG", "worker_grouping_actions", {"worker_id": worker_id, "folder": folder})
@@ -3361,16 +3345,8 @@ def _execute_folder_worker(
 
         logger.log("DEBUG", "worker_actions_grouped", {"worker_id": worker_id, "folder": folder, "group_count": len(action_groups)})
 
-        # Process each group
         for (grp_folder, target), group_actions in action_groups.items():
             logger.log("DEBUG", "worker_processing_group", {"worker_id": worker_id, "folder": grp_folder, "target": target, "action_count": len(group_actions)})
-            if status_callback:
-                _f = grp_folder[-38:] if len(grp_folder) > 38 else grp_folder
-                _t = (target or "∅")[-22:] if target and len(target or "") > 22 else (target or "∅")
-                # Separate move count so the bar can show accurate total
-                _n_moves = sum(1 for a in group_actions if a.get("action_type", "move") == "move")
-                status_callback(worker_id, f"{_f} → {_t}", _n_moves)
-            # Handle dry-run mode
             if dry_run:
                 for action in group_actions:
                     main_db.execute(
@@ -3381,9 +3357,8 @@ def _execute_folder_worker(
                 main_db.commit()
                 continue
 
-            # Real execution
+            # Real execution — IMAP4.abort/OSError bubble up for caller to reconnect
             try:
-                # SELECT source folder (read-only=False for modifications)
                 logger.log("DEBUG", "worker_selecting_folder", {"worker_id": worker_id, "folder": grp_folder})
                 sel_typ, sel_resp = client.select(f'"{grp_folder}"', readonly=False)
                 logger.log("DEBUG", "worker_folder_selected", {"worker_id": worker_id, "folder": grp_folder, "status": sel_typ})
@@ -3400,10 +3375,8 @@ def _execute_folder_worker(
                         raise imaplib.IMAP4.error(error_msg)
                     continue
 
-                # Check if server supports UID MOVE
                 supports_uid_move = hasattr(client, "capabilities") and b"MOVE" in getattr(client, "capabilities", ())
 
-                # Separate keyword and move actions for batch processing
                 keyword_actions_set = [a for a in group_actions if a.get("action_type") == "set_keywords"]
                 keyword_actions_remove = [a for a in group_actions if a.get("action_type") == "remove_keywords"]
                 move_actions = [a for a in group_actions if a.get("action_type", "move") == "move"]
@@ -3413,10 +3386,9 @@ def _execute_folder_worker(
                     "folder": grp_folder,
                     "set_keywords": len(keyword_actions_set),
                     "remove_keywords": len(keyword_actions_remove),
-                    "moves": len(move_actions)
+                    "moves": len(move_actions),
                 })
 
-                # Process keyword actions in batches
                 if keyword_actions_set:
                     logger.log("DEBUG", "worker_processing_keywords_set", {"worker_id": worker_id, "folder": grp_folder, "count": len(keyword_actions_set)})
                     batch_done, batch_failed = _perform_batch_keyword_operations(
@@ -3447,11 +3419,8 @@ def _execute_folder_worker(
                     actions_done += batch_done
                     actions_failed += batch_failed
 
-                # Collect successful move actions for verification
                 successful_moves: list[tuple[dict, str | None]] = []
 
-                # Process move actions in batch (one IMAP command per folder/target pair
-                # instead of one command per message).
                 logger.log("DEBUG", "worker_processing_moves_start", {"worker_id": worker_id, "folder": grp_folder, "count": len(move_actions)})
                 if move_actions:
                     batch_done, batch_failed, batch_successful = _perform_batch_move_operations(
@@ -3465,26 +3434,17 @@ def _execute_folder_worker(
                         backup_dir=backup_dir,
                         logger=logger,
                     )
-                    if tick_callback:
-                        for _ in range(batch_done + batch_failed):
-                            tick_callback(worker_id)
                     actions_done += batch_done
                     actions_failed += batch_failed
                     if verify_moves and target:
                         successful_moves.extend(batch_successful)
 
-                # EXPUNGE folder (delete flagged messages).
-                # Skipped when defer_expunge=True: caller will issue a single
-                # EXPUNGE after all chunk workers for this folder complete.
-                if not dry_run and not defer_expunge:
-                    try:
-                        client.expunge()
-                    except Exception:
-                        pass  # Best effort
+                try:
+                    client.expunge()
+                except Exception:
+                    pass  # Best effort
 
-                # Verify successful moves (before EXPUNGE in main thread flow)
-                # In parallel worker context, verification is handled by main thread
-                if verify_moves and successful_moves and not dry_run:
+                if verify_moves and successful_moves:
                     for action, message_id in successful_moves:
                         try:
                             _verify_move_operation(
@@ -3493,10 +3453,9 @@ def _execute_folder_worker(
                                 action=action,
                                 message_id=message_id,
                                 logger=logger,
-                                verbose=False,  # Avoid excessive logging in worker
+                                verbose=False,
                             )
                         except Exception as verify_exc:
-                            # Log verification error but don't fail
                             if logger:
                                 logger.log(
                                     "WARN",
@@ -3510,10 +3469,9 @@ def _execute_folder_worker(
 
                 main_db.commit()
 
+            except (imaplib.IMAP4.abort, OSError):
+                raise  # Connection error — let the worker loop reconnect
             except Exception as exc:
-                # SSL/socket errors mean the connection is unrecoverable.
-                if isinstance(exc, (imaplib.IMAP4.abort, OSError)):
-                    client_healthy = False
                 logger.log(
                     "ERROR",
                     "execute_folder_group_failed",
@@ -3521,10 +3479,9 @@ def _execute_folder_worker(
                 )
                 if strict:
                     raise
-                if not client_healthy:
-                    # No point trying remaining groups on a broken connection.
-                    break
 
+    except (imaplib.IMAP4.abort, OSError):
+        raise  # Propagate to worker loop for reconnection
     except Exception as exc:
         logger.log(
             "ERROR",
@@ -3538,14 +3495,6 @@ def _execute_folder_worker(
         if main_db:
             try:
                 main_db.close()
-            except Exception:
-                pass
-        if client and not dry_run:
-            try:
-                if client_healthy:
-                    pool.release(client)
-                else:
-                    pool.discard(client)
             except Exception:
                 pass
 
@@ -3769,195 +3718,141 @@ def execute_actions_parallel(
             console=("📂 Execution plan:" + (f"\n{lines}" if lines else "")),
         )
 
-    # Split large folders into per-worker chunks only when there are fewer source
-    # folders than workers.  When folders >= workers, each worker handles a
-    # different folder and chunking would only cause multiple workers to compete
-    # on the same IMAP mailbox — the server serializes concurrent writes to the
-    # same folder, so chunks of the same folder never run faster in parallel.
-    _MIN_CHUNK_SIZE = 10  # minimum actions per chunk before splitting makes sense
-    chunk_tasks: list[tuple[str, int, int, list[dict]]] = []  # (folder, chunk_idx, n_chunks, actions)
-    expunge_folders: list[str] = []  # folders whose EXPUNGE must be deferred
-
-    should_chunk = len(sorted_folders) < max_workers
-
-    for folder in sorted_folders:
-        actions = folder_actions[folder]
-        if should_chunk:
-            n_chunks = min(max_workers, (len(actions) + _MIN_CHUNK_SIZE - 1) // _MIN_CHUNK_SIZE)
-        else:
-            n_chunks = 1
-        if n_chunks > 1:
-            chunk_size = (len(actions) + n_chunks - 1) // n_chunks
-            chunks = [actions[i:i + chunk_size] for i in range(0, len(actions), chunk_size)]
-            expunge_folders.append(folder)
-        else:
-            chunks = [actions]
-        for chunk_idx, chunk in enumerate(chunks):
-            chunk_tasks.append((folder, chunk_idx, len(chunks), chunk))
+    from core.imap_client import imap_login as _imap_login
 
     logger.log(
         "INFO",
         "execute_parallel_folders",
-        {"folder_count": len(sorted_folders), "task_count": len(chunk_tasks), "max_workers": max_workers},
-        console=f"🔧 Processing {len(sorted_folders)} folders ({len(chunk_tasks)} tasks) with {max_workers} workers",
+        {"folder_count": len(sorted_folders), "max_workers": max_workers},
+        console=f"🔧 Processing {len(sorted_folders)} folders with {max_workers} workers",
     )
 
-    # Set up progress bar: one tick per completed chunk task
+    # One task per folder — no chunking.  Each worker owns its connection for its
+    # entire lifetime, eliminating the shared-pool acquire/release cycle that caused
+    # the previous freeze (NOOP blocking in release() while holding the last slot).
+    work_q: _queue.Queue[tuple[str, list[dict]]] = _queue.Queue()
+    for f in sorted_folders:
+        work_q.put((f, folder_actions[f]))
+
     folders_bar = tqdm(
-        total=len(chunk_tasks),
+        total=len(sorted_folders),
         desc="📦 Processing folders",
-        unit="task",
+        unit="folder",
         dynamic_ncols=True,
         leave=True,
         position=0,
         disable=not show_progress,
     )
 
-    # Per-worker progress bars (one per worker slot, showing current folder/target + move progress)
-    _worker_lock = threading.Lock()
-    worker_bars: list[tqdm] = []
-    if show_progress:
-        for _i in range(max_workers):
-            worker_bars.append(tqdm(
-                total=0,
-                desc=f"   W{_i} │ idle",
-                unit="msg",
-                dynamic_ncols=True,
-                position=_i + 1,
-                leave=False,
-            ))
-
-    def _worker_status_callback(wid: int, desc: str, n_moves: int) -> None:
-        with _worker_lock:
-            if wid < len(worker_bars):
-                bar = worker_bars[wid]
-                bar.n = 0
-                bar.total = n_moves
-                bar.set_description(f"   W{wid} │ {desc}", refresh=False)
-                bar.refresh()
-
-    def _worker_tick_callback(wid: int) -> None:
-        with _worker_lock:
-            if wid < len(worker_bars):
-                worker_bars[wid].update(1)
-
-    # Create connection pool
-    pool = IMAPConnectionPool(secrets_path, max_workers, logger)
 
     total_done = 0
     total_failed = 0
+    _stats_lock = threading.Lock()
+    _first_error: list[Exception] = []  # captures first fatal error for strict mode
 
-    try:
-        logger.log("DEBUG", "executor_creating_pool", {"max_workers": max_workers, "task_count": len(chunk_tasks)})
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures: dict[concurrent.futures.Future, tuple[str, int, int]] = {}
-            wid_pending: dict[int, int] = {}  # tasks remaining per worker-bar slot
-            for folder, chunk_idx, n_chunks, chunk in chunk_tasks:
-                worker_id = len(futures) % max_workers
-                wid_pending[worker_id] = wid_pending.get(worker_id, 0) + 1
-                logger.log("DEBUG", "executor_submitting_worker", {
-                    "worker_id": worker_id, "folder": folder,
-                    "chunk": chunk_idx, "n_chunks": n_chunks, "action_count": len(chunk),
-                })
-                future = executor.submit(
-                    _execute_folder_worker,
-                    pool=pool,
-                    db_path=db_path,
-                    folder=folder,
-                    actions=chunk,
-                    worker_id=worker_id,
-                    dry_run=dry_run,
-                    strict=strict,
-                    verify_moves=verify_moves,
-                    backup_moved=backup_moved,
-                    backup_all=backup_all,
-                    backup_dir=backup_dir,
-                    logger=logger,
-                    defer_expunge=(n_chunks > 1),
-                    status_callback=_worker_status_callback,
-                    tick_callback=_worker_tick_callback,
-                )
-                futures[future] = (folder, chunk_idx, n_chunks, worker_id)
-
-            logger.log("DEBUG", "executor_waiting_for_results", {"future_count": len(futures)})
-            for future in concurrent.futures.as_completed(futures):
-                folder, chunk_idx, n_chunks, wid = futures[future]
-                try:
-                    folder_name, actions_done, actions_failed = future.result()
-                    total_done += actions_done
-                    total_failed += actions_failed
-                    with _worker_lock:
-                        wid_pending[wid] -= 1
-                        if wid < len(worker_bars) and wid_pending[wid] == 0:
-                            bar = worker_bars[wid]
-                            bar.n = 0
-                            bar.total = 0
-                            bar.set_description(f"   W{wid} │ idle", refresh=False)
-                            bar.refresh()
-                    _suffix = f", {actions_failed} failed" if actions_failed else ""
-                    logger.log(
-                        "INFO",
-                        "execute_folder_done",
-                        {"folder": folder_name, "done": actions_done, "failed": actions_failed},
-                        console=f"  ✅ {folder_name}: {actions_done} done{_suffix}",
-                    )
-                    folders_bar.set_postfix_str(f"Last: {folder_name}")
-                    folders_bar.update(1)
-                except Exception as exc:
-                    with _worker_lock:
-                        wid_pending[wid] = max(0, wid_pending.get(wid, 1) - 1)
-                        if wid < len(worker_bars):
-                            bar = worker_bars[wid]
-                            bar.n = 0
-                            bar.total = 0
-                            bar.set_description(f"   W{wid} │ ❌ failed", refresh=False)
-                            bar.refresh()
-                    logger.log(
-                        "ERROR",
-                        "execute_folder_worker_failed",
-                        {"folder": folder, "chunk": chunk_idx, "error": str(exc)},
-                        console=f"❌ Worker failed for {folder} (chunk {chunk_idx}): {exc}",
-                    )
-                    folders_bar.update(1)
-                    if strict:
-                        for f in futures:
-                            f.cancel()
-                        raise
-
-        folders_bar.close()
-        for _bar in worker_bars:
-            _bar.close()
-
-    finally:
-        pool.shutdown()
-
-    # Deferred EXPUNGE: issue one EXPUNGE per folder that was split into chunks.
-    # Workers used defer_expunge=True so \Deleted flags are set but not yet purged.
-    if expunge_folders and not dry_run:
-        from core.imap_client import imap_login as _imap_login
-        logger.log(
-            "INFO",
-            "execute_deferred_expunge",
-            {"folders": expunge_folders},
-            console=f"🗑️  Expunging {len(expunge_folders)} chunked folder(s)...",
-        )
-        expunge_client = _imap_login(secrets_path, logger)
+    def _worker(worker_id: int) -> None:
+        nonlocal total_done, total_failed
+        conn: imaplib.IMAP4 | None = None
+        if not dry_run:
+            conn = _imap_login(secrets_path, logger)
         try:
-            for folder in expunge_folders:
+            while True:
+                if strict and _first_error:
+                    break
                 try:
-                    expunge_client.select(f'"{folder}"', readonly=False)
-                    expunge_client.expunge()
-                except Exception as exc:
+                    wfolder, wactions = work_q.get_nowait()
+                except _queue.Empty:
+                    break
+                done = failed = 0
+                try:
+                    _, done, failed = _execute_folder_worker(
+                        conn=conn,
+                        db_path=db_path,
+                        folder=wfolder,
+                        actions=wactions,
+                        worker_id=worker_id,
+                        dry_run=dry_run,
+                        strict=strict,
+                        verify_moves=verify_moves,
+                        backup_moved=backup_moved,
+                        backup_all=backup_all,
+                        backup_dir=backup_dir,
+                        logger=logger,
+                    )
+                except (imaplib.IMAP4.abort, OSError) as conn_exc:
                     logger.log(
                         "WARN",
-                        "execute_deferred_expunge_failed",
-                        {"folder": folder, "error": str(exc)},
+                        "worker_reconnect",
+                        {"worker_id": worker_id, "folder": wfolder, "error": str(conn_exc)},
+                        console=f"🔄 Worker {worker_id} reconnecting after connection error",
                     )
+                    if conn is not None:
+                        try:
+                            conn.shutdown()
+                        except Exception:
+                            pass
+                    conn = None
+                    if not dry_run:
+                        try:
+                            conn = _imap_login(secrets_path, logger)
+                            _, done, failed = _execute_folder_worker(
+                                conn=conn,
+                                db_path=db_path,
+                                folder=wfolder,
+                                actions=wactions,
+                                worker_id=worker_id,
+                                dry_run=dry_run,
+                                strict=strict,
+                                verify_moves=verify_moves,
+                                backup_moved=backup_moved,
+                                backup_all=backup_all,
+                                backup_dir=backup_dir,
+                                logger=logger,
+                            )
+                        except Exception as retry_exc:
+                            logger.log(
+                                "ERROR",
+                                "worker_retry_failed",
+                                {"worker_id": worker_id, "folder": wfolder, "error": str(retry_exc)},
+                                console=f"❌ Worker {worker_id} retry failed for {wfolder}: {retry_exc}",
+                            )
+                            failed = len(wactions)
+                            if strict:
+                                _first_error.append(retry_exc)
+                except Exception as exc:
+                    logger.log(
+                        "ERROR",
+                        "worker_folder_error",
+                        {"worker_id": worker_id, "folder": wfolder, "error": str(exc)},
+                    )
+                    failed = len(wactions)
+                    if strict:
+                        _first_error.append(exc)
+                with _stats_lock:
+                    total_done += done
+                    total_failed += failed
+                folders_bar.set_postfix_str(f"Last: {wfolder}")
+                folders_bar.update(1)
         finally:
-            try:
-                expunge_client.logout()
-            except Exception:
-                pass
+            if conn is not None:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+
+    threads = [
+        threading.Thread(target=_worker, args=(i,), daemon=True)
+        for i in range(max_workers)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    folders_bar.close()
+
+    if strict and _first_error:
+        raise _first_error[0]
 
     timer.stop()
     timer.count = total_done

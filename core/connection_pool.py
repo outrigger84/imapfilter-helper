@@ -79,20 +79,10 @@ class IMAPConnectionPool:
         """
         Release a connection back to the pool.
 
-        Sends NOOP before returning so any pending server responses (e.g.
-        unsolicited EXISTS/EXPUNGE notifications) are consumed and the
-        connection's SSL buffer is clean for the next caller.  If NOOP fails
-        the connection is discarded instead so a corrupted socket never
-        re-enters the pool.
-
         Args:
             conn: The IMAP connection to return to the pool
         """
-        try:
-            conn.noop()
-            self._pool.put(conn)
-        except Exception:
-            self.discard(conn)
+        self._pool.put(conn)
 
     def discard(self, conn: imaplib.IMAP4_SSL) -> None:
         """
