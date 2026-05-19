@@ -526,6 +526,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output .md path (default: data/review_YYYYMMDD_HHMMSS.md)",
     )
 
+    p_classify = sub.add_parser(
+        "review-sections",
+        help="Browse folders by section and flag mis-targeted section assignments",
+    )
+    p_classify.add_argument(
+        "--section",
+        action="append",
+        dest="sections",
+        help="Limit to specific top-level section(s) (can be repeated)",
+    )
+    p_classify.add_argument(
+        "--email-limit",
+        type=int,
+        default=200,
+        help="Max emails to load per folder (default: 200)",
+    )
+    p_classify.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output .md path (default: data/review_sections_YYYYMMDD_HHMMSS.md)",
+    )
+    p_classify.add_argument(
+        "--systematic",
+        action="store_true",
+        help="Step through every folder one-by-one with ok/flag/skip/prev navigation",
+    )
+
     p_mbox = sub.add_parser(
         "mbox-import",
         help="Upload an MBOX file to IMAP, routing each message directly to its target folder via rules",
@@ -1585,6 +1613,26 @@ def handle_review(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogg
     )
 
 
+def handle_review_sections(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
+    """Handle the ``review-sections`` command for folder section classification review."""
+
+    del db, logger  # Unused – kept for consistent handler signature
+
+    from core.tools.folder_classifier import launch_folder_classifier
+
+    from datetime import datetime
+    output_path = args.output or (
+        cfg.paths.data_dir / f"review_sections_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+    )
+    return launch_folder_classifier(
+        cfg=cfg,
+        output_path=output_path,
+        sections=getattr(args, "sections", None),
+        email_limit=getattr(args, "email_limit", 200),
+        systematic=getattr(args, "systematic", False),
+    )
+
+
 def handle_mbox_import(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
     """Handle the ``mbox-import`` command."""
     from core.mbox_importer import run_mbox_import
@@ -1830,6 +1878,7 @@ COMMAND_HANDLERS: dict[str, Handler] = {
     "check-conflicts": handle_check_conflicts,
     "view-cache": handle_view_cache,
     "review": handle_review,
+    "review-sections": handle_review_sections,
     "mbox-import": handle_mbox_import,
 }
 
@@ -1884,7 +1933,7 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
     logger = JsonLogger(cfg.paths.log_file, notifier=notifier)
 
     # Validate cache access based on command
-    read_only_commands = {"evaluate", "execute", "eval-execute", "check-conflicts", "view-cache", "review"}
+    read_only_commands = {"evaluate", "execute", "eval-execute", "check-conflicts", "view-cache", "review", "review-sections"}
     write_commands = {"build-cache", "run-all", "stream"}
 
     try:
@@ -1924,5 +1973,6 @@ __all__ = [
     "handle_check_conflicts",
     "handle_view_cache",
     "handle_review",
+    "handle_review_sections",
     "handle_mbox_import",
 ]
