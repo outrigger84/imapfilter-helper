@@ -16,7 +16,7 @@ import imaplib
 from email.parser import HeaderParser
 from email.policy import default
 from pathlib import Path
-from typing import Any, Dict, Iterable, Sequence
+from typing import Any, Callable, Dict, Iterable, Sequence
 
 from tqdm import tqdm
 
@@ -3160,6 +3160,8 @@ def _execute_folder_worker(
     backup_dir: Path | None = None,
     logger: JsonLogger | None = None,
     defer_expunge: bool = False,
+    status_callback: Callable[[int, str, int], None] | None = None,
+    tick_callback: Callable[[int], None] | None = None,
 ) -> tuple[str, int, int]:
     """
     Process all actions for a single source folder (runs in worker thread).
@@ -3224,6 +3226,12 @@ def _execute_folder_worker(
         # Process each group
         for (grp_folder, target), group_actions in action_groups.items():
             logger.log("DEBUG", "worker_processing_group", {"worker_id": worker_id, "folder": grp_folder, "target": target, "action_count": len(group_actions)})
+            if status_callback:
+                _f = grp_folder[-38:] if len(grp_folder) > 38 else grp_folder
+                _t = (target or "∅")[-22:] if target and len(target or "") > 22 else (target or "∅")
+                # Separate move count so the bar can show accurate total
+                _n_moves = sum(1 for a in group_actions if a.get("action_type", "move") == "move")
+                status_callback(worker_id, f"{_f} → {_t}", _n_moves)
             # Handle dry-run mode
             if dry_run:
                 for action in group_actions:
@@ -3324,6 +3332,8 @@ def _execute_folder_worker(
                             verbose=False,  # Avoid excessive logging in worker
                         )
 
+                        if tick_callback:
+                            tick_callback(worker_id)
                         if status == "done":
                             actions_done += 1
                             # Track for verification if needed
@@ -3353,6 +3363,8 @@ def _execute_folder_worker(
                             actions_failed += 1
 
                     except Exception as exc:
+                        if tick_callback:
+                            tick_callback(worker_id)
                         error_msg = str(exc)
                         main_db.execute(
                             "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
@@ -3694,6 +3706,34 @@ def execute_actions_parallel(
         disable=not show_progress,
     )
 
+    # Per-worker progress bars (one per worker slot, showing current folder/target + move progress)
+    _worker_lock = threading.Lock()
+    worker_bars: list[tqdm] = []
+    if show_progress:
+        for _i in range(max_workers):
+            worker_bars.append(tqdm(
+                total=0,
+                desc=f"   W{_i} │ idle",
+                unit="msg",
+                dynamic_ncols=True,
+                position=_i + 1,
+                leave=False,
+            ))
+
+    def _worker_status_callback(wid: int, desc: str, n_moves: int) -> None:
+        with _worker_lock:
+            if wid < len(worker_bars):
+                bar = worker_bars[wid]
+                bar.n = 0
+                bar.total = n_moves
+                bar.set_description(f"   W{wid} │ {desc}", refresh=False)
+                bar.refresh()
+
+    def _worker_tick_callback(wid: int) -> None:
+        with _worker_lock:
+            if wid < len(worker_bars):
+                worker_bars[wid].update(1)
+
     # Create connection pool
     pool = IMAPConnectionPool(secrets_path, max_workers, logger)
 
@@ -3725,19 +3765,42 @@ def execute_actions_parallel(
                     backup_dir=backup_dir,
                     logger=logger,
                     defer_expunge=(n_chunks > 1),
+                    status_callback=_worker_status_callback,
+                    tick_callback=_worker_tick_callback,
                 )
-                futures[future] = (folder, chunk_idx, n_chunks)
+                futures[future] = (folder, chunk_idx, n_chunks, worker_id)
 
             logger.log("DEBUG", "executor_waiting_for_results", {"future_count": len(futures)})
             for future in concurrent.futures.as_completed(futures):
-                folder, chunk_idx, n_chunks = futures[future]
+                folder, chunk_idx, n_chunks, wid = futures[future]
                 try:
                     folder_name, actions_done, actions_failed = future.result()
                     total_done += actions_done
                     total_failed += actions_failed
+                    with _worker_lock:
+                        if wid < len(worker_bars):
+                            bar = worker_bars[wid]
+                            bar.n = 0
+                            bar.total = 0
+                            bar.set_description(f"   W{wid} │ idle", refresh=False)
+                            bar.refresh()
+                    _suffix = f", {actions_failed} failed" if actions_failed else ""
+                    logger.log(
+                        "INFO",
+                        "execute_folder_done",
+                        {"folder": folder_name, "done": actions_done, "failed": actions_failed},
+                        console=f"  ✅ {folder_name}: {actions_done} done{_suffix}",
+                    )
                     folders_bar.set_postfix_str(f"Last: {folder_name}")
                     folders_bar.update(1)
                 except Exception as exc:
+                    with _worker_lock:
+                        if wid < len(worker_bars):
+                            bar = worker_bars[wid]
+                            bar.n = 0
+                            bar.total = 0
+                            bar.set_description(f"   W{wid} │ ❌ failed", refresh=False)
+                            bar.refresh()
                     logger.log(
                         "ERROR",
                         "execute_folder_worker_failed",
@@ -3751,6 +3814,8 @@ def execute_actions_parallel(
                         raise
 
         folders_bar.close()
+        for _bar in worker_bars:
+            _bar.close()
 
     finally:
         pool.shutdown()
