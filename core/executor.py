@@ -3696,6 +3696,8 @@ def execute_actions_parallel(
     else:
         sorted_folders = sorted(folder_actions.keys())
 
+    actual_total = sum(len(acts) for acts in folder_actions.values())
+
     # Log verbose execution overview (similar to sequential executor)
     if verbose:
         # Calculate group totals (folder → target)
@@ -3734,13 +3736,23 @@ def execute_actions_parallel(
     for f in sorted_folders:
         work_q.put((f, folder_actions[f]))
 
+    actions_bar = tqdm(
+        total=actual_total,
+        desc="⚙️  Executing actions",
+        unit="action",
+        dynamic_ncols=True,
+        leave=True,
+        position=0,
+        disable=not show_progress,
+    )
+
     folders_bar = tqdm(
         total=len(sorted_folders),
         desc="📦 Processing folders",
         unit="folder",
         dynamic_ncols=True,
         leave=True,
-        position=0,
+        position=1,
         disable=not show_progress,
     )
 
@@ -3831,8 +3843,17 @@ def execute_actions_parallel(
                 with _stats_lock:
                     total_done += done
                     total_failed += failed
-                folders_bar.set_postfix_str(f"Last: {wfolder}")
+                    _td, _tf = total_done, total_failed
+                actions_bar.update(done + failed)
+                folders_bar.set_postfix(done=_td, fail=_tf)
                 folders_bar.update(1)
+                if verbose:
+                    logger.log(
+                        "INFO",
+                        "worker_folder_done",
+                        {"worker_id": worker_id, "folder": wfolder, "done": done, "failed": failed},
+                        console=f"  ✓ Worker {worker_id}: {wfolder} — {done} done, {failed} failed",
+                    )
         finally:
             if conn is not None:
                 try:
@@ -3849,6 +3870,7 @@ def execute_actions_parallel(
     for t in threads:
         t.join()
 
+    actions_bar.close()
     folders_bar.close()
 
     if strict and _first_error:
