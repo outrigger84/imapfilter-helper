@@ -3744,8 +3744,10 @@ def execute_actions_parallel(
         logger.log("DEBUG", "executor_creating_pool", {"max_workers": max_workers, "task_count": len(chunk_tasks)})
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures: dict[concurrent.futures.Future, tuple[str, int, int]] = {}
+            wid_pending: dict[int, int] = {}  # tasks remaining per worker-bar slot
             for folder, chunk_idx, n_chunks, chunk in chunk_tasks:
                 worker_id = len(futures) % max_workers
+                wid_pending[worker_id] = wid_pending.get(worker_id, 0) + 1
                 logger.log("DEBUG", "executor_submitting_worker", {
                     "worker_id": worker_id, "folder": folder,
                     "chunk": chunk_idx, "n_chunks": n_chunks, "action_count": len(chunk),
@@ -3778,7 +3780,8 @@ def execute_actions_parallel(
                     total_done += actions_done
                     total_failed += actions_failed
                     with _worker_lock:
-                        if wid < len(worker_bars):
+                        wid_pending[wid] -= 1
+                        if wid < len(worker_bars) and wid_pending[wid] == 0:
                             bar = worker_bars[wid]
                             bar.n = 0
                             bar.total = 0
@@ -3795,6 +3798,7 @@ def execute_actions_parallel(
                     folders_bar.update(1)
                 except Exception as exc:
                     with _worker_lock:
+                        wid_pending[wid] = max(0, wid_pending.get(wid, 1) - 1)
                         if wid < len(worker_bars):
                             bar = worker_bars[wid]
                             bar.n = 0
