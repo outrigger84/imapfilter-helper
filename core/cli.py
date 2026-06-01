@@ -69,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable Telegram notifications for this run",
     )
+    parser.add_argument(
+        "--no-notifications",
+        action="store_true",
+        help="Disable all notifications for this run",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_build = sub.add_parser("build-cache", help="Build local message cache")
@@ -1915,7 +1920,9 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
 
             notif_cfg = secrets.get("notifications", {})
 
-            if getattr(args, "no_gotify", False):
+            if getattr(args, "no_notifications", False):
+                print("ℹ️  All notifications disabled via --no-notifications")
+            elif getattr(args, "no_gotify", False):
                 print("ℹ️  GOTIFY notifications disabled via --no-gotify")
             else:
                 gotify_cfg = notif_cfg.get("gotify", {})
@@ -1934,7 +1941,9 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
                 else:
                     print("ℹ️  GOTIFY is disabled in configuration")
 
-            if getattr(args, "no_telegram", False):
+            if getattr(args, "no_notifications", False):
+                pass  # already printed above
+            elif getattr(args, "no_telegram", False):
                 print("ℹ️  Telegram notifications disabled via --no-telegram")
             else:
                 tg_cfg = notif_cfg.get("telegram", {})
