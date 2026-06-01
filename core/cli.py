@@ -90,6 +90,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Scan the specified folder and all its subfolders recursively (can be repeated)",
     )
     p_build.add_argument(
+        "--exclude-folders",
+        action="append",
+        metavar="FOLDER",
+        dest="exclude_folders",
+        help="Exclude the specified folder (can be repeated; most useful with --all-folders)",
+    )
+    p_build.add_argument(
         "--limit",
         type=int,
         help="Cache at most this many messages per folder",
@@ -144,6 +151,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Evaluate rules for the specified folder and all its subfolders recursively",
     )
+    p_eval.add_argument(
+        "--exclude-folders",
+        action="append",
+        metavar="FOLDER",
+        dest="exclude_folders",
+        help="Exclude the specified folder (can be repeated; most useful with --all-folders)",
+    )
 
     p_exec = sub.add_parser("execute", help="Execute queued actions")
     p_exec.add_argument("--dry-run", action="store_true", help="Simulate execution only (no IMAP writes)")
@@ -178,6 +192,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--folder-recursive",
         action="append",
         help="Execute pending actions for the specified folder and all its subfolders recursively",
+    )
+    p_exec.add_argument(
+        "--exclude-folders",
+        action="append",
+        metavar="FOLDER",
+        dest="exclude_folders",
+        help="Exclude the specified folder (can be repeated; most useful with --all-folders)",
     )
     p_exec.add_argument(
         "--backup-moved",
@@ -240,6 +261,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--folder-recursive",
         action="append",
         help="Process the specified folder and all its subfolders recursively",
+    )
+    p_run.add_argument(
+        "--exclude-folders",
+        action="append",
+        metavar="FOLDER",
+        dest="exclude_folders",
+        help="Exclude the specified folder (can be repeated; most useful with --all-folders)",
     )
     p_run.add_argument("--strict", action="store_true", help="Abort on missing/failed IMAP ops during execute")
     p_run.add_argument(
@@ -340,6 +368,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Process the specified folder and all its subfolders recursively",
     )
+    p_eval_exec.add_argument(
+        "--exclude-folders",
+        action="append",
+        metavar="FOLDER",
+        dest="exclude_folders",
+        help="Exclude the specified folder (can be repeated; most useful with --all-folders)",
+    )
     p_eval_exec.add_argument("--strict", action="store_true", help="Abort on missing/failed IMAP ops during execute")
     p_eval_exec.add_argument(
         "--verify-moves",
@@ -415,6 +450,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--folder-recursive",
         action="append",
         help="Process the specified folder and all its subfolders recursively",
+    )
+    p_stream.add_argument(
+        "--exclude-folders",
+        action="append",
+        metavar="FOLDER",
+        dest="exclude_folders",
+        help="Exclude the specified folder (can be repeated; most useful with --all-folders)",
     )
     p_stream.add_argument(
         "--verbose",
@@ -655,6 +697,24 @@ def _normalize_folder_list(
     return cleaned or None
 
 
+def _apply_folder_exclusions(
+    folders: list[str] | None,
+    excluded: list[str] | None,
+    *,
+    expand_all: Callable[[], list[str]] | None = None,
+) -> list[str] | None:
+    """Remove excluded folders from the list. When folders is None (all-folders), expand first."""
+    if not excluded:
+        return folders
+    if folders is None:
+        if expand_all is None:
+            return None
+        folders = expand_all()
+    excluded_set = set(excluded)
+    result = [f for f in folders if f not in excluded_set]
+    return result or None
+
+
 def _resolve_scope_selection(
     *,
     all_folders: bool,
@@ -741,12 +801,15 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
             logger=logger,
         )
 
+        excluded = _normalize_folder_list(getattr(args, "exclude_folders", None))
+
         if args.all_folders:
             folders = list_all_folders(client)
+            folders = _apply_folder_exclusions(folders, excluded)
             # Get folder sizes for sorting and progress display
             folder_sizes = get_folder_sizes(client, folders)
         elif resolved_folders:
-            folders = resolved_folders
+            folders = _apply_folder_exclusions(resolved_folders, excluded) or resolved_folders
             folder_sizes = None
         else:
             folders = [DEFAULT_INBOX]
@@ -872,6 +935,13 @@ def _expand_folders_from_db(db: sqlite3.Connection, recursive_folders: list[str]
     return sorted(list(expanded))
 
 
+def _get_all_folders_from_db(db: sqlite3.Connection) -> list[str]:
+    """Return all folder names recorded in the cache database."""
+    cursor = db.cursor()
+    cursor.execute("SELECT DISTINCT name FROM folders")
+    return sorted(row[0] for row in cursor.fetchall())
+
+
 def handle_evaluate(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
     """Handle the ``evaluate`` command."""
     cfg.executor.dry_run = args.dry_run
@@ -891,6 +961,12 @@ def handle_evaluate(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLo
         all_folders=args.all_folders,
         folders=final_folders,
         default_scope=cfg.executor.default_run_scope,
+    )
+    excluded = _normalize_folder_list(getattr(args, "exclude_folders", None))
+    eval_folders = _apply_folder_exclusions(
+        eval_folders,
+        excluded,
+        expand_all=lambda: _get_all_folders_from_db(db),
     )
     rules = load_rules(cfg.paths.rules_dir, logger)
     evaluate_rules(
@@ -940,6 +1016,12 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
         all_folders=args.all_folders,
         folders=final_folders,
         default_scope=cfg.executor.default_run_scope,
+    )
+    excluded = _normalize_folder_list(getattr(args, "exclude_folders", None))
+    exec_folders = _apply_folder_exclusions(
+        exec_folders,
+        excluded,
+        expand_all=lambda: _get_all_folders_from_db(db),
     )
 
     # Get parallel_workers setting from CLI args, fall back to config default
@@ -1057,12 +1139,16 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
         selected = _normalize_folder_list(args.folder)
         recursive = _normalize_folder_list(getattr(args, "folder_recursive", None))
 
+        excluded = _normalize_folder_list(getattr(args, "exclude_folders", None))
+
         # For build-cache phase, expand folders using IMAP
         if args.all_folders and client is not None:
             folders = list_all_folders(client)
+            folders = _apply_folder_exclusions(folders, excluded) or []
         elif recursive and client is not None:
             expanded_recursive = expand_folders_recursive(client, recursive, show_progress=True)
             folders = list(set((selected or []) + expanded_recursive))
+            folders = _apply_folder_exclusions(folders, excluded) or folders
         else:
             folders = selected if selected else [DEFAULT_INBOX]
 
@@ -1076,6 +1162,11 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             all_folders=args.all_folders,
             folders=final_eval_folders,
             default_scope=cfg.executor.default_run_scope,
+        )
+        eval_folders = _apply_folder_exclusions(
+            eval_folders,
+            excluded,
+            expand_all=lambda: _get_all_folders_from_db(db),
         )
         _cache_timer, folders_count, msg_count = build_cache(
             client,
@@ -1225,6 +1316,12 @@ def handle_eval_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: Js
             folders=final_folders,
             default_scope=cfg.executor.default_run_scope,
         )
+        excluded = _normalize_folder_list(getattr(args, "exclude_folders", None))
+        eval_folders = _apply_folder_exclusions(
+            eval_folders,
+            excluded,
+            expand_all=lambda: _get_all_folders_from_db(db),
+        )
 
         # Phase 1: Evaluate rules
         rules = load_rules(cfg.paths.rules_dir, logger)
@@ -1332,10 +1429,13 @@ def handle_stream(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogg
     selected = _normalize_folder_list(args.folder)
     recursive = _normalize_folder_list(getattr(args, "folder_recursive", None))
 
+    excluded = _normalize_folder_list(getattr(args, "exclude_folders", None))
+
     if args.all_folders:
         client_init = imap_login(cfg.paths.secrets_file, logger)
         try:
             folders = list_all_folders(client_init)
+            folders = _apply_folder_exclusions(folders, excluded) or []
         finally:
             client_init.logout()
     elif recursive:
@@ -1343,10 +1443,11 @@ def handle_stream(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogg
         try:
             expanded_recursive = expand_folders_recursive(client_init, recursive, show_progress=True)
             folders = list(set((selected or []) + expanded_recursive))
+            folders = _apply_folder_exclusions(folders, excluded) or folders
         finally:
             client_init.logout()
     elif selected:
-        folders = selected
+        folders = _apply_folder_exclusions(selected, excluded) or selected
     else:
         folders = [DEFAULT_INBOX]
 
