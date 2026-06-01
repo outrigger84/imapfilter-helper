@@ -64,6 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable Gotify notifications for this run",
     )
+    parser.add_argument(
+        "--no-telegram",
+        action="store_true",
+        help="Disable Telegram notifications for this run",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_build = sub.add_parser("build-cache", help="Build local message cache")
@@ -1886,7 +1891,7 @@ COMMAND_HANDLERS: dict[str, Handler] = {
 def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> int:
     """Entry point for the CLI."""
     import json
-    from core.notifications import GotifyNotifier, NotificationDispatcher
+    from core.notifications import GotifyNotifier, TelegramNotifier, NotificationDispatcher
 
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -1898,37 +1903,66 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
     )
     _ensure_layout(cfg)
 
-    # Initialize notification dispatcher with GOTIFY if configured
-    notifier = None
-    if getattr(args, "no_gotify", False):
-        print("ℹ️  GOTIFY notifications disabled via --no-gotify")
-    else:
-        try:
-            secrets_path = cfg.paths.secrets_file
-            if secrets_path.exists():
-                with open(secrets_path, encoding="utf-8") as f:
-                    secrets = json.load(f)
-                    gotify_cfg = secrets.get("notifications", {}).get("gotify", {})
-                    if gotify_cfg.get("enabled"):
-                        base_url = gotify_cfg.get("base_url", "")
-                        token = gotify_cfg.get("token", "")
-                        if not base_url or not token:
-                            print("⚠️  GOTIFY configured but missing base_url or token")
-                        else:
-                            gotify = GotifyNotifier(
-                                base_url=base_url,
-                                token=token,
-                                max_timeout_failures=gotify_cfg.get("max_timeout_failures", 3),
-                            )
-                            notifier = NotificationDispatcher(gotify_notifier=gotify)
-                            print(f"✅ GOTIFY initialized: {base_url}")
-                    else:
-                        print("ℹ️  GOTIFY is disabled in configuration")
+    # Initialize notification dispatcher with configured notifiers
+    gotify_notifier = None
+    telegram_notifier = None
+
+    try:
+        secrets_path = cfg.paths.secrets_file
+        if secrets_path.exists():
+            with open(secrets_path, encoding="utf-8") as f:
+                secrets = json.load(f)
+
+            notif_cfg = secrets.get("notifications", {})
+
+            if getattr(args, "no_gotify", False):
+                print("ℹ️  GOTIFY notifications disabled via --no-gotify")
             else:
-                print(f"ℹ️  Secrets file not found: {secrets_path}")
-        except Exception as e:
-            # Log notification setup errors but don't let them break mail processing
-            print(f"⚠️  GOTIFY setup error: {e}")
+                gotify_cfg = notif_cfg.get("gotify", {})
+                if gotify_cfg.get("enabled"):
+                    base_url = gotify_cfg.get("base_url", "")
+                    token = gotify_cfg.get("token", "")
+                    if not base_url or not token:
+                        print("⚠️  GOTIFY configured but missing base_url or token")
+                    else:
+                        gotify_notifier = GotifyNotifier(
+                            base_url=base_url,
+                            token=token,
+                            max_timeout_failures=gotify_cfg.get("max_timeout_failures", 3),
+                        )
+                        print(f"✅ GOTIFY initialized: {base_url}")
+                else:
+                    print("ℹ️  GOTIFY is disabled in configuration")
+
+            if getattr(args, "no_telegram", False):
+                print("ℹ️  Telegram notifications disabled via --no-telegram")
+            else:
+                tg_cfg = notif_cfg.get("telegram", {})
+                if tg_cfg.get("enabled"):
+                    bot_token = tg_cfg.get("bot_token", "")
+                    chat_id = tg_cfg.get("chat_id", "")
+                    if not bot_token or not chat_id:
+                        print("⚠️  Telegram configured but missing bot_token or chat_id")
+                    else:
+                        telegram_notifier = TelegramNotifier(
+                            bot_token=bot_token,
+                            chat_id=chat_id,
+                            max_timeout_failures=tg_cfg.get("max_timeout_failures", 3),
+                        )
+                        print(f"✅ Telegram initialized: chat_id={chat_id}")
+                else:
+                    print("ℹ️  Telegram is disabled in configuration")
+        else:
+            print(f"ℹ️  Secrets file not found: {secrets_path}")
+    except Exception as e:
+        print(f"⚠️  Notification setup error: {e}")
+
+    notifier = None
+    if gotify_notifier or telegram_notifier:
+        notifier = NotificationDispatcher(
+            gotify_notifier=gotify_notifier,
+            telegram_notifier=telegram_notifier,
+        )
 
     logger = JsonLogger(cfg.paths.log_file, notifier=notifier)
 

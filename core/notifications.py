@@ -1,7 +1,6 @@
-"""Notification adapters for external services like GOTIFY."""
+"""Notification adapters for external services like GOTIFY and Telegram."""
 from __future__ import annotations
 
-import json
 import requests
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
@@ -92,17 +91,66 @@ class GotifyNotifier:
             return False
 
 
+class TelegramNotifier:
+    """Send notifications via Telegram Bot API."""
+
+    def __init__(self, bot_token: str, chat_id: str, max_timeout_failures: int = 3):
+        self.bot_token = bot_token
+        self.chat_id = chat_id
+        self.endpoint = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        self._timeout_count = 0
+        self._max_timeout_failures = max_timeout_failures
+        self._disabled = False
+
+    def send(
+        self,
+        title: str,
+        message: str,
+        priority: int = 0,
+        extras: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        if self._disabled:
+            return False
+
+        text = f"<b>{title}</b>\n{message}"
+        try:
+            response = requests.post(
+                self.endpoint,
+                json={
+                    "chat_id": self.chat_id,
+                    "text": text,
+                    "parse_mode": "HTML",
+                },
+                timeout=5,
+            )
+            response.raise_for_status()
+            self._timeout_count = 0
+            return True
+
+        except requests.exceptions.Timeout as e:
+            self._timeout_count += 1
+            if self._timeout_count >= self._max_timeout_failures:
+                self._disabled = True
+                print(f"Telegram auto-disabled after {self._timeout_count} consecutive timeouts")
+            else:
+                print(f"Telegram timeout ({self._timeout_count}/{self._max_timeout_failures}): {e}")
+            return False
+
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to send Telegram notification: {e}")
+            return False
+
+
 class NotificationDispatcher:
     """Dispatch notifications based on event type."""
 
-    def __init__(self, gotify_notifier: Optional[GotifyNotifier] = None):
-        """
-        Initialize dispatcher.
-
-        Args:
-            gotify_notifier: GOTIFY notifier instance (optional)
-        """
+    def __init__(
+        self,
+        gotify_notifier: Optional[GotifyNotifier] = None,
+        telegram_notifier: Optional[TelegramNotifier] = None,
+    ):
         self.gotify = gotify_notifier
+        self.telegram = telegram_notifier
 
     def dispatch(
         self,
@@ -118,12 +166,13 @@ class NotificationDispatcher:
             message: Event type/identifier
             context: Event context data
         """
-        if not self.gotify:
+        if not self.gotify and not self.telegram:
             return
 
-        if self.gotify._disabled:
+        if self.gotify and self.gotify._disabled:
             print(f"⚠️  GOTIFY is disabled due to repeated timeouts. Event '{message}' will not be sent.")
-            return
+        if self.telegram and self.telegram._disabled:
+            print(f"⚠️  Telegram is disabled due to repeated timeouts. Event '{message}' will not be sent.")
 
         # Only send notifications for important events
         notify_events = {
@@ -148,7 +197,6 @@ class NotificationDispatcher:
             return
 
         title, event_type = notify_events[message]
-        print(f"📤 Sending GOTIFY notification: {title} (event: {message})")
         context = context or {}
 
         # Build notification message and priority
@@ -275,17 +323,24 @@ class NotificationDispatcher:
         else:
             return
 
-        # Send the notification
-        success = self.gotify.send(
-            title=title,
-            message=body,
-            priority=priority,
-            extras={
-                "event": message,
-                "level": level,
-            },
-        )
-        if success:
-            print(f"✅ GOTIFY notification sent: {title}")
-        else:
-            print(f"❌ GOTIFY notification failed: {title}")
+        # Send to all configured notifiers
+        if self.gotify:
+            print(f"📤 Sending GOTIFY notification: {title} (event: {message})")
+            success = self.gotify.send(
+                title=title,
+                message=body,
+                priority=priority,
+                extras={"event": message, "level": level},
+            )
+            if success:
+                print(f"✅ GOTIFY notification sent: {title}")
+            else:
+                print(f"❌ GOTIFY notification failed: {title}")
+
+        if self.telegram:
+            print(f"📤 Sending Telegram notification: {title} (event: {message})")
+            success = self.telegram.send(title=title, message=body, priority=priority)
+            if success:
+                print(f"✅ Telegram notification sent: {title}")
+            else:
+                print(f"❌ Telegram notification failed: {title}")
