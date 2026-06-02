@@ -1997,7 +1997,7 @@ COMMAND_HANDLERS: dict[str, Handler] = {
 def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> int:
     """Entry point for the CLI."""
     import json
-    from core.notifications import GotifyNotifier, TelegramNotifier, NotificationDispatcher
+    from core.notifications import GotifyNotifier, TelegramNotifier, NotificationDispatcher, AsyncNotificationDispatcher
 
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -2012,6 +2012,7 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
     # Initialize notification dispatcher with configured notifiers
     gotify_notifier = None
     telegram_notifier = None
+    telegram_min_priority = 0
 
     try:
         secrets_path = cfg.paths.secrets_file
@@ -2059,6 +2060,7 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
                             chat_id=chat_id,
                             max_timeout_failures=tg_cfg.get("max_timeout_failures", 3),
                         )
+                        telegram_min_priority = tg_cfg.get("min_priority", 0)
                         print(f"✅ Telegram initialized: chat_id={chat_id}")
                 else:
                     print("ℹ️  Telegram is disabled in configuration")
@@ -2069,10 +2071,12 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
 
     notifier = None
     if gotify_notifier or telegram_notifier:
-        notifier = NotificationDispatcher(
+        dispatcher = NotificationDispatcher(
             gotify_notifier=gotify_notifier,
             telegram_notifier=telegram_notifier,
+            telegram_min_priority=telegram_min_priority,
         )
+        notifier = AsyncNotificationDispatcher(dispatcher)
 
     logger = JsonLogger(cfg.paths.log_file, notifier=notifier)
 
@@ -2099,6 +2103,8 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
         return handler(args, cfg, db, logger)
     finally:
         db.close()
+        if notifier is not None:
+            notifier.shutdown()
 
 
 __all__ = [

@@ -1,7 +1,10 @@
 """Notification adapters for external services like GOTIFY and Telegram."""
 from __future__ import annotations
 
+import queue
 import requests
+import threading
+import time
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
@@ -101,6 +104,7 @@ class TelegramNotifier:
         self._timeout_count = 0
         self._max_timeout_failures = max_timeout_failures
         self._disabled = False
+        self._retry_after_until: float = 0.0
 
     def send(
         self,
@@ -110,6 +114,9 @@ class TelegramNotifier:
         extras: Optional[Dict[str, Any]] = None,
     ) -> bool:
         if self._disabled:
+            return False
+
+        if time.monotonic() < self._retry_after_until:
             return False
 
         text = f"<b>{title}</b>\n{message}"
@@ -123,6 +130,13 @@ class TelegramNotifier:
                 },
                 timeout=5,
             )
+
+            if response.status_code == 429:
+                retry_after = response.json().get("parameters", {}).get("retry_after", 30)
+                self._retry_after_until = time.monotonic() + retry_after
+                print(f"Telegram rate-limited — retry after {retry_after}s")
+                return False
+
             response.raise_for_status()
             self._timeout_count = 0
             return True
@@ -148,9 +162,11 @@ class NotificationDispatcher:
         self,
         gotify_notifier: Optional[GotifyNotifier] = None,
         telegram_notifier: Optional[TelegramNotifier] = None,
+        telegram_min_priority: int = 0,
     ):
         self.gotify = gotify_notifier
         self.telegram = telegram_notifier
+        self._telegram_min_priority = telegram_min_priority
 
     def dispatch(
         self,
@@ -337,10 +353,45 @@ class NotificationDispatcher:
             else:
                 print(f"❌ GOTIFY notification failed: {title}")
 
-        if self.telegram:
+        if self.telegram and priority >= self._telegram_min_priority:
             print(f"📤 Sending Telegram notification: {title} (event: {message})")
             success = self.telegram.send(title=title, message=body, priority=priority)
             if success:
                 print(f"✅ Telegram notification sent: {title}")
             else:
                 print(f"❌ Telegram notification failed: {title}")
+
+
+class AsyncNotificationDispatcher:
+    """Non-blocking wrapper around NotificationDispatcher using a background thread queue."""
+
+    def __init__(self, dispatcher: NotificationDispatcher, max_queue_size: int = 500):
+        self._dispatcher = dispatcher
+        self._queue: queue.Queue = queue.Queue(maxsize=max_queue_size)
+        self._thread = threading.Thread(target=self._worker, daemon=True)
+        self._thread.start()
+
+    def dispatch(
+        self,
+        level: str,
+        message: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        try:
+            self._queue.put_nowait((level, message, context))
+        except queue.Full:
+            print(f"⚠️  Notification queue full — dropping event '{message}'")
+
+    def _worker(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                break
+            level, message, context = item
+            self._dispatcher.dispatch(level, message, context)
+            self._queue.task_done()
+
+    def shutdown(self, timeout: float = 10.0) -> None:
+        """Flush remaining queued notifications and stop the background thread."""
+        self._queue.put(None)
+        self._thread.join(timeout=timeout)
