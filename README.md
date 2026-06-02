@@ -565,6 +565,46 @@ To get started quickly, copy `data/secrets.example.json` to `data/secrets.json` 
 }
 ```
 
+### Notifications
+
+Push notifications are supported via **Gotify** and/or **Telegram**. Configure either or both under the `notifications` key in `data/secrets.json`:
+
+```json
+{
+  "imap": { "..." : "..." },
+  "notifications": {
+    "gotify": {
+      "enabled": true,
+      "base_url": "http://gotify.example.com",
+      "token": "your_application_token",
+      "max_timeout_failures": 3
+    },
+    "telegram": {
+      "enabled": true,
+      "bot_token": "123456789:AABBCCDDEEFFaabbccddeeff-your-bot-token",
+      "chat_id": "your_chat_id",
+      "max_timeout_failures": 3,
+      "min_priority": 2
+    }
+  }
+}
+```
+
+**Telegram options:**
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `bot_token` | *(required)* | Telegram bot token from [@BotFather](https://t.me/BotFather). |
+| `chat_id` | *(required)* | Chat or channel ID to send messages to. |
+| `max_timeout_failures` | `3` | Number of consecutive HTTP timeouts before the notifier auto-disables for the rest of the run. |
+| `min_priority` | `0` | Minimum event priority to forward to Telegram. Events below this threshold are silently skipped. **Recommended: `2`** for large jobs — suppresses per-action success noise (priority 1) while still delivering summaries (priority 2–3) and failures (priority 4–5). |
+
+**Why `min_priority` matters on large jobs:** Telegram bots are rate-limited to ~30 messages per minute. Without filtering, a job that moves 500 emails generates 500 individual "Action Executed" notifications, which quickly exhausts the rate limit and floods the chat. Setting `min_priority: 2` reduces that to a single "Execute Complete" summary.
+
+Notifications are dispatched asynchronously on a background thread so they never block or slow down the main execution pipeline. If Telegram returns a `429 Too Many Requests` response, the notifier automatically honours the `retry_after` cooldown window before attempting the next send.
+
+To suppress all notifications for a single run, pass `--no-notifications`. To suppress only one notifier, use `--no-telegram` or `--no-gotify`.
+
 Common IMAP servers:
 - **Gmail**: `imap.gmail.com:993`
 - **Outlook**: `imap-mail.outlook.com:993`
