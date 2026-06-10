@@ -65,10 +65,31 @@ def _sanitize_message_headers(msg: mailbox.mboxMessage) -> None:
         del msg[key]
 
 
+# Headers that must be removed before uploading to iCloud IMAP.
+# X-Apple-Action / X-Apple-MoveToFolder tell the server to execute a deferred
+# action (e.g. move to INBOX) when the message arrives, which conflicts with
+# the target folder and causes [UNAVAILABLE] Unexpected exception.
+# X-Apple-UUID lets the server detect a duplicate of an already-stored message.
+# The ICL and Mozilla headers are internal metadata with no meaning on re-import.
+_STRIP_BEFORE_UPLOAD: frozenset[str] = frozenset({
+    "x-apple-action",
+    "x-apple-movetofolder",
+    "x-apple-uuid",
+    "x-icl-info",
+    "x-icl-score",
+    "x-mozilla-status",
+    "x-mozilla-status2",
+    "x-mozilla-keys",
+})
+
+
 def _message_to_crlf_bytes(msg: mailbox.mboxMessage) -> bytes:
     """Convert mboxMessage to RFC-2822 bytes with CRLF line endings."""
     import io
     import email.generator as _eg
+
+    for header in _STRIP_BEFORE_UPLOAD:
+        del msg[header]  # no-op if absent; removes all instances if present
 
     class _Utf8BytesGenerator(_eg.BytesGenerator):
         """BytesGenerator that writes non-ASCII payload strings as UTF-8."""
