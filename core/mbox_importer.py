@@ -6,6 +6,7 @@ import email.errors
 import email.utils
 import imaplib
 import mailbox
+import os
 import re
 import threading
 from collections import defaultdict
@@ -376,8 +377,13 @@ def _append_folder_batch(
             else:
                 failed += 1
                 failed_indices.append(idx)
+                resp_str = " ".join(
+                    r.decode("utf-8", "ignore") if isinstance(r, bytes) else str(r)
+                    for r in (resp or [])
+                )
                 logger.log("WARN", "append_failed",
-                           {"folder": folder, "resp": str(resp)})
+                           {"folder": folder, "resp": resp_str},
+                           console=f"    ⚠️  APPEND rejected ({resp_str})")
                 if err_mbox is not None and msg is not None:
                     with (err_lock or _null_context()):
                         try:
@@ -741,15 +747,37 @@ def run_mbox_import(
     indices_to_remove = list(set(all_successful_indices) | set(skipped_indices) | set(all_failed_indices))
     if indices_to_remove:
         logger.log("INFO", "mbox_cleanup_start", {"count": len(indices_to_remove)},
-                   console=f"🧹 Removing {len(indices_to_remove)} uploaded messages from {mbox_path.name} ...")
-        cleanup_mbox = mailbox.mbox(str(mbox_path))
-        for idx in indices_to_remove:
+                   console=f"🧹 Removing {len(indices_to_remove)} processed messages from {mbox_path.name} ...")
+        remove_set = set(indices_to_remove)
+        try:
+            cleanup_mbox = mailbox.mbox(str(mbox_path))
+            for idx in indices_to_remove:
+                try:
+                    cleanup_mbox.remove(idx)
+                except Exception:
+                    pass
+            cleanup_mbox.flush()
+            cleanup_mbox.close()
+        except OSError as exc:
+            if exc.errno != 36:  # ENAMETOOLONG
+                raise
+            # Source mbox filename is too long for mailbox.mbox to place its
+            # temp file alongside it. Write a cleaned copy with a short name in
+            # the same directory then atomically rename it into place.
+            tmp_path = mbox_path.parent / f"_cleanup_{os.getpid()}.mbox"
             try:
-                cleanup_mbox.remove(idx)
+                src = mailbox.mbox(str(mbox_path))
+                dst = mailbox.mbox(str(tmp_path))
+                for i, msg in enumerate(src):
+                    if i not in remove_set:
+                        dst.add(msg)
+                dst.flush()
+                dst.close()
+                src.close()
+                tmp_path.replace(mbox_path)
             except Exception:
-                pass
-        cleanup_mbox.flush()
-        cleanup_mbox.close()
+                tmp_path.unlink(missing_ok=True)
+                raise
 
         remaining = sum(1 for _ in mailbox.mbox(str(mbox_path)))
         logger.log("INFO", "mbox_cleanup_done", {"remaining": remaining},
