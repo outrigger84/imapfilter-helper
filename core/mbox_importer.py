@@ -498,7 +498,14 @@ def run_mbox_import(
     if error_mbox_path is None:
         date_str = datetime.date.today().isoformat()
         stem = mbox_path.stem
-        error_mbox_path = mbox_path.parent / f"{date_str}-{stem}-error.mbox"
+        candidate = f"{date_str}-{stem}-error.mbox"
+        if len(candidate.encode()) > 255:
+            # Accumulated date prefixes make the name too long for the filesystem.
+            # Keep the batch range (e.g. "1100001-1110000") as the unique identifier.
+            m = re.search(r'(\d{5,}-\d{5,})', stem)
+            short_stem = f"converted_merged.{m.group(1)}" if m else stem[-(220 - len(date_str)):]
+            candidate = f"{date_str}-{short_stem}-error.mbox"
+        error_mbox_path = mbox_path.parent / candidate
 
     err_mbox = mailbox.mbox(str(error_mbox_path))
     logger.log("INFO", "error_mbox_open", {"path": str(error_mbox_path)},
@@ -575,17 +582,26 @@ def run_mbox_import(
                             "folder": folder, "attempt": attempt, "error": str(exc),
                         }, console=f"  ⚠️  Connection dropped (attempt {attempt}/{_RECONNECT_ATTEMPTS}): {exc}")
                         _safe_logout(client)
+                        # Recover indices written to the progress file during the
+                        # failed attempt but not returned (exception cut short the
+                        # return path), so retries don't re-upload or re-fail them.
+                        succ_set = set(folder_successful)
+                        if progress_path is not None and index_to_msgid:
+                            already_done = _load_progress(progress_path)
+                            for i in list(remaining):
+                                mid = index_to_msgid.get(i, "")
+                                if mid and mid in already_done and i not in succ_set:
+                                    folder_successful.append(i)
+                                    folder_uploaded += 1
+                                    succ_set.add(i)
                         if attempt < _RECONNECT_ATTEMPTS:
                             logger.log("INFO", "imap_reconnect", {},
                                        console="  🔄 Reconnecting ...")
                             client = imap_login(secrets_path, logger)
-                            # Exclude already-uploaded indices from the retry
-                            succ_set = set(folder_successful)
                             remaining = [i for i in remaining if i not in succ_set]
                         else:
                             logger.log("ERROR", "imap_folder_give_up", {"folder": folder},
                                        console=f"  ❌ Giving up on {folder} after {_RECONNECT_ATTEMPTS} attempts")
-                            succ_set = set(folder_successful)
                             give_up_indices = [i for i in remaining if i not in succ_set]
                             folder_failed += len(give_up_indices)
                             folder_failed_idxs.extend(give_up_indices)
@@ -595,7 +611,12 @@ def run_mbox_import(
                                         err_mbox.add(mbox[idx])
                                     except Exception:
                                         pass
-                                err_mbox.flush()
+                                try:
+                                    err_mbox.flush()
+                                except OSError as io_err:
+                                    logger.log("ERROR", "err_mbox_flush_failed",
+                                               {"error": str(io_err)},
+                                               console=f"  ❌ Failed to flush error mbox: {io_err}")
 
                 total_uploaded += folder_uploaded
                 total_failed += folder_failed
