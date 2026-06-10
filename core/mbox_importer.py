@@ -30,6 +30,16 @@ def _quote_mailbox(name: str) -> str:
     return f'"{name}"'
 
 
+def _message_exists_in_folder(client: imaplib.IMAP4_SSL, message_id: str) -> bool:
+    """Return True if a message with this Message-ID exists in the currently-selected folder."""
+    try:
+        mid = message_id.strip()
+        typ, data = client.search(None, f'HEADER Message-ID {mid}')
+        return typ == "OK" and bool(data and data[0] and data[0].strip())
+    except Exception:
+        return False
+
+
 def _mbox_flags_to_imap(msg: mailbox.mboxMessage) -> Optional[str]:
     """Convert mbox Status/X-Status flags to an IMAP flags string."""
     flag_str = msg.get_flags()  # e.g. "RAF"
@@ -396,12 +406,28 @@ def _append_folder_batch(
                     subject = msg.get("subject", "(no subject)")
                     print(f"    ✓ {subject[:60]}")
             else:
-                failed += 1
-                failed_indices.append(idx)
                 resp_str = " ".join(
                     r.decode("utf-8", "ignore") if isinstance(r, bytes) else str(r)
                     for r in (resp or [])
                 )
+                # On [UNAVAILABLE], check whether the message already exists in the
+                # folder (iCloud deduplicates by Message-ID and returns this error
+                # rather than silently accepting the duplicate).
+                msg_id = (index_to_msgid or {}).get(idx, "").strip()
+                if "unavailable" in resp_str.lower() and msg_id:
+                    if _message_exists_in_folder(client, msg_id):
+                        uploaded += 1
+                        successful_indices.append(idx)
+                        logger.log("INFO", "append_already_exists",
+                                   {"folder": folder, "msg_id": msg_id},
+                                   console=f"    ↩  Already in folder (skipped duplicate)")
+                        if progress_path is not None and index_to_msgid is not None:
+                            with (progress_lock or _null_context()):
+                                _record_uploaded(progress_path, msg_id)
+                        continue
+
+                failed += 1
+                failed_indices.append(idx)
                 logger.log("WARN", "append_failed",
                            {"folder": folder, "resp": resp_str},
                            console=f"    ⚠️  APPEND rejected ({resp_str})")
@@ -411,7 +437,6 @@ def _append_folder_batch(
                             err_mbox.add(msg)
                         except Exception:
                             pass  # Message too corrupted to write to error mbox
-                msg_id = index_to_msgid.get(idx, "")
                 if msg_id:
                     with (progress_lock or _null_context()):
                         _record_uploaded(progress_path, msg_id)
