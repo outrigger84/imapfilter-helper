@@ -31,11 +31,23 @@ def _quote_mailbox(name: str) -> str:
 
 
 def _message_exists_in_folder(client: imaplib.IMAP4_SSL, message_id: str) -> bool:
-    """Return True if a message with this Message-ID exists in the currently-selected folder."""
+    """Return True if a message with this Message-ID exists in the currently-selected folder.
+
+    Passes the SEARCH criterion as bytes to prevent imaplib from wrapping the
+    multi-word string in double-quotes (which turns it into a body-text search).
+    """
     try:
         mid = message_id.strip()
-        typ, data = client.search(None, f'HEADER Message-ID {mid}')
-        return typ == "OK" and bool(data and data[0] and data[0].strip())
+        # Bytes arg bypasses imaplib._checkquote so the server receives:
+        #   SEARCH HEADER Message-ID <value>
+        # instead of:
+        #   SEARCH "HEADER Message-ID <value>"  (body-text search — wrong)
+        criterion = ("HEADER Message-ID " + mid).encode("ascii", "ignore")
+        typ, dat = client._simple_command("SEARCH", criterion)
+        if typ != "OK":
+            return False
+        # dat[0] is b'1 3 7' (seq nums) or b'' when nothing matches
+        return bool(dat and dat[0] and dat[0].strip())
     except Exception:
         return False
 
