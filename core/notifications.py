@@ -365,9 +365,9 @@ class NotificationDispatcher:
 class AsyncNotificationDispatcher:
     """Non-blocking wrapper around NotificationDispatcher using a background thread queue."""
 
-    def __init__(self, dispatcher: NotificationDispatcher, max_queue_size: int = 500):
+    def __init__(self, dispatcher: NotificationDispatcher):
         self._dispatcher = dispatcher
-        self._queue: queue.Queue = queue.Queue(maxsize=max_queue_size)
+        self._queue: queue.Queue = queue.Queue()
         self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
 
@@ -377,10 +377,7 @@ class AsyncNotificationDispatcher:
         message: str,
         context: Optional[Dict[str, Any]] = None,
     ) -> None:
-        try:
-            self._queue.put_nowait((level, message, context))
-        except queue.Full:
-            print(f"⚠️  Notification queue full — dropping event '{message}'")
+        self._queue.put_nowait((level, message, context))
 
     def _worker(self) -> None:
         while True:
