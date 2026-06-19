@@ -317,12 +317,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Backup all cached messages after execution completes (creates full archive)",
     )
     p_run.add_argument(
+        "--temp-dir",
+        type=Path,
+        default=None,
+        help="Directory for intermediate worker databases during parallel build (default: system temp dir)",
+    )
+    p_run.add_argument(
         "--parallel-workers",
         type=int,
         default=None,
         help=(
-            "Number of parallel workers for execute phase. "
-            "0=force sequential, N>0=force N workers, None=auto-detect "
+            "Number of parallel workers for cache build and execute phases. "
+            "0/1=force sequential, N>1=force N workers, None=auto-detect "
             "(parallel if ≥5 folders, otherwise sequential). Default: None (auto-detect)"
         ),
     )
@@ -1069,6 +1075,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             timer, stats = execute_actions(
                 client,
                 db,
+                reconnect_fn=None if args.dry_run else lambda: imap_login(cfg.paths.secrets_file, logger),
                 show_progress=cfg.logging.show_progress,
                 dry_run=cfg.executor.dry_run,
                 strict=cfg.executor.strict,
@@ -1168,15 +1175,55 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             excluded,
             expand_all=lambda: _get_all_folders_from_db(db),
         )
-        _cache_timer, folders_count, msg_count = build_cache(
-            client,
-            db,
-            folders,
-            show_progress=cfg.logging.show_progress,
-            logger=logger,
-            limit=cfg.cache.limit,
-            order=cfg.cache.order,
-        )
+        # Auto-detect parallelism for cache phase (same logic as build-cache command)
+        cache_parallel_workers = getattr(args, "parallel_workers", None)
+        if cache_parallel_workers is None:
+            cache_parallel_workers = cfg.cache.parallel_workers if len(folders) >= 5 else 1
+
+        if cache_parallel_workers > 1 and client is not None:
+            folder_sizes = get_folder_sizes(client, folders) if args.all_folders else None
+            tasks = distribute_folders_for_load_balancing(folders, folder_sizes, cache_parallel_workers)
+            num_splits = sum(1 for t in tasks if t[1] is not None)
+            logger.log(
+                "INFO",
+                "folders_distributed_for_load_balancing",
+                {"total_tasks": len(tasks), "mega_splits": num_splits, "workers": cache_parallel_workers},
+                console=f"📂 Distributed {len(folders)} folders into {len(tasks)} tasks (with {num_splits} mega-folder splits) across {cache_parallel_workers} workers",
+            )
+            logger.log(
+                "INFO",
+                "cache_parallel_enabled",
+                {"workers": cache_parallel_workers, "original_folders": len(folders), "total_tasks": len(tasks)},
+                console=f"🚀 Parallel cache building: {cache_parallel_workers} workers for {len(tasks)} tasks",
+            )
+            _cache_timer, folders_count, msg_count = build_cache_parallel(
+                cfg.paths.secrets_file,
+                cfg.paths.db_file,
+                tasks,
+                show_progress=cfg.logging.show_progress,
+                logger=logger,
+                limit=cfg.cache.limit,
+                order=cfg.cache.order,
+                max_workers=cache_parallel_workers,
+                folder_sizes=folder_sizes,
+                temp_dir=getattr(args, "temp_dir", None),
+            )
+        else:
+            logger.log(
+                "INFO",
+                "cache_sequential",
+                {"folders": len(folders)},
+                console=f"📂 Sequential cache building: {len(folders)} folders",
+            )
+            _cache_timer, folders_count, msg_count = build_cache(
+                client,
+                db,
+                folders,
+                show_progress=cfg.logging.show_progress,
+                logger=logger,
+                limit=cfg.cache.limit,
+                order=cfg.cache.order,
+            )
         rules = load_rules(cfg.paths.rules_dir, logger)
         _eval_timer, rules_count, matches = evaluate_rules(
             db,
@@ -1222,6 +1269,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             _exec_timer, stats = execute_actions(
                 client,
                 db,
+                reconnect_fn=None if cfg.executor.dry_run else lambda: imap_login(cfg.paths.secrets_file, logger),
                 show_progress=cfg.logging.show_progress,
                 dry_run=cfg.executor.dry_run,
                 strict=cfg.executor.strict,
@@ -1370,6 +1418,7 @@ def handle_eval_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: Js
             _exec_timer, stats = execute_actions(
                 client,
                 db,
+                reconnect_fn=None if cfg.executor.dry_run else lambda: imap_login(cfg.paths.secrets_file, logger),
                 show_progress=cfg.logging.show_progress,
                 dry_run=cfg.executor.dry_run,
                 strict=cfg.executor.strict,

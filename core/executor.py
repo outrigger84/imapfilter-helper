@@ -104,6 +104,17 @@ def _is_invalid_mailbox_name_error(exc_str: str) -> bool:
     return "character not allowed" in s or ("cannot" in s and "mailbox name" in s)
 
 
+def _is_connection_dead(exc: Exception) -> bool:
+    """Return True if the exception indicates the IMAP TCP/SSL socket is gone."""
+    if isinstance(exc, (imaplib.IMAP4.abort, EOFError)):
+        return True
+    msg = str(exc).lower()
+    return any(
+        token in msg
+        for token in ("eof", "connection reset", "broken pipe", "connection aborted")
+    )
+
+
 # ============================================================================
 # Phase 2, Part C: Verification and Backup Helpers
 # ============================================================================
@@ -1378,6 +1389,7 @@ def execute_actions(
     client: imaplib.IMAP4 | None,
     db,
     *,
+    reconnect_fn: Callable[[], imaplib.IMAP4] | None = None,
     show_progress: bool,
     dry_run: bool,
     strict: bool,
@@ -2118,6 +2130,44 @@ def execute_actions(
             )
             raise
 
+    def _do_reconnect() -> bool:
+        """Reconnect to the IMAP server after a connection loss.
+
+        Updates ``client`` and ``supports_uid_move`` in the enclosing scope so
+        all subsequent IMAP calls in this execute_actions() invocation use the
+        fresh connection.  Returns True on success, False otherwise.
+        """
+        nonlocal client, supports_uid_move
+        if reconnect_fn is None or dry_run:
+            return False
+        for attempt in range(1, 4):
+            try:
+                logger.log(
+                    "WARN",
+                    "imap_reconnecting",
+                    {"attempt": attempt},
+                    console=f"   🔄 SSL connection lost — reconnecting (attempt {attempt}/3)...",
+                )
+                client = reconnect_fn()
+                supports_uid_move = _has_capability("MOVE")
+                logger.log(
+                    "INFO",
+                    "imap_reconnected",
+                    {"attempt": attempt},
+                    console="   ✅ Reconnected to IMAP server",
+                )
+                return True
+            except Exception as conn_exc:
+                logger.log(
+                    "ERROR",
+                    "imap_reconnect_failed",
+                    {"attempt": attempt, "error": str(conn_exc)},
+                    console=f"   ❌ Reconnect attempt {attempt} failed: {conn_exc}",
+                )
+                if attempt < 3:
+                    time.sleep(5 * attempt)
+        return False
+
     def flush_group() -> None:
         nonlocal current_key, current_items, current_rule_name
         if current_key is None or not current_items:
@@ -2386,7 +2436,13 @@ def execute_actions(
                 disable=not show_progress,
             )
             try:
-                sel_typ, sel_resp = client.select(f'"{folder}"')
+                try:
+                    sel_typ, sel_resp = client.select(f'"{folder}"')
+                except imaplib.IMAP4.error as _sel_exc:
+                    if _is_connection_dead(_sel_exc) and _do_reconnect():
+                        sel_typ, sel_resp = client.select(f'"{folder}"')
+                    else:
+                        raise
                 log_imap_call(
                     "imap_select",
                     op_label=f'SELECT "{folder}"',
@@ -2658,6 +2714,11 @@ def execute_actions(
                                 batch_fallback.clear()
                                 batch_succeeded = True  # suppress per-message fallback loop
                                 break
+                            if _is_connection_dead(batch_exc) and _do_reconnect():
+                                try:
+                                    client.select(f'"{folder}"')
+                                except Exception:
+                                    pass
                             logger.log(
                                 "WARN",
                                 "execute_batch_move_failed",
@@ -2929,6 +2990,27 @@ def execute_actions(
                                     if verbose
                                     else None
                                 ),
+                            )
+                            continue
+
+                        # Reconnect on dead SSL/socket connection and reset UID to
+                        # pending so it is retried on the next run.  Subsequent UIDs
+                        # in this loop will then use the fresh connection.
+                        if _is_connection_dead(exc) and _do_reconnect():
+                            try:
+                                client.select(f'"{folder}"')
+                            except Exception:
+                                pass
+                            db.execute(
+                                "UPDATE actions SET status='pending' WHERE id=?",
+                                (a_id,),
+                            )
+                            db.commit()
+                            logger.log(
+                                "WARN",
+                                "imap_reconnect_uid_requeued",
+                                {"uid": uid, "folder": folder, "target": target},
+                                console=f"   🔄 Requeued {folder}/{uid} after reconnect",
                             )
                             continue
 
