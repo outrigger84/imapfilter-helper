@@ -12,8 +12,10 @@ import tempfile
 import threading
 import time
 from datetime import datetime, timezone
+from email.parser import HeaderParser as _HeaderParser
+from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence
 
 from tqdm import tqdm
 
@@ -159,6 +161,35 @@ def _coalesce_fetch_payload(msg_data) -> bytes:
         elif isinstance(item, (bytes, bytearray)):
             continue
     return b"".join(parts)
+
+
+_INTERNALDATE_HEADER_PARSER = _HeaderParser()
+
+
+def _internaldate_from_header(raw_header: bytes) -> Optional[str]:
+    """Derive an INTERNALDATE-formatted string from a message's Date: header.
+
+    Used as a fallback when the FETCH response carries no INTERNALDATE so the
+    cached payload still records a usable date. Returns a string in IMAP
+    INTERNALDATE format (``%d-%b-%Y %H:%M:%S %z``) or None if unavailable.
+    """
+    if not raw_header:
+        return None
+    try:
+        msg = _INTERNALDATE_HEADER_PARSER.parsestr(
+            raw_header.decode(errors="ignore"), headersonly=True
+        )
+        date_str = msg.get("date")
+        if not date_str:
+            return None
+        dt = parsedate_to_datetime(date_str)
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.strftime("%d-%b-%Y %H:%M:%S %z")
+    except (ValueError, TypeError):
+        return None
 
 
 def _parse_fetch_response(msg_data) -> tuple[bytes, list[str], str | None]:
@@ -440,6 +471,8 @@ def build_cache(
                     cache_entry: dict = {"header": raw_hdr.decode(errors="ignore")}
                     if flags:
                         cache_entry["flags"] = flags
+                    if not internaldate:
+                        internaldate = _internaldate_from_header(raw_hdr)
                     if internaldate:
                         cache_entry["internaldate"] = internaldate
 
@@ -832,6 +865,8 @@ def build_cache_parallel(
                     cache_entry: dict = {"header": raw_hdr.decode(errors="ignore")}
                     if flags:
                         cache_entry["flags"] = flags
+                    if not internaldate:
+                        internaldate = _internaldate_from_header(raw_hdr)
                     if internaldate:
                         cache_entry["internaldate"] = internaldate
 

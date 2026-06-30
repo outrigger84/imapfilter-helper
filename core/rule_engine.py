@@ -7,6 +7,7 @@ import json
 import re
 from datetime import datetime, timezone
 from email.parser import HeaderParser as _HeaderParser
+from email.utils import parsedate_to_datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional, Sequence, Tuple
@@ -143,6 +144,25 @@ def _parse_internaldate(date_str: Optional[str]) -> Optional[datetime]:
     return None
 
 
+def _parse_header_date(date_str: Optional[str]) -> Optional[datetime]:
+    """Parse an RFC 2822 ``Date:`` header into a timezone-aware datetime.
+
+    Used as a fallback when the cached payload has no INTERNALDATE. Returns
+    None if the value is missing or unparseable.
+    """
+    if not date_str:
+        return None
+    try:
+        dt = parsedate_to_datetime(date_str)
+    except (ValueError, TypeError):
+        return None
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def _extract_message_metadata(data: str) -> Tuple[dict, List[str], Optional[datetime]]:
     """
     Extract message metadata from cached data string.
@@ -184,6 +204,13 @@ def _extract_message_metadata(data: str) -> Tuple[dict, List[str], Optional[date
         date_str = payload.get("internaldate")
         if isinstance(date_str, str):
             date_object = _parse_internaldate(date_str)
+
+        # Fallback: derive the date from the message's Date: header when the
+        # cached payload has no internaldate (e.g. caches built before
+        # internaldate capture, or when the FETCH response parser missed it).
+        # Without this, every age-based rule silently fails to match.
+        if date_object is None:
+            date_object = _parse_header_date(header_dict.get("date"))
     else:
         # Fallback: treat entire payload as header
         header_dict = _parse_header_map(str(payload))
