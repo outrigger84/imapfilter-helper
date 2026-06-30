@@ -927,6 +927,7 @@ def _perform_batch_move_operations(
     backup_moved: bool = False,
     backup_dir: Path | None = None,
     logger: JsonLogger | None = None,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> tuple[int, int, list[tuple[dict, str | None]]]:
     """
     Move all UIDs in *actions* from *folder* to *target* with O(1) IMAP round-trips.
@@ -989,6 +990,8 @@ def _perform_batch_move_operations(
     successful_moves = []
     fallback_actions: list[dict] = []
     chunks = [to_move[i : i + _BATCH_SIZE] for i in range(0, len(to_move), _BATCH_SIZE)]
+    total = len(to_move)
+    _LOG_INTERVAL = 5000
 
     for chunk in chunks:
         uid_set = ",".join(a["uid"] for a in chunk if a.get("uid"))
@@ -1013,6 +1016,7 @@ def _perform_batch_move_operations(
                     {"folder": folder, "target": target, "uid_count": len(chunk), "error": str(exc)},
                 )
 
+        chunk_size = len(chunk)
         if chunk_ok:
             ts = now_iso()
             for action in chunk:
@@ -1026,9 +1030,20 @@ def _perform_batch_move_operations(
                 )
                 successful_moves.append((action, None))
             main_db.commit()
-            done += len(chunk)
+            prev_done = done
+            done += chunk_size
+            if logger and done // _LOG_INTERVAL != prev_done // _LOG_INTERVAL:
+                logger.log(
+                    "INFO",
+                    "worker_batch_move_progress",
+                    {"folder": folder, "target": target, "done": done, "total": total},
+                    console=f"  ↳ {folder} → {target}: {done:,}/{total:,} moved",
+                )
         else:
             fallback_actions.extend(chunk)
+
+        if progress_callback is not None:
+            progress_callback(chunk_size)
 
     # Per-message fallback for any chunks the batch command rejected.
     for action in fallback_actions:
@@ -1049,6 +1064,8 @@ def _perform_batch_move_operations(
             successful_moves.append((action, None))
         else:
             failed += 1
+        if progress_callback is not None:
+            progress_callback(1)
 
     return done, failed, successful_moves
 
@@ -3377,6 +3394,7 @@ def _execute_folder_worker(
     backup_all: bool = False,
     backup_dir: Path | None = None,
     logger: JsonLogger | None = None,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> tuple[str, int, int]:
     """
     Process all actions for a single source folder (runs in worker thread).
@@ -3428,7 +3446,12 @@ def _execute_folder_worker(
         logger.log("DEBUG", "worker_actions_grouped", {"worker_id": worker_id, "folder": folder, "group_count": len(action_groups)})
 
         for (grp_folder, target), group_actions in action_groups.items():
-            logger.log("DEBUG", "worker_processing_group", {"worker_id": worker_id, "folder": grp_folder, "target": target, "action_count": len(group_actions)})
+            logger.log(
+                "DEBUG",
+                "worker_processing_group",
+                {"worker_id": worker_id, "folder": grp_folder, "target": target, "action_count": len(group_actions)},
+                console=f"  ▶ Worker {worker_id}: {grp_folder} → {target or '(no target)'} ({len(group_actions):,} messages)",
+            )
             if dry_run:
                 for action in group_actions:
                     main_db.execute(
@@ -3436,6 +3459,8 @@ def _execute_folder_worker(
                         ("done", now_iso(), action["id"]),
                     )
                     actions_done += 1
+                    if progress_callback is not None:
+                        progress_callback(1)
                 main_db.commit()
                 continue
 
@@ -3515,6 +3540,7 @@ def _execute_folder_worker(
                         backup_moved=backup_moved,
                         backup_dir=backup_dir,
                         logger=logger,
+                        progress_callback=progress_callback,
                     )
                     actions_done += batch_done
                     actions_failed += batch_failed
@@ -3858,6 +3884,12 @@ def execute_actions_parallel(
                 except _queue.Empty:
                     break
                 done = failed = 0
+                reported_via_cb = [0]
+
+                def _progress_cb(n: int, _reported=reported_via_cb) -> None:
+                    _reported[0] += n
+                    actions_bar.update(n)
+
                 try:
                     _, done, failed = _execute_folder_worker(
                         conn=conn,
@@ -3872,6 +3904,7 @@ def execute_actions_parallel(
                         backup_all=backup_all,
                         backup_dir=backup_dir,
                         logger=logger,
+                        progress_callback=_progress_cb,
                     )
                 except (imaplib.IMAP4.abort, OSError) as conn_exc:
                     logger.log(
@@ -3902,6 +3935,7 @@ def execute_actions_parallel(
                                 backup_all=backup_all,
                                 backup_dir=backup_dir,
                                 logger=logger,
+                                progress_callback=_progress_cb,
                             )
                         except Exception as retry_exc:
                             logger.log(
@@ -3926,16 +3960,19 @@ def execute_actions_parallel(
                     total_done += done
                     total_failed += failed
                     _td, _tf = total_done, total_failed
-                actions_bar.update(done + failed)
+                # Catch-all: update bar for any actions not already reported via callback
+                # (e.g. verification steps, failed actions mid-exception, etc.)
+                remainder = (done + failed) - reported_via_cb[0]
+                if remainder > 0:
+                    actions_bar.update(remainder)
                 folders_bar.set_postfix(done=_td, fail=_tf)
                 folders_bar.update(1)
-                if verbose:
-                    logger.log(
-                        "INFO",
-                        "worker_folder_done",
-                        {"worker_id": worker_id, "folder": wfolder, "done": done, "failed": failed},
-                        console=f"  ✓ Worker {worker_id}: {wfolder} — {done} done, {failed} failed",
-                    )
+                logger.log(
+                    "INFO",
+                    "worker_folder_done",
+                    {"worker_id": worker_id, "folder": wfolder, "done": done, "failed": failed},
+                    console=f"  ✓ Worker {worker_id}: {wfolder} — {done:,} done, {failed} failed",
+                )
         finally:
             if conn is not None:
                 try:
