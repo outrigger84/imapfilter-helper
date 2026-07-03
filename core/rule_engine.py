@@ -449,23 +449,33 @@ def conditions_match(
     return _evaluate_condition_node(header, conditions, flags, date)
 
 
-def find_matching_rule(header: dict, rules: Sequence[dict]) -> dict | None:
+def find_matching_rule(
+    header: dict,
+    rules: Sequence[dict],
+    flags: Optional[List[str]] = None,
+    date: Optional[datetime] = None,
+) -> dict | None:
     """
     Find the first matching rule for a message header.
 
-    Rules are evaluated in order (should be sorted by priority first).
+    Rules are evaluated in order (should be sorted by priority ascending —
+    lower priority number = higher precedence, matching evaluate_rules).
     Returns the first matching rule or None if no rules match.
 
     Args:
         header: Parsed header dictionary with lowercase keys
-        rules: List of rule dictionaries, ordered by priority (highest first)
+        rules: List of rule dictionaries, sorted by priority ascending
+        flags: Optional list of IMAP flags/keywords for the message.
+               Without this, has_keyword/lacks_keyword conditions never match.
+        date: Optional message date. Without this, age_days_* conditions
+              never match.
 
     Returns:
         The first matching rule dict, or None if no match
     """
     for rule in rules:
         conditions = rule.get("conditions")
-        if conditions_match(header, conditions):
+        if conditions_match(header, conditions, flags=flags, date=date):
             return rule
     return None
 

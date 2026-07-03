@@ -1,0 +1,20 @@
+[project]
+name = "imapfilter-helper"
+version = "1.0.0"
+description = "Cache-assisted IMAP mailbox filtering: rule evaluation, action execution, and rule-authoring tools"
+requires-python = ">=3.10"
+dependencies = [
+    "tqdm>=4.50.0",     # progress bars: cache building, message processing, execution
+    "requests>=2.25.0", # Gotify notification support
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0.0",
+    "pytest-cov>=2.10.0",
+]
+
+[tool.pytest.ini_options]
+# Only collect from tests/. Root-level and .archive/ scripts named test_*.py
+# are diagnostics, not tests — some connect to the live IMAP server at import.
+testpaths = ["tests"]

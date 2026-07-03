@@ -11,8 +11,7 @@ from typing import Optional
 from tqdm import tqdm
 
 from core.rule_engine import (
-    _extract_raw_header,
-    _parse_header_map,
+    _extract_message_metadata,
     find_matching_rule,
     load_rules,
 )
@@ -175,8 +174,9 @@ class RuleCoverageAnalyzer:
             print("⚠️  No rules found")
             rules = []
 
-        # Sort rules by priority (descending) to match executor behavior
-        rules.sort(key=lambda r: r.get("priority", 100), reverse=True)
+        # Sort rules by priority ascending to match executor behaviour:
+        # lower priority number = higher precedence, first match wins.
+        rules.sort(key=lambda r: int(r.get("priority", 100)))
 
         # Query all messages from cache
         cursor = self.conn.cursor()
@@ -203,12 +203,12 @@ class RuleCoverageAnalyzer:
 
         print(f"🔍 Analyzing {total_count:,} messages...")
         for folder, uid, data in tqdm(all_rows, desc="Coverage analysis", unit="msg"):
-            # Parse header
-            raw_header = _extract_raw_header(data)
-            header = _parse_header_map(raw_header)
+            # Parse header, flags, and date from the cached payload. Flags and
+            # date must be supplied or has_keyword/age_days_* rules never match.
+            header, flags, date = _extract_message_metadata(data)
 
             # Find matching rule
-            matching_rule = find_matching_rule(header, rules)
+            matching_rule = find_matching_rule(header, rules, flags=flags, date=date)
 
             if matching_rule:
                 covered_count += 1

@@ -242,20 +242,28 @@ def prune_empty_folders(
     Delete empty leaf folders from the mail server.
 
     Args:
-        client:  Authenticated IMAP connection, or None when dry_run is True.
+        client:  Authenticated IMAP connection (read-only LIST/STATUS suffices
+                 for dry_run).
         auto:    If True, delete without prompting. If False, prompt per folder.
         dry_run: List candidates without deleting anything.
         logger:  Optional logger for structured output.
     """
-    if dry_run:
-        # Build a provisional list using a temporary login is not possible here;
-        # callers should pass client=None only when they have no connection.
-        print("ℹ️  --prune-empty-folders: dry-run mode — no folders will be deleted")
+    if client is None:
+        print("ℹ️  --prune-empty-folders: no IMAP connection available — skipping")
         return
 
     candidates = find_empty_prunable_folders(client)
     if not candidates:
         print("✅ No empty folders to remove")
+        return
+
+    if dry_run:
+        print(f"\n🗑️  Dry run — {len(candidates)} empty folder(s) would be deleted:")
+        for folder in candidates:
+            print(f"  • {folder}")
+            if logger:
+                logger.log("INFO", "prune_folder", {"folder": folder, "status": "dry_run"})
+        print("\nℹ️  No folders were deleted (dry-run mode)")
         return
 
     print(f"\n🗑️  Found {len(candidates)} empty folder(s) to prune:")

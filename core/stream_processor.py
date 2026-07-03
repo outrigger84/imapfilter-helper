@@ -15,6 +15,8 @@ class StreamMessage(NamedTuple):
     folder: str
     uid: str
     header_text: str
+    flags: list[str] = []
+    internaldate: str | None = None
 
 
 def count_stream_messages(
@@ -153,7 +155,7 @@ def stream_messages(
                     for uid in batch
                 )
                 try:
-                    typ, msg_data = client.uid("FETCH", uid_set, "(BODY.PEEK[HEADER])")
+                    typ, msg_data = client.uid("FETCH", uid_set, "(FLAGS INTERNALDATE BODY.PEEK[HEADER])")
                 except Exception as exc:
                     logger.log(
                         "WARN",
@@ -171,7 +173,7 @@ def stream_messages(
                     continue
 
                 parsed = _parse_batch_fetch_response(msg_data)
-                for uid_str, (raw_hdr, _flags, _date) in parsed.items():
+                for uid_str, (raw_hdr, flags, internaldate) in parsed.items():
                     if not raw_hdr:
                         logger.log(
                             "WARN",
@@ -179,7 +181,13 @@ def stream_messages(
                             {"folder": folder, "uid": uid_str},
                         )
                         continue
-                    yield StreamMessage(folder=folder, uid=uid_str, header_text=raw_hdr.decode(errors="ignore"))
+                    yield StreamMessage(
+                        folder=folder,
+                        uid=uid_str,
+                        header_text=raw_hdr.decode(errors="ignore"),
+                        flags=flags,
+                        internaldate=internaldate,
+                    )
                     msg_count += 1
 
             logger.log(

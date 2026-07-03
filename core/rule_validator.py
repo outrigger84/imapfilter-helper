@@ -48,6 +48,10 @@ class RuleValidator:
         structure_issues = self._find_structure_issues(conditions)
         warnings.extend(structure_issues)
 
+        # Check for condition dicts the engine would evaluate partially
+        ambiguity_issues = self._find_ambiguous_conditions(conditions)
+        warnings.extend(ambiguity_issues)
+
         # Check actions for suspicious patterns
         action_issues = self._validate_actions(rule)
         warnings.extend(action_issues)
@@ -143,6 +147,69 @@ class RuleValidator:
             return max_child_depth
 
         return depth
+
+    # Condition-key families as understood by core.rule_engine.
+    # The engine evaluates flag, age and logical keys in one dict as an AND,
+    # but silently ignores header-operator keys when any other family is
+    # present, and within a family only evaluates the first key it finds.
+    _HEADER_OPERATOR_KEYS = (
+        "contains", "equals", "regex", "not_contains", "not_equals", "not_regex",
+    )
+    _FLAG_KEYS = ("has_keyword", "has_flag", "lacks_keyword", "lacks_flag")
+    _AGE_KEYS = ("age_days_gt", "age_days_lt", "age_days_eq")
+    _LOGICAL_KEYS = ("not", "all", "any")
+
+    def _find_ambiguous_conditions(self, node: Any, path: str = "root") -> list[str]:
+        """Find condition dicts that the rule engine would evaluate partially.
+
+        Two silent footguns are detected:
+        - A dict mixing header-operator keys with flag/age/logical keys: the
+          engine returns after the flag/age/logical checks and never evaluates
+          the header clause.
+        - A dict with more than one key from the same family (e.g. both
+          ``contains`` and ``not_contains``): the engine only evaluates the
+          first key it checks; the rest are ignored.
+        """
+        issues: list[str] = []
+
+        if isinstance(node, list):
+            for i, child in enumerate(node):
+                issues.extend(self._find_ambiguous_conditions(child, f"{path}[{i}]"))
+            return issues
+
+        if not isinstance(node, dict):
+            return issues
+
+        header_ops = [k for k in self._HEADER_OPERATOR_KEYS if k in node]
+        flag_keys = [k for k in self._FLAG_KEYS if k in node]
+        age_keys = [k for k in self._AGE_KEYS if k in node]
+        logical_keys = [k for k in self._LOGICAL_KEYS if k in node]
+
+        if header_ops and (flag_keys or age_keys or logical_keys):
+            others = flag_keys + age_keys + logical_keys
+            issues.append(
+                f"⚠️ {path}: header condition ({'/'.join(header_ops)}) is silently "
+                f"IGNORED when combined with {'/'.join(others)} in the same block - "
+                "wrap the conditions in an 'all' group instead"
+            )
+
+        for family_name, present in (
+            ("header operators", header_ops),
+            ("flag conditions", flag_keys),
+            ("age conditions", age_keys),
+        ):
+            if len(present) > 1:
+                issues.append(
+                    f"⚠️ {path}: multiple {family_name} ({'/'.join(present)}) in one "
+                    "block - only the first is evaluated; split into separate "
+                    "conditions inside an 'all' group"
+                )
+
+        # Recurse into logical wrappers
+        for key in logical_keys:
+            issues.extend(self._find_ambiguous_conditions(node.get(key), f"{path}/{key}"))
+
+        return issues
 
     def _find_structure_issues(self, node: Any) -> list[str]:
         """Find structural problems in conditions.

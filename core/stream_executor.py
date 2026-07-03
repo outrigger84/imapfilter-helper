@@ -11,7 +11,12 @@ from tqdm import tqdm
 
 from core.backup import backup_messages, BackupResult
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
-from core.rule_engine import find_matching_rule, _parse_header_map
+from core.rule_engine import (
+    find_matching_rule,
+    _parse_header_map,
+    _parse_header_date,
+    _parse_internaldate,
+)
 from core.stream_processor import StreamMessage
 from core.stream_resume import ResumeLog
 
@@ -298,8 +303,12 @@ def stream_execute(
             # Parse header into dict
             header = _parse_header_map(msg.header_text)
 
-            # Find matching rule
-            matching_rule = find_matching_rule(header, sorted_rules)
+            # Find matching rule. Flags and date must be supplied here or
+            # has_keyword/lacks_keyword and age_days_* conditions never match.
+            msg_date = _parse_internaldate(msg.internaldate)
+            if msg_date is None:
+                msg_date = _parse_header_date(header.get("date"))
+            matching_rule = find_matching_rule(header, sorted_rules, flags=msg.flags, date=msg_date)
 
             if not matching_rule:
                 stats["skipped"] += 1

@@ -20,7 +20,7 @@ from tqdm import tqdm
 from core.connection_pool import IMAPConnectionPool
 from core.imap_client import imap_login
 from core.logging_utils import JsonLogger
-from core.rule_engine import find_matching_rule, load_rules
+from core.rule_engine import find_matching_rule, load_rules, _parse_header_date
 
 
 def _quote_mailbox(name: str) -> str:
@@ -279,7 +279,10 @@ def _classify_messages(
                     subject = msg.get("subject", "(no subject)")
                     print(f"  [{i+1}] {subject[:60]} → {target} (--no-move)")
             else:
-                matching_rule = find_matching_rule(header_dict, sorted_rules)
+                # Mbox messages carry no IMAP flags, but age_days_* conditions
+                # can still be evaluated from the Date: header.
+                msg_date = _parse_header_date(header_dict.get("date"))
+                matching_rule = find_matching_rule(header_dict, sorted_rules, date=msg_date)
                 if matching_rule:
                     action = matching_rule.get("action") or {}
                     if not action:

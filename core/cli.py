@@ -1110,9 +1110,9 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                     pass
 
     if getattr(args, "prune_empty_folders", False):
-        prune_client = None
-        if not args.dry_run:
-            prune_client = imap_login(cfg.paths.secrets_file, logger)
+        # Log in even for dry-run: finding prunable folders only needs
+        # read-only LIST/STATUS, and dry-run should show the candidate list.
+        prune_client = imap_login(cfg.paths.secrets_file, logger)
         try:
             prune_empty_folders(
                 prune_client,
@@ -1318,9 +1318,9 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                 pass
 
     if getattr(args, "prune_empty_folders", False):
-        prune_client = None
-        if not args.dry_run:
-            prune_client = imap_login(cfg.paths.secrets_file, logger)
+        # Log in even for dry-run: finding prunable folders only needs
+        # read-only LIST/STATUS, and dry-run should show the candidate list.
+        prune_client = imap_login(cfg.paths.secrets_file, logger)
         try:
             prune_empty_folders(
                 prune_client,
