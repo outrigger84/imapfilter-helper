@@ -13,8 +13,16 @@ secrets.json
 *.log
 *.log.[0-9]*
 
-# --- Coverage ---
+# --- Coverage / test caches ---
 .coverage
+.pytest_cache/
+
+# --- Generated runtime artifacts ---
+data/wizard_cache*.json
+data/review_*.md
+
+# --- Backups / editor droppings ---
+*.bak
 
 # --- Python build junk ---
 __pycache__/
