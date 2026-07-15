@@ -78,12 +78,12 @@ print(f"Total time: {total_time:.2f}s for {len(folders)} folders")
 print(f"Average: {total_time/len(folders)*1000:.1f}ms per folder")
 
 if slow_folders:
-    print(f"\n⚠️  Slow folders (>1s):")
+    print("\n⚠️  Slow folders (>1s):")
     for folder, elapsed in sorted(slow_folders, key=lambda x: x[1], reverse=True)[:10]:
         print(f"   {elapsed:.2f}s - {folder}")
 
 if failed_folders:
-    print(f"\n❌ Failed folders:")
+    print("\n❌ Failed folders:")
     for folder, error in failed_folders:
         print(f"   {folder}: {error}")
 else:

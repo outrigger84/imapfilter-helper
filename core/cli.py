@@ -485,14 +485,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Clear the resume log before running so all emails are re-evaluated from scratch",
     )
 
-    p_clear = sub.add_parser("clear-pending", help="Remove all pending actions without executing them")
+    sub.add_parser("clear-pending", help="Remove all pending actions without executing them")
 
-    p_clear_cache = sub.add_parser(
+    sub.add_parser(
         "clear-cache",
         help="Remove cached message headers and pending actions",
     )
 
-    p_compact_cache = sub.add_parser(
+    sub.add_parser(
         "compact-cache",
         help="Prune cached headers for messages that have already been handled",
     )
@@ -1992,7 +1992,7 @@ def _output_detailed_conflicts(conflicts, cache_available):
     medium = sum(1 for c in conflicts if c.severity.value == "medium")
     low = sum(1 for c in conflicts if c.severity.value == "low")
 
-    print(f"\n📊 Summary:")
+    print("\n📊 Summary:")
     print(f"   Total Conflicts: {len(conflicts)}")
     print(f"   Validation: {'cache (real message counts)' if cache_available else 'static analysis'}")
     if high > 0:
@@ -2008,7 +2008,7 @@ def _output_detailed_conflicts(conflicts, cache_available):
         type_display = conflict.type.value.replace("_", " ").title()
 
         print(f"\n{severity_icon} CONFLICT #{i} — {type_display} ({conflict.severity.value.upper()})")
-        print(f"\n   Rules:")
+        print("\n   Rules:")
         print(f"      [{conflict.rule1_priority}] {conflict.rule1_name}")
         print(f"      [{conflict.rule2_priority}] {conflict.rule2_name}")
         print(f"\n   Overlap: {conflict.overlap_percent:.0%} ({conflict.overlap_relationship.value})")

@@ -557,7 +557,7 @@ class RuleWizard:
 
         if success:
             print()
-            print(f"Rule saved successfully!")
+            print("Rule saved successfully!")
             print(f"  {message}")
             print()
             print("You can now run your rules with: python -m core.cli run-all")

@@ -84,7 +84,7 @@ class WizardCache:
                 with open(temp_path, 'w') as f:
                     json.dump(self._cache, f, indent=2)
                 temp_path.replace(self.cache_path)
-            except Exception as e:
+            except Exception:
                 if temp_path.exists():
                     temp_path.unlink()
                 raise

@@ -18,7 +18,7 @@ from __future__ import annotations
 import sys
 import sqlite3
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 # Make repo-root imports (rule_wizard, core.*) work from any cwd
 ROOT = Path(__file__).resolve().parents[2]
@@ -100,7 +100,7 @@ except AssertionError as e:
 print("\n1.4 Verify all dependencies can be imported...")
 try:
     from core.config import build_default_config, AppConfig
-    from core.tools.rule_wizard_core import (
+    from core.tools.rule_wizard_core import (  # noqa: F401 — imported to verify availability
         CacheQueryEngine,
         EmailPatternExtractor,
         SubjectPatternExtractor,

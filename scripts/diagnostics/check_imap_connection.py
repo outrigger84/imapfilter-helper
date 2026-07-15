@@ -89,8 +89,8 @@ try:
         else:
             print(f"⚠ Got status={status}, data={data}")
 except socket.timeout:
-    print(f"\n   ✗ TIMEOUT on STATUS command (THIS IS THE ISSUE!)")
-    print(f"   The STATUS command hangs on some folders")
+    print("\n   ✗ TIMEOUT on STATUS command (THIS IS THE ISSUE!)")
+    print("   The STATUS command hangs on some folders")
     sys.exit(1)
 except Exception as e:
     print(f"\n   ✗ STATUS failed: {e}")

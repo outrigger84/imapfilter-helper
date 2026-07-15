@@ -56,7 +56,7 @@ def main():
     worker_dbs = sorted(args.temp_dir.glob("thread_*.db"))
     if not worker_dbs:
         print(f"❌ Error: No worker databases found in {args.temp_dir}")
-        print(f"   Looking for: thread_*.db files")
+        print("   Looking for: thread_*.db files")
         return 1
 
     print(f"📂 Found {len(worker_dbs)} worker database(s) to merge")
@@ -191,7 +191,7 @@ def main():
     # Commit changes
     try:
         main_db.commit()
-        print(f"\n✅ Committed all changes")
+        print("\n✅ Committed all changes")
     except sqlite3.OperationalError as err:
         print(f"❌ Error committing changes: {err}")
         main_db.close()
@@ -200,7 +200,7 @@ def main():
     main_db.close()
 
     # Report results
-    print(f"\n📊 Merge Complete")
+    print("\n📊 Merge Complete")
     print(f"   📧 Total headers: {total_headers}")
     print(f"   📁 Total folders: {total_folders}")
 

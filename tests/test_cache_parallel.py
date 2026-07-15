@@ -1,8 +1,6 @@
 """Tests for cache optimization: folder sizing, sorting, connection pooling, and WAL mode."""
 from __future__ import annotations
 
-import queue
-import re
 import sqlite3
 import sys
 import threading

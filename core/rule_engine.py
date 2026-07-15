@@ -10,7 +10,7 @@ from email.parser import HeaderParser as _HeaderParser
 from email.utils import parsedate_to_datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 from tqdm import tqdm
 

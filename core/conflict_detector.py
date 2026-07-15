@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from core.logging_utils import JsonLogger
-from core.rule_engine import conditions_match
 
 
 class ConflictType(Enum):
@@ -813,7 +812,7 @@ class ConflictDetector:
                         overlap_percent=overlap_pct,
                         affected_count=None,
                         explanation=f"Rules '{rule1.get('name')}' and '{rule2.get('name')}' have {overlap_pct:.0%} identical conditions and move to the same target.",
-                        suggestion=f"Consider merging these rules into a single rule with combined conditions.",
+                        suggestion="Consider merging these rules into a single rule with combined conditions.",
                         reason=reason,
                     )
                 )
@@ -941,8 +940,8 @@ class ConflictDetector:
             )
         else:
             return (
-                f"Option A: Adjust priorities to differentiate execution order. "
-                f"Option B: Add exclusion conditions to one rule to prevent overlap."
+                "Option A: Adjust priorities to differentiate execution order. "
+                "Option B: Add exclusion conditions to one rule to prevent overlap."
             )
 
     def _explain_unreachable(self, rule1: dict, rule2: dict) -> str:
@@ -1144,10 +1143,10 @@ class ConflictResolver:
                         self.applied_fixes.append(f"{rule_file.name}: priority {old_value} → {new_value}")
 
             elif fix["type"] == "merge_rules":
-                print(f"  ℹ️  Manual merge required:")
-                print(f"     1. Review conditions in both rules")
-                print(f"     2. Combine conditions with OR logic")
-                print(f"     3. Delete one of the rule files")
+                print("  ℹ️  Manual merge required:")
+                print("     1. Review conditions in both rules")
+                print("     2. Combine conditions with OR logic")
+                print("     3. Delete one of the rule files")
 
             return True
 
@@ -1195,8 +1194,8 @@ class ConflictResolver:
                 print(f"    [{j}] {fix['description']}")
 
             print("  Other options:")
-            print(f"    [S] Skip this conflict")
-            print(f"    [Q] Quit without more changes")
+            print("    [S] Skip this conflict")
+            print("    [Q] Quit without more changes")
 
             choice = input("\n  Select option [1-{}]/s/q: ".format(len(suggestions))).lower()
 
@@ -1209,20 +1208,20 @@ class ConflictResolver:
                 fix_idx = int(choice) - 1
                 fix = suggestions[fix_idx]
 
-                print(f"\n  Preview of changes:")
+                print("\n  Preview of changes:")
                 if self.apply_fix(conflict, fix, dry_run=True):
                     confirm = input("\n  Apply this fix? [y/N]: ").lower()
                     if confirm == "y":
                         if self.apply_fix(conflict, fix, dry_run=False):
                             applied += 1
-                            print(f"  ✓ Fix applied")
+                            print("  ✓ Fix applied")
                         else:
-                            print(f"  ✗ Fix failed")
+                            print("  ✗ Fix failed")
             else:
                 print("  Invalid choice")
 
         print("\n" + "=" * 80)
-        print(f"Resolution Summary:")
+        print("Resolution Summary:")
         print(f"  Applied: {applied}")
         print(f"  Skipped: {skipped}")
         print(f"  Total: {len(self.conflicts)}")

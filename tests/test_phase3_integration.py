@@ -208,9 +208,9 @@ def test_phase3_integration_flags_and_age():
         db.close()
         print("\n✅ Phase 3 Integration Test Passed!")
         print(f"   - Processed {match_count} matches")
-        print(f"   - Verified flag-based conditions")
-        print(f"   - Verified age-based conditions")
-        print(f"   - Verified backward compatibility")
+        print("   - Verified flag-based conditions")
+        print("   - Verified age-based conditions")
+        print("   - Verified backward compatibility")
 
 
 def test_phase3_complex_logical_operators():
@@ -323,7 +323,7 @@ def test_phase3_complex_logical_operators():
 
         db.close()
         print("\n✅ Complex Logical Operators Test Passed!")
-        print(f"   - Verified nested ANY/ALL with flags and age")
+        print("   - Verified nested ANY/ALL with flags and age")
 
 
 if __name__ == "__main__":

@@ -6,8 +6,6 @@ and correctly evaluated by the rule engine.
 
 import json
 import pytest
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from core.tools.rule_wizard_core import (
     RuleBuilder,

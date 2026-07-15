@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import base64
 import imaplib
-import re
 from pathlib import Path
 from typing import Sequence
 
 from tqdm import tqdm
 
-from core.backup import backup_messages, BackupResult
-from core.logging_utils import JsonLogger, PhaseTimer, now_iso
+from core.backup import backup_messages
+from core.logging_utils import JsonLogger, PhaseTimer
 from core.rule_engine import (
     find_matching_rule,
     _parse_header_map,

@@ -435,7 +435,7 @@ def _append_folder_batch(
                         successful_indices.append(idx)
                         logger.log("INFO", "append_already_exists",
                                    {"folder": folder, "msg_id": msg_id},
-                                   console=f"    ↩  Already in folder (skipped duplicate)")
+                                   console="    ↩  Already in folder (skipped duplicate)")
                         if progress_path is not None and index_to_msgid is not None:
                             with (progress_lock or _null_context()):
                                 _record_uploaded(progress_path, msg_id)
@@ -866,7 +866,7 @@ def run_mbox_import(
     if total_failed == 0 and progress_path.exists():
         progress_path.unlink()
         logger.log("INFO", "progress_cleared", {},
-                   console=f"🗑️  Progress file removed (all messages uploaded successfully)")
+                   console="🗑️  Progress file removed (all messages uploaded successfully)")
     elif progress_path.exists():
         logger.log("INFO", "progress_kept", {"path": str(progress_path)},
                    console=f"♻️  Progress file kept at {progress_path.name} — re-run to retry failures")

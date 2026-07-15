@@ -114,7 +114,7 @@ class CacheQueryEngine:
             """)
 
             self.conn.commit()
-        except sqlite3.Error as e:
+        except sqlite3.Error:
             # Indexes might already exist, which is fine
             pass
 

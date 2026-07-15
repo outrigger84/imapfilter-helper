@@ -2,7 +2,6 @@
 """Test script for keyword actions implementation."""
 
 import json
-import sqlite3
 import tempfile
 from pathlib import Path
 
@@ -131,7 +130,7 @@ def test_action_selection():
 
         action_id, uid, folder, target, rule_name, priority, created_at, action_type, action_data = row
 
-        print(f"\nSelected action:")
+        print("\nSelected action:")
         print(f"  ID: {action_id}")
         print(f"  UID: {uid}")
         print(f"  Folder: {folder}")

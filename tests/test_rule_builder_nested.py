@@ -4,9 +4,7 @@ Tests the ConditionNode, ConditionGroup, GroupingSpec classes and
 RuleBuilder's ability to create nested boolean logic in rules.
 """
 
-import json
 import pytest
-from pathlib import Path
 
 from core.tools.rule_wizard_core import (
     ConditionNode,

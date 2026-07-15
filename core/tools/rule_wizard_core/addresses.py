@@ -1,7 +1,6 @@
 """Email address parsing, display-name extraction, and address grouping."""
 from __future__ import annotations
 
-import email
 from dataclasses import dataclass
 from typing import List, Tuple
 

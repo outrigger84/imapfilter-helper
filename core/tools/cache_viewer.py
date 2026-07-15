@@ -235,7 +235,7 @@ def extract_emails_from_cache(
                     )
                 )
 
-            except Exception as e:
+            except Exception:
                 skipped_count += 1
                 continue
 
@@ -348,7 +348,7 @@ def _matches_conditions(
         # Unrecognized format
         return True
 
-    except Exception as e:
+    except Exception:
         # If rule engine fails, skip filtering
         return True
 

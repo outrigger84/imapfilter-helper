@@ -251,7 +251,7 @@ def test_all_email_field_types_detected():
 
         with patch("builtins.input", return_value="1"):
             with patch("sys.stdout", new=captured_output):
-                result = wizard._select_match_type(field)
+                wizard._select_match_type(field)
 
         output = captured_output.getvalue()
 

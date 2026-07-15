@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import imaplib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -13,9 +14,12 @@ from core.logging_utils import JsonLogger
 
 
 def _ensure_large_imap_buffer() -> None:
-    """Remove imaplib's line-length cap so large SEARCH responses (e.g. huge INBOX) don't abort."""
-    # sys.maxsize + 1 overflows Py_ssize_t when imaplib calls readline(_MAXLINE + 1)
-    imaplib._MAXLINE = sys.maxsize - 1
+    """Raise imaplib's line-length cap so large SEARCH responses (e.g. huge INBOX) don't abort.
+
+    64 MB fits a UID SEARCH response for tens of millions of messages while
+    still bounding what a misbehaving server can make readline() buffer.
+    """
+    imaplib._MAXLINE = 64 * 1024 * 1024
 
 
 _FETCH_FOLD_RE = re.compile(rb"\bFETCH\b")
@@ -91,7 +95,15 @@ def imap_login(secrets_path: Path, logger: JsonLogger) -> imaplib.IMAP4:
     else:
         mail = imaplib.IMAP4(secrets_cfg["host"], secrets_cfg.get("port", default_port))
     mail.sock.settimeout(300)  # 5 min — large INBOX SEARCH/FETCH can be slow
-    mail.login(secrets_cfg["username"], secrets_cfg["password"])
+    # IMAPFILTER_PASSWORD overrides the secrets file, so the file can omit
+    # the password entirely (e.g. on shared machines or public checkouts).
+    password = os.environ.get("IMAPFILTER_PASSWORD") or secrets_cfg.get("password")
+    if not password:
+        sys.exit(
+            "❌ No IMAP password: set IMAPFILTER_PASSWORD or add \"password\" "
+            f"to {secrets_path}"
+        )
+    mail.login(secrets_cfg["username"], password)
     _patch_fold_aware_readline(mail)
     return mail
 

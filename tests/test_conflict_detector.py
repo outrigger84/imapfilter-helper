@@ -5,7 +5,6 @@ import json
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch
 
 import pytest
 
@@ -286,7 +285,6 @@ class TestConflictDetector:
             rule_data = {"name": "Test Rule", "priority": 100}
             rule_file.write_text(json.dumps(rule_data))
 
-            rules = [rule_data]
             resolver = ConflictResolver([], tmpdir)
             found_file = resolver._find_rule_file("Test Rule")
 

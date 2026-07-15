@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass, field
 from email.header import decode_header
 from pathlib import Path

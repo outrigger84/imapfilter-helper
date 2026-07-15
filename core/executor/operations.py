@@ -60,7 +60,6 @@ def _perform_move_operation(
     uid = action['uid']
     folder = action['folder']
     target = _encode_mailbox_utf7(action['target']) if action.get('target') else None
-    rule_name = action.get('rule_name')
 
     # Guard: Skip if email is already in target folder
     if target and folder == target:

@@ -9,12 +9,11 @@ import re
 import statistics
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from email.message import Message
 from pathlib import Path
 from typing import Optional
 
-from core.imap_client import imap_login, list_all_folders, get_folder_sizes, safe_search_all
+from core.imap_client import imap_login, get_folder_sizes, safe_search_all
 from core.logging_utils import JsonLogger
 
 

@@ -1,9 +1,7 @@
 """Integration tests for parallel cache building feature."""
 from __future__ import annotations
 
-import concurrent.futures
 import json
-import sqlite3
 import sys
 import threading
 import time
@@ -645,7 +643,7 @@ def test_smart_detection_with_all_folders(test_context, monkeypatch):
     # Simulate CLI with --all-folders
     all_folders = True
     if all_folders:
-        client = MockIMAPClient(folders_data)
+        MockIMAPClient(folders_data)
         folders = list(folders_data.keys())
 
     parallel_workers = 5 if len(folders) >= 5 else 1

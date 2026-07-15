@@ -12,7 +12,6 @@ Tests the data structure foundation including:
 """
 import unittest
 import pytest
-from unittest.mock import Mock
 from core.tools.rule_wizard_core import (
     DisplayNameVariation,
     EmailGroup,
@@ -21,7 +20,6 @@ from core.tools.rule_wizard_core import (
     _extract_display_name,
     consolidate_email_addresses,
     create_expandable_email_items,
-    extract_email_address,
 )
 
 

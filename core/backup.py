@@ -1,14 +1,12 @@
 """Message backup utilities for IMAPFilter helper."""
 from __future__ import annotations
 
-import json
 import mailbox
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email import message_from_bytes
 from pathlib import Path
-from typing import Iterable
 
 import imaplib
 from tqdm import tqdm

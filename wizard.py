@@ -243,7 +243,7 @@ def handle_cache_operations(args: argparse.Namespace, config, logger) -> int:
 
             size_reduction_mb = (size_before - size_after) / (1024 * 1024)
             if size_reduction_mb > 0:
-                print(f"✓ Defragmentation complete")
+                print("✓ Defragmentation complete")
                 print(f"  Size reduced by {size_reduction_mb:.1f} MB")
             else:
                 print("✓ Database already optimized")

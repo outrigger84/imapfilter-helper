@@ -25,7 +25,7 @@ from core.config import build_default_config
 from core.database import init_db
 from core.logging_utils import JsonLogger
 from core.rule_engine import evaluate_rules, load_rules
-from core.rule_utils import slugify, generate_filename
+from core.rule_utils import slugify
 from core.rule_validator import RuleValidator
 
 

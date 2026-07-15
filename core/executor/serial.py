@@ -15,7 +15,6 @@ from tqdm import tqdm
 from core.backup import backup_messages, backup_all_cached_messages, BackupResult
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 
-HEADER_PARSER = HeaderParser(policy=default)
 
 from core.executor.helpers import (
     _encode_mailbox_utf7,
@@ -27,9 +26,10 @@ from core.executor.helpers import (
     _uidvalidity_mismatch,
 )
 
-from core.executor.verification import _verify_move
 
 from core.executor.conflicts import resolve_pending_conflicts
+
+HEADER_PARSER = HeaderParser(policy=default)
 
 
 def execute_actions(

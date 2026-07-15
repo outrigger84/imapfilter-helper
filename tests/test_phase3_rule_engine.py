@@ -2,9 +2,7 @@
 Test Phase 3 Rule Engine Extensions: Keyword and Age-Based Conditions
 """
 import json
-import sqlite3
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
@@ -13,7 +11,6 @@ from core.rule_engine import (
     _evaluate_condition_node,
     _evaluate_flag_condition,
     _extract_message_metadata,
-    _parse_header_map,
     _parse_internaldate,
     conditions_match,
 )

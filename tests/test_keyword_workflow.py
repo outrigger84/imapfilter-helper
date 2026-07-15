@@ -76,7 +76,7 @@ def test_keyword_rule_workflow():
             verbose=True
         )
 
-        print(f"\nEvaluation results:")
+        print("\nEvaluation results:")
         print(f"  Messages processed: {count}")
         print(f"  Total matches: {matches}")
 

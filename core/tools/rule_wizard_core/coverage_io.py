@@ -74,7 +74,7 @@ def _deserialize_coverage_data(data):
     Returns:
         Tuple of (CoverageStats, List[UncoveredMessage], List[DomainCluster])
     """
-    from core.tools.coverage_analyzer import CoverageStats, UncoveredMessage, DomainCluster
+    from core.tools.coverage_analyzer import UncoveredMessage
 
     # Deserialize stats
     stats_data = data['stats']

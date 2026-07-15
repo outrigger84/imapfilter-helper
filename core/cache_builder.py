@@ -11,7 +11,7 @@ import sqlite3
 import tempfile
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import timezone
 from email.parser import HeaderParser as _HeaderParser
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -1052,7 +1052,6 @@ def build_cache_parallel(
     # Open main database for merge with retry logic
     main_db = None
     max_open_retries = 5
-    pragma_lock_issue = False
     for open_attempt in range(max_open_retries):
         try:
             main_db = sqlite3.connect(str(db_path), timeout=60.0, check_same_thread=False)
@@ -1066,14 +1065,12 @@ def build_cache_parallel(
                     main_db.execute("PRAGMA journal_mode=DELETE")
                 except sqlite3.OperationalError as pragma_error:
                     if "database is locked" in str(pragma_error):
-                        pragma_lock_issue = True
                         logger.log("INFO", "pragma_lock_skip", {}, console="⚠️  Database locked for PRAGMA changes - proceeding anyway")
                     else:
                         raise
             except sqlite3.OperationalError as pragma_error:
                 if "database is locked" not in str(pragma_error):
                     raise
-                pragma_lock_issue = True
                 logger.log("INFO", "pragma_lock_skip", {}, console="⚠️  Database locked for PRAGMA changes - proceeding anyway")
             break
         except sqlite3.OperationalError as open_error:

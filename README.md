@@ -555,6 +555,8 @@ python -m core.cli --cache-file ~/mail-cache.db build-cache
 
 To get started quickly, copy `data/secrets.example.json` to `data/secrets.json` and replace the placeholder IMAP credentials with your own.
 
+The IMAP password can also be supplied via the `IMAPFILTER_PASSWORD` environment variable, which takes precedence over the secrets file — useful if you prefer not to keep the password on disk (the `password` key can then be omitted entirely).
+
 **Secrets file structure (`data/secrets.json`):**
 
 ```json

@@ -9,7 +9,7 @@ from time import perf_counter
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from core.notifications import NotificationDispatcher
+    pass
 
 
 def now_iso() -> str:

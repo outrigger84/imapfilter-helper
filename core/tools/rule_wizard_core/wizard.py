@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 import curses
-import email
 import imaplib
 import json
 import time
 from collections import Counter
-from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
@@ -651,7 +649,7 @@ class RuleWizard:
         Returns:
             Fixed rule dict or None if cancelled
         """
-        print(f"\nThis rule cannot be saved without fixes.")
+        print("\nThis rule cannot be saved without fixes.")
         fix_response = prompt_yes_no("Fix interactively?", default=True)
 
         if not fix_response:
@@ -755,7 +753,7 @@ class RuleWizard:
 
             print(f"\n✓ Preview complete for \"{rule.get('name', 'Unknown')}\"")
             if folder_matches:
-                print(f"\nMatches by folder:")
+                print("\nMatches by folder:")
                 for folder, count in sorted(folder_matches.items()):
                     print(f"  {folder}: {format_count(count)} messages")
             print(f"Total: {format_count(matches)} messages would be affected")
@@ -1350,7 +1348,7 @@ class RuleWizard:
             # to match them, since contains "@unknown" would match nothing real.
             self.rule_builder.add_condition(header="from", match_type="not_contains", value="@")
             pattern = "(no valid email address)"
-            print(f"\n✓ Condition: sender (from) does not contain '@'")
+            print("\n✓ Condition: sender (from) does not contain '@'")
         elif batch_target.target_type == "domain":
             # Domain-wide: use @domain.com pattern (via helper for consistency)
             pattern = self._convert_domain_selection_to_pattern(f"[All from {batch_target.value}]")
@@ -1373,10 +1371,10 @@ class RuleWizard:
         print("BATCH TARGET")
         print("=" * 60)
         if batch_target.target_type == "domain":
-            print(f"Type:        Domain-wide")
+            print("Type:        Domain-wide")
             print(f"Domain:      {batch_target.value}")
         else:
-            print(f"Type:        Specific sender")
+            print("Type:        Specific sender")
             print(f"Email:       {batch_target.value}")
         print(f"Messages:    {format_count(batch_target.estimated_count)}")
         if batch_target.sample_messages:
@@ -1744,7 +1742,7 @@ class RuleWizard:
             formatted = self._format_condition(cond)
             if i < len(self.rule_builder._flat_conditions):
                 print(f"  {i}. {formatted}")
-                print(f"     ↓ AND ↓")
+                print("     ↓ AND ↓")
             else:
                 print(f"  {i}. {formatted}")
         print("=" * 60)
@@ -2061,8 +2059,6 @@ class RuleWizard:
 
         if len(email_groups) == 1:
             # Auto-select if only one email (offer all or specific option)
-            # ISSUE #5 FIX: Use helper method for consistent format
-            domain_selection = self._format_domain_selection(selected_domain, field)
             print(f"\nFound 2 options for {selected_domain}:")
             print("(Use arrow keys to navigate, Enter to select, ESC to cancel)")
             input("Press Enter to select option...")
@@ -2512,8 +2508,6 @@ class RuleWizard:
         Returns:
             List of (value, count) tuples from uncovered messages only, sorted by count descending
         """
-        from collections import Counter
-        from core.rule_engine import _extract_raw_header, _parse_header_map
 
         if not self.coverage_analyzer:
             # Fallback to cache if no coverage analyzer
@@ -2529,7 +2523,7 @@ class RuleWizard:
             uncovered_messages = self.coverage_analyzer.get_uncovered_messages()
 
             if not uncovered_messages:
-                print(f"No uncovered messages found")
+                print("No uncovered messages found")
                 return []
 
             counter = Counter()
@@ -2613,7 +2607,6 @@ class RuleWizard:
         Returns:
             List of (value, count) tuples, sorted by count descending
         """
-        from collections import Counter
         from core.rule_engine import _extract_raw_header, _parse_header_map, find_matching_rule
 
         if not self.rule_builder.conditions or not self.cache_engine:
@@ -2726,7 +2719,7 @@ class RuleWizard:
             if client is not None:
                 try:
                     client.logout()
-                except:
+                except Exception:
                     pass
 
     def _edit_folder_path(self, folder_path: str) -> Optional[str]:
@@ -3524,20 +3517,20 @@ class RuleWizard:
         print("\n" + "=" * 60)
         print("📊 Summary — Preview Rule")
         print("=" * 60)
-        print(f"   🧩  Rules evaluated: 1")
+        print("   🧩  Rules evaluated: 1")
         print(f"   🎯  Matches found: {total_matches}")
         print(f"   ⏱️  Duration: {stats.get('duration', 'N/A')} ({stats.get('rate', 'N/A')} msg/s)")
 
         # Show matches by folder
         if folder_matches:
             sorted_folders = sorted(folder_matches.items(), key=lambda kv: (-kv[1], kv[0]))
-            print(f"   📂  Matches by folder:")
+            print("   📂  Matches by folder:")
             for folder, count in sorted_folders:
                 print(f"      • {folder}: {count}")
 
         # Show matches by rule
         rule_name = stats.get('rule_name', 'Preview Rule')
-        print(f"   🧠  Matches by rule:")
+        print("   🧠  Matches by rule:")
         print(f"      • {rule_name}: {total_matches}")
         print("=" * 60 + "\n")
 

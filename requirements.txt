@@ -17,3 +17,6 @@ pytest>=7.0.0
 
 # Optional: pytest plugins for enhanced testing
 pytest-cov>=2.10.0  # Coverage reporting
+
+# Linter (configured in pyproject.toml, run in CI)
+ruff>=0.8.0
