@@ -712,18 +712,20 @@ class ConflictDetector:
         """
         conflicts = []
 
-        # Sort rules by priority (lower first)
+        # Sort rules by priority ascending — lower number = evaluated first =
+        # higher precedence, matching evaluate_rules' first-match-wins order.
         sorted_rules = sorted(self.rules, key=lambda r: r.get("priority", 100))
 
-        # For each rule, check if shadowed by higher priority
+        # For each rule, check if shadowed by an earlier-evaluated rule
         for i, rule2 in enumerate(sorted_rules):
             priority2 = rule2.get("priority", 100)
 
             for rule1 in sorted_rules[:i]:
                 priority1 = rule1.get("priority", 100)
 
-                # Only check rules with strictly higher priority
-                if priority1 <= priority2:
+                # Only rules evaluated strictly earlier can shadow this one.
+                # Equal priorities are handled by detect_priority_conflicts.
+                if priority1 >= priority2:
                     continue
 
                 # Check overlap
@@ -746,7 +748,7 @@ class ConflictDetector:
                     affected = self.cache_engine.count_matching_messages(rule2.get("conditions", {}))
 
                 # Generate reason
-                reason = f"Rule with priority {priority2} is shadowed by higher priority rule {priority1}: conditions are {rel.value}"
+                reason = f"Rule with priority {priority2} is shadowed by earlier-evaluated priority {priority1} rule: conditions are {rel.value}"
 
                 conflicts.append(
                     ConflictResult(

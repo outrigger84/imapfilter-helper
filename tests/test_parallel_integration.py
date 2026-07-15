@@ -38,6 +38,13 @@ if "tqdm" not in sys.modules:
         def set_postfix_str(self, s: str) -> None:
             pass
 
+        def set_description(self, s: str) -> None:
+            pass
+
+        def reset(self, total: int = 0) -> None:
+            self.total = total
+            self._count = 0
+
         def __enter__(self):
             return self
 
@@ -53,6 +60,11 @@ if "tqdm" not in sys.modules:
     sys.modules["tqdm"] = tqdm_module
 
 from core.cache_builder import build_cache, build_cache_parallel
+
+def _parallel_tasks(folders):
+    """Wrap folder names as the (folder, chunk_idx, num_chunks) task tuples build_cache_parallel expects."""
+    return [(folder, None, None) for folder in folders]
+
 from core.database import init_db
 from core.logging_utils import JsonLogger
 
@@ -117,25 +129,33 @@ class MockIMAPClient:
 
         if command == "FETCH":
             uid_value = args[0]
-            if isinstance(uid_value, bytes):
+            if isinstance(uid_value, (bytes, bytearray)):
                 uid_value = uid_value.decode("ascii")
 
             if self.selected_folder is None:
                 return "NO", None
 
+            # Batched FETCH: uid_value is a comma-separated UID set
+            requested = set(uid_value.split(","))
             messages = self.folders_data.get(self.selected_folder, [])
+            response: list = []
+            seq = 0
             for uid, header, flags, internaldate in messages:
-                if uid == uid_value:
-                    # Construct FETCH response with FLAGS and INTERNALDATE
-                    flags_str = " ".join(flags) if flags else ""
-                    internaldate_str = f'"{internaldate}"' if internaldate else '""'
-                    metadata = (
-                        f'{uid} (FLAGS ({flags_str}) '
-                        f'INTERNALDATE {internaldate_str} BODY[HEADER])'
-                    ).encode()
-                    return "OK", [(metadata, header)]
+                if uid not in requested:
+                    continue
+                seq += 1
+                flags_str = " ".join(flags) if flags else ""
+                internaldate_str = f'"{internaldate}"' if internaldate else '""'
+                metadata = (
+                    f'{seq} (UID {uid} FLAGS ({flags_str}) '
+                    f'INTERNALDATE {internaldate_str} BODY[HEADER] {{{len(header)}}}'
+                ).encode()
+                response.append((metadata, header))
+                response.append(b")")
 
-            return "NO", None
+            if not response:
+                return "NO", None
+            return "OK", response
 
         return "NO", None
 
@@ -305,7 +325,7 @@ def test_parallel_sequential_equivalence(test_context, sample_folders_data, monk
     timer_par, folders_par, msgs_par = build_cache_parallel(
         test_context["secrets_path"],
         test_context["tmp_path"] / "par.db",
-        folders,
+        _parallel_tasks(folders),
         show_progress=False,
         logger=test_context["logger"],
         limit=None,
@@ -370,7 +390,7 @@ def test_parallel_folder_independence(test_context, monkeypatch):
     timer, folders_count, msgs_count = build_cache_parallel(
         test_context["secrets_path"],
         test_context["db_path"],
-        folders,
+        _parallel_tasks(folders),
         show_progress=False,
         logger=test_context["logger"],
         limit=None,
@@ -430,7 +450,7 @@ def test_parallel_error_isolation(test_context, monkeypatch):
     timer, folders_count, msgs_count = build_cache_parallel(
         test_context["secrets_path"],
         test_context["db_path"],
-        folders,
+        _parallel_tasks(folders),
         show_progress=False,
         logger=test_context["logger"],
         limit=None,
@@ -488,7 +508,7 @@ def test_parallel_progress_tracking(test_context, monkeypatch):
     timer, folders_count, msgs_count = build_cache_parallel(
         test_context["secrets_path"],
         test_context["db_path"],
-        folders,
+        _parallel_tasks(folders),
         show_progress=False,  # Don't show actual progress bar in tests
         logger=test_context["logger"],
         limit=None,
@@ -557,7 +577,7 @@ def test_auto_detect_parallel_many_folders(test_context, monkeypatch):
     timer, folders_count, msgs_count = build_cache_parallel(
         test_context["secrets_path"],
         test_context["db_path"],
-        folders,
+        _parallel_tasks(folders),
         show_progress=False,
         logger=test_context["logger"],
         limit=None,
@@ -593,7 +613,7 @@ def test_parallel_workers_override(test_context, monkeypatch):
     timer, folders_count, msgs_count = build_cache_parallel(
         test_context["secrets_path"],
         test_context["db_path"],
-        folders,
+        _parallel_tasks(folders),
         show_progress=False,
         logger=test_context["logger"],
         limit=None,
@@ -639,17 +659,19 @@ def test_smart_detection_with_all_folders(test_context, monkeypatch):
 
 def test_parallel_faster_than_sequential(test_context, monkeypatch):
     """Verify 5 workers is faster than 1 worker."""
-    # Create folders with simulated network delay
+    # Create folders with simulated network delay. The folder count must be
+    # large enough that the saved network time clearly exceeds the fixed
+    # settle/merge overhead (~2.5s of sleeps) built into build_cache_parallel.
     folders_data = {
         f"Folder{i}": [
             (str(j), f"Subject: F{i}-M{j}\r\n\r\n".encode(), [], "01-Dec-2025 10:00:00 +0000")
             for j in range(3)
         ]
-        for i in range(6)
+        for i in range(40)
     }
 
     def mock_login(secrets_path, logger):
-        return MockIMAPClient(folders_data, delay_ms=50)  # 50ms per operation
+        return MockIMAPClient(folders_data, delay_ms=60)  # 60ms per operation
 
     monkeypatch.setattr("core.connection_pool.imap_login", mock_login)
     monkeypatch.setattr(
@@ -659,12 +681,12 @@ def test_parallel_faster_than_sequential(test_context, monkeypatch):
         ],
     )
 
-    folders = [f"Folder{i}" for i in range(6)]
+    folders = [f"Folder{i}" for i in range(40)]
 
     # Test sequential (1 worker)
     db_seq = init_db(test_context["tmp_path"] / "seq.db", logger=test_context["logger"])
     start_seq = time.time()
-    client_seq = MockIMAPClient(folders_data, delay_ms=50)
+    client_seq = MockIMAPClient(folders_data, delay_ms=60)
     build_cache(
         client_seq,
         db_seq,
@@ -682,7 +704,7 @@ def test_parallel_faster_than_sequential(test_context, monkeypatch):
     build_cache_parallel(
         test_context["secrets_path"],
         test_context["db_path"],
-        folders,
+        _parallel_tasks(folders),
         show_progress=False,
         logger=test_context["logger"],
         limit=None,
@@ -692,9 +714,9 @@ def test_parallel_faster_than_sequential(test_context, monkeypatch):
     time_par = time.time() - start_par
 
     # Parallel should be noticeably faster (allow some overhead)
-    # With 50ms delay and 6 folders * 4 ops each = 24 operations
-    # Sequential: ~1.2s, Parallel with 5 workers: ~0.4s
-    # In practice, expect at least 1.3x speedup (accounting for thread overhead)
+    # With 60ms delay and 40 folders * 3 ops each (select+search+batched fetch):
+    # Sequential: ~7.2s. Parallel with 5 workers: ~1.5s of work plus ~2.5s of
+    # fixed settle/merge sleeps ≈ 4s, so expect at least 1.3x speedup.
     speedup = time_seq / time_par
     assert speedup > 1.3, f"Parallel should be faster (speedup: {speedup:.2f}x)"
 
@@ -728,7 +750,7 @@ def test_worker_count_effect(test_context, monkeypatch):
         build_cache_parallel(
             test_context["secrets_path"],
             db_path,
-            folders,
+            _parallel_tasks(folders),
             show_progress=False,
             logger=test_context["logger"],
             limit=None,
@@ -777,7 +799,7 @@ def test_memory_usage_reasonable(test_context, monkeypatch):
     timer, folders_count, msgs_count = build_cache_parallel(
         test_context["secrets_path"],
         test_context["db_path"],
-        folders,
+        _parallel_tasks(folders),
         show_progress=False,
         logger=test_context["logger"],
         limit=None,
@@ -824,7 +846,7 @@ def test_continue_on_folder_failure(test_context, monkeypatch):
     timer, folders_count, msgs_count = build_cache_parallel(
         test_context["secrets_path"],
         test_context["db_path"],
-        folders,
+        _parallel_tasks(folders),
         show_progress=False,
         logger=test_context["logger"],
         limit=None,
@@ -886,7 +908,7 @@ def test_imap_connection_failure_recovery(test_context, monkeypatch):
     timer, folders_count, msgs_count = build_cache_parallel(
         test_context["secrets_path"],
         test_context["db_path"],
-        folders,
+        _parallel_tasks(folders),
         show_progress=False,
         logger=test_context["logger"],
         limit=None,
@@ -926,7 +948,7 @@ def test_database_concurrent_write_safety(test_context, monkeypatch):
     timer, folders_count, msgs_count = build_cache_parallel(
         test_context["secrets_path"],
         test_context["db_path"],
-        folders,
+        _parallel_tasks(folders),
         show_progress=False,
         logger=test_context["logger"],
         limit=None,
@@ -991,7 +1013,7 @@ def test_parallel_with_limit_and_order(test_context, monkeypatch):
     timer, folders_count, msgs_count = build_cache_parallel(
         test_context["secrets_path"],
         test_context["db_path"],
-        folders,
+        _parallel_tasks(folders),
         show_progress=False,
         logger=test_context["logger"],
         limit=3,
@@ -1038,7 +1060,7 @@ def test_parallel_flags_and_internaldate_preservation(test_context, monkeypatch)
     timer, folders_count, msgs_count = build_cache_parallel(
         test_context["secrets_path"],
         test_context["db_path"],
-        ["INBOX"],
+        _parallel_tasks(["INBOX"]),
         show_progress=False,
         logger=test_context["logger"],
         limit=None,
@@ -1091,7 +1113,7 @@ def test_empty_folders_handled_correctly(test_context, monkeypatch):
     timer, folders_count, msgs_count = build_cache_parallel(
         test_context["secrets_path"],
         test_context["db_path"],
-        folders,
+        _parallel_tasks(folders),
         show_progress=False,
         logger=test_context["logger"],
         limit=None,

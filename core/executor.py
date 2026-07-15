@@ -1543,10 +1543,13 @@ def execute_actions(
 
     dedup_params = where_params + limit_param
 
+    # dedup_params, not where_params: when limit is set the CTE text contains
+    # the LIMIT ? placeholder, and sqlite requires a binding for it even
+    # though this query only reads from "ranked".
     suppressed_count_cur = db.cursor()
     suppressed_count_cur.execute(
         dedup_cte + "SELECT COUNT(*) FROM ranked WHERE rn>1",
-        where_params,
+        dedup_params,
     )
     suppressed = suppressed_count_cur.fetchone()[0] or 0
 
@@ -2475,6 +2478,12 @@ def execute_actions(
 
                 def _record_success(action_id: int, uid_value: str) -> None:
                     """Mark action as successful and track for later verification."""
+                    if verify_moves and target and not dry_run:
+                        # Prime the message-id cache while the header row still
+                        # exists — _verify_move runs after the DELETE below and
+                        # would otherwise always skip with missing_message_id.
+                        _cached_message_id(folder, uid_value)
+                        successful_moves.append((action_id, uid_value))
                     db.execute(
                         "UPDATE actions SET status='done', executed_at=? WHERE id=?",
                         (now_iso(), action_id),
@@ -2484,9 +2493,6 @@ def execute_actions(
                         (folder, uid_value),
                     ).rowcount
                     stats["done"] += 1
-
-                    if verify_moves and target and not dry_run:
-                        successful_moves.append((action_id, uid_value))
 
                     console_msg = f"   ✅ Moved {folder}/{uid_value} → {display_target}" if verbose else None
                     logger.log(

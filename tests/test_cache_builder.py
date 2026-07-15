@@ -49,9 +49,24 @@ from core.database import init_db
 from core.logging_utils import JsonLogger
 
 
+BATCH_FETCH_QUERY = "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)"
+
+
+def _batch_fetch_response(headers_by_uid: dict[str, bytes]):
+    """Build an imaplib-style multi-UID FETCH response."""
+    response: list = []
+    for seq, (uid, header) in enumerate(headers_by_uid.items(), 1):
+        envelope = f"{seq} (UID {uid} BODY[HEADER] {{{len(header)}}}".encode()
+        response.append((envelope, header))
+        response.append(b")")
+    return "OK", response
+
+
 class _FakeClient:
-    def __init__(self, message_bytes: bytes):
-        self._message_bytes = message_bytes
+    """Serves the same header for every UID in a batched FETCH."""
+
+    def __init__(self, header_bytes: bytes = b"Subject: Test\n\n"):
+        self._header_bytes = header_bytes
         self.uid_calls: list[tuple[str, object, str]] = []
 
     def select(self, mailbox: str, readonly: bool = True):
@@ -62,11 +77,9 @@ class _FakeClient:
         self.uid_calls.append((command, uid, query))
         if command != "FETCH":
             raise AssertionError(f"Unexpected UID command {command}")
-        if query == "(BODY.PEEK[HEADER])":
-            header = b"Subject: Test\n\n"
-            return "OK", [(b"1 (BODY[HEADER])", header)]
-        if query == "(BODY.PEEK[])":
-            return "OK", [(b"1 (BODY[])", self._message_bytes)]
+        if query == BATCH_FETCH_QUERY:
+            uid_set = uid.decode() if isinstance(uid, (bytes, bytearray)) else str(uid)
+            return _batch_fetch_response({u: self._header_bytes for u in uid_set.split(",")})
         raise AssertionError(f"Unexpected query {query}")
 
 
@@ -82,7 +95,7 @@ class _UIDAwareClient:
     def uid(self, command: str, uid, *args):
         if command == "SEARCH":
             criterion = args[0]
-            if criterion == "ALL":
+            if criterion in ("ALL", "UNDELETED"):
                 ordered = sorted(self._messages.keys(), key=int)
                 return "OK", [" ".join(ordered).encode()]
             match = re.search(r'"([^\"]+)"', criterion)
@@ -96,13 +109,12 @@ class _UIDAwareClient:
 
         if command == "FETCH":
             query = args[0]
-            key = uid.decode() if isinstance(uid, (bytes, bytearray)) else str(uid)
-            header, body = self._messages[key]
-            if query == "(BODY.PEEK[HEADER])":
-                return "OK", [(f"{key} (BODY[HEADER])".encode(), header)]
-            if query == "(BODY.PEEK[])":
-                return "OK", [(f"{key} (BODY[])".encode(), body)]
-            raise AssertionError(f"Unexpected fetch query {query}")
+            if query != BATCH_FETCH_QUERY:
+                raise AssertionError(f"Unexpected fetch query {query}")
+            uid_set = uid.decode() if isinstance(uid, (bytes, bytearray)) else str(uid)
+            return _batch_fetch_response(
+                {key: self._messages[key][0] for key in uid_set.split(",")}
+            )
         raise AssertionError(f"Unexpected UID command {command}")
 
 
@@ -121,11 +133,13 @@ def cache_context(tmp_path: Path):
         db.close()
 
 
-def test_build_cache_without_backup(monkeypatch, cache_context):
+def test_build_cache_stores_headers(monkeypatch, cache_context):
     cfg, db, logger = cache_context
-    client = _FakeClient(b"Subject: Test\n\nBody")
+    client = _FakeClient()
 
-    monkeypatch.setattr("core.cache_builder.safe_search_all", lambda _client: [b"1", b"2"])
+    monkeypatch.setattr(
+        "core.cache_builder.safe_search_all", lambda _client, **_kwargs: [b"1", b"2"]
+    )
 
     timer, folders, messages = build_cache(
         client,
@@ -135,58 +149,19 @@ def test_build_cache_without_backup(monkeypatch, cache_context):
         logger=logger,
         limit=None,
         order="newest",
-        backup_enabled=False,
-        backup_dir=cfg.paths.backup_dir,
     )
 
     assert folders == 1
     assert messages == 2
     assert timer.count == 2
     assert all(
-        call[0] == "FETCH" and call[2] == "(BODY.PEEK[HEADER])" for call in client.uid_calls
+        call[0] == "FETCH" and call[2] == BATCH_FETCH_QUERY for call in client.uid_calls
     )
-    assert not cfg.paths.backup_dir.exists()
 
     cur = db.cursor()
     cur.execute("SELECT COUNT(*) FROM headers WHERE folder='INBOX'")
     (count,) = cur.fetchone()
     assert count == 2
-
-
-def test_build_cache_with_backup(monkeypatch, cache_context):
-    cfg, db, logger = cache_context
-    client = _FakeClient(b"Subject: Backup\n\nSaved body")
-
-    monkeypatch.setattr("core.cache_builder.safe_search_all", lambda _client: [b"1"])
-
-    timer, folders, messages = build_cache(
-        client,
-        db,
-        ["INBOX"],
-        show_progress=False,
-        logger=logger,
-        limit=None,
-        order="newest",
-        backup_enabled=True,
-        backup_dir=cfg.paths.backup_dir,
-    )
-
-    assert folders == 1
-    assert messages == 1
-    assert timer.count == 1
-    assert any(
-        call[0] == "FETCH" and call[2] == "(BODY.PEEK[])" for call in client.uid_calls
-    )
-
-    files = list(cfg.paths.backup_dir.glob("INBOX_*.mbox"))
-    assert len(files) == 1
-    assert re.fullmatch(r"INBOX_\d{8}T\d{6}Z\.mbox", files[0].name)
-    assert files[0].stat().st_size > 0
-
-    cur = db.cursor()
-    cur.execute("SELECT COUNT(*) FROM headers WHERE folder='INBOX'")
-    (count,) = cur.fetchone()
-    assert count == 1
 
 
 def test_build_cache_stores_matching_uids(cache_context):
@@ -211,8 +186,6 @@ def test_build_cache_stores_matching_uids(cache_context):
         logger=logger,
         limit=None,
         order="newest",
-        backup_enabled=False,
-        backup_dir=cfg.paths.backup_dir,
     )
 
     assert folders == 1

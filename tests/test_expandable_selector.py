@@ -814,7 +814,11 @@ class TestIntegrationWizardExpandableEmails:
         assert email == 'm@c.com'
 
     def test_extract_email_from_variation_data(self):
-        """Test extracting email when selecting DisplayNameVariation (child)."""
+        """Test extracting email when selecting DisplayNameVariation (child).
+
+        Selecting a specific variation preserves the display name so rules can
+        differentiate senders that share one address (e.g. relay services).
+        """
         class MockWizard:
             def _extract_email_from_consolidated_label(self, label, data=None):
                 from core.tools.rule_wizard_core import RuleWizard
@@ -828,7 +832,7 @@ class TestIntegrationWizardExpandableEmails:
             data=variation
         )
 
-        assert email == 'm@c.com'
+        assert email == 'Name <m@c.com>'
 
     def test_extract_email_from_label_only_backward_compat(self):
         """Test backward compatibility - extract from label without data."""

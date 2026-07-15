@@ -95,21 +95,18 @@ def test_keyword_rule_workflow():
                 keywords = data.get("keywords", [])
             print(f"  - {folder}/{uid}: {rule_name} ({action_type}) - keywords: {keywords} [{status}]")
 
-        # Verify actions
-        assert len(actions) == 4, f"Expected 4 actions (2 messages × 2 rules), got {len(actions)}"
+        # Verify actions. The engine is first-match-wins: each message gets one
+        # action from the winning rule. Both rules match both messages, and
+        # "Remove work flag from newsletters" (priority 90, lower number =
+        # higher precedence) beats "Mark newsletters as seen" (priority 100).
+        assert len(actions) == 2, f"Expected 2 actions (one per message, first match wins), got {len(actions)}"
 
-        # Check first action (highest priority)
-        assert actions[0][3] == "set_keywords", "First action should be set_keywords"
-        set_data = json.loads(actions[0][4])
-        assert set_data["keywords"] == ["newsletter", "\\Seen"], "Set keywords mismatch"
-
-        # Check second action
-        assert actions[1][3] == "set_keywords", "Second action should be set_keywords"
-
-        # Check third action (lower priority)
-        assert actions[2][3] == "remove_keywords", "Third action should be remove_keywords"
-        remove_data = json.loads(actions[2][4])
-        assert remove_data["keywords"] == ["work", "urgent"], "Remove keywords mismatch"
+        assert {a[0] for a in actions} == {"1001", "1002"}, "Each message should get exactly one action"
+        for uid, folder, rule_name, action_type, action_data, status in actions:
+            assert rule_name == "Remove work flag from newsletters", "Winning rule mismatch"
+            assert action_type == "remove_keywords", "Action should be remove_keywords"
+            data = json.loads(action_data)
+            assert data["keywords"] == ["work", "urgent"], "Remove keywords mismatch"
 
         print("\n✅ Keyword rule workflow test passed")
         db.close()

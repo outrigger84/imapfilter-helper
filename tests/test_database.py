@@ -105,15 +105,20 @@ def test_build_cache_stores_headers_per_folder(tmp_path: Path, monkeypatch: pyte
         def uid(self, command: str, uid, query: str):
             if command != "FETCH":
                 raise AssertionError(f"Unexpected UID command {command}")
-            uid_value = uid.decode() if isinstance(uid, (bytes, bytearray)) else str(uid)
-            header = f"Subject: {self.current_folder} {uid_value}\r\n"
-            if query == "(BODY.PEEK[HEADER])":
-                return "OK", [(b"1 (BODY[HEADER])", header.encode())]
-            raise AssertionError(f"Unexpected fetch query {query}")
+            if query != "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)":
+                raise AssertionError(f"Unexpected fetch query {query}")
+            uid_set = uid.decode() if isinstance(uid, (bytes, bytearray)) else str(uid)
+            response: list = []
+            for seq, uid_value in enumerate(uid_set.split(","), 1):
+                header = f"Subject: {self.current_folder} {uid_value}\r\n".encode()
+                envelope = f"{seq} (UID {uid_value} BODY[HEADER] {{{len(header)}}}".encode()
+                response.append((envelope, header))
+                response.append(b")")
+            return "OK", response
 
     fake_client = FakeClient()
 
-    def fake_safe_search_all(client):
+    def fake_safe_search_all(client, **_kwargs):
         return folder_uids.get(client.current_folder, [])
 
     monkeypatch.setattr("core.cache_builder.safe_search_all", fake_safe_search_all)
@@ -127,8 +132,6 @@ def test_build_cache_stores_headers_per_folder(tmp_path: Path, monkeypatch: pyte
             logger=logger,
             limit=None,
             order="newest",
-            backup_enabled=False,
-            backup_dir=tmp_path / "backups",
         )
 
         rows = db.execute(
@@ -167,15 +170,20 @@ def test_build_cache_respects_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         def uid(self, command: str, uid, query: str):
             if command != "FETCH":
                 raise AssertionError(f"Unexpected UID command {command}")
-            uid_value = uid.decode() if isinstance(uid, (bytes, bytearray)) else str(uid)
-            header = f"Subject: {self.current_folder} {uid_value}\r\n"
-            if query == "(BODY.PEEK[HEADER])":
-                return "OK", [(b"1 (BODY[HEADER])", header.encode())]
-            raise AssertionError(f"Unexpected fetch query {query}")
+            if query != "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)":
+                raise AssertionError(f"Unexpected fetch query {query}")
+            uid_set = uid.decode() if isinstance(uid, (bytes, bytearray)) else str(uid)
+            response: list = []
+            for seq, uid_value in enumerate(uid_set.split(","), 1):
+                header = f"Subject: {self.current_folder} {uid_value}\r\n".encode()
+                envelope = f"{seq} (UID {uid_value} BODY[HEADER] {{{len(header)}}}".encode()
+                response.append((envelope, header))
+                response.append(b")")
+            return "OK", response
 
     fake_client = FakeClient()
 
-    def fake_safe_search_all(client):
+    def fake_safe_search_all(client, **_kwargs):
         return [b"1", b"2", b"3", b"4"]
 
     monkeypatch.setattr("core.cache_builder.safe_search_all", fake_safe_search_all)
@@ -189,8 +197,6 @@ def test_build_cache_respects_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPa
             logger=logger,
             limit=2,
             order="oldest",
-            backup_enabled=False,
-            backup_dir=tmp_path / "backups",
         )
 
         rows = db.execute(

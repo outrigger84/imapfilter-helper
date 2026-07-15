@@ -102,7 +102,12 @@ class IMAPConnectionPool:
             pass
 
     def shutdown(self) -> None:
-        """Close all connections in the pool."""
+        """Close all connections and reset the pool so it can be reused.
+
+        Resetting _created is required: without it, a later acquire() on this
+        pool would see the max reached with an empty queue and block until the
+        120 s timeout (e.g. during the cache-build retry phase).
+        """
         while not self._pool.empty():
             try:
                 conn = self._pool.get_nowait()
@@ -110,3 +115,5 @@ class IMAPConnectionPool:
             except (queue.Empty, Exception):
                 # Ignore errors during shutdown
                 pass
+        with self._lock:
+            self._created = 0

@@ -20,6 +20,11 @@ import sqlite3
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+# Make repo-root imports (rule_wizard, core.*) work from any cwd
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 # Test results tracking
 results = {
     "passed": [],
@@ -197,7 +202,7 @@ section_header("Test 3: Component Initialization")
 
 print("\n3.1 Initialize RuleWizard with config...")
 try:
-    wizard = rule_wizard.RuleWizard(config, show_progress=False)
+    wizard = rule_wizard.RuleWizard(config)
     test_result("RuleWizard instantiation", True)
 except Exception as e:
     test_result("RuleWizard instantiation", False, str(e))
@@ -300,7 +305,7 @@ try:
     builder.set_name("Test Smoke Rule")
     builder.set_priority(100)
     builder.add_condition("from", "contains", "test@example.com")
-    builder.set_action("move", "Test/Folder")
+    builder.add_action("move", "Test/Folder")
 
     valid, error = builder.validate()
     assert valid, f"Validation failed: {error}"

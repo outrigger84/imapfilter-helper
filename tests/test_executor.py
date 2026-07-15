@@ -189,8 +189,11 @@ def test_execute_actions_respects_limit(tmp_path: Path):
     )
 
     assert stats["done"] == 2
-    copy_commands = [cmd for cmd in client.commands if cmd[0] == "COPY"]
-    assert len(copy_commands) == 2
+    # Moves are batched: one COPY command may carry several UIDs.
+    copied_uids = [
+        uid for cmd, uid_set in client.commands if cmd == "COPY" for uid in uid_set.split(",")
+    ]
+    assert sorted(copied_uids) == ["msg-2", "msg-3"]
 
     remaining = db.execute(
         "SELECT uid, status FROM actions ORDER BY uid"
@@ -250,11 +253,13 @@ def test_execute_actions_prefers_uid_move(tmp_path: Path):
 
     assert stats["done"] == 3
 
-    move_commands = [cmd for cmd in client.commands if cmd[0] == "MOVE"]
     copy_commands = [cmd for cmd in client.commands if cmd[0] == "COPY"]
     store_commands = [cmd for cmd in client.commands if cmd[0] == "STORE"]
-
-    assert len(move_commands) == 3
+    # Moves are batched: one MOVE command may carry several UIDs.
+    moved_uids = [
+        uid for cmd, uid_set in client.commands if cmd == "MOVE" for uid in uid_set.split(",")
+    ]
+    assert sorted(moved_uids) == ["msg-1", "msg-2", "msg-3"]
     assert not copy_commands
     assert not store_commands
 

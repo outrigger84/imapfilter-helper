@@ -582,6 +582,10 @@ class TestConnectionPool:
 
             # Force thread termination by shutting down pool
             pool._pool.put(None)  # Unblock the waiting thread
+            # Join before shutdown: shutdown() drains the queue and can steal
+            # the None before the blocked thread wakes, leaving it to time out
+            t.join(timeout=5)
+            assert not t.is_alive()
 
         pool.shutdown()
 

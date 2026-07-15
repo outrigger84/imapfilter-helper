@@ -47,10 +47,15 @@ A helper CLI that orchestrates cache building, rule evaluation, and action execu
 │   ├── keywords.json           # Predefined keywords list
 │   └── backups/                # Message backup mbox files
 ├── rules/                      # JSON rule files (user-managed)
+├── scripts/                    # Standalone utilities and diagnostics
+│   ├── merge_worker_dbs.py     # Recovery fallback for failed parallel cache merges
+│   └── diagnostics/            # Live-server connectivity checks
 ├── imapfilter_helper.py        # Main entry point script
 ├── rule_manager.py             # Interactive rule editor console (TUI)
 ├── rule_wizard.py              # Cache-assisted guided rule creator
-└── tests/                      # Test suite (20+ test files, 228+ test functions)
+├── server_probe.py             # IMAP server capability/performance probe (wraps core/server_probe.py)
+├── wizard.py                   # Rule wizard entry point
+└── tests/                      # Test suite (25 test files, 360+ test functions)
 ```
 
 The CLI parser and command implementations live in `core/cli.py`. The top-level `imapfilter_helper.py` is now a thin wrapper that simply calls `core.cli.main()`.
@@ -495,8 +500,6 @@ Save? (yes/no/edit): yes
 - **Need pattern help** – See actual email addresses/subjects to create better rules
 - **Want confidence** – Preview match counts before committing
 
-See `RULE_WIZARD_USAGE.md` for comprehensive documentation, real-world examples, and troubleshooting.
-
 ### Interactive Cache Viewer
 
 A tool for visually exploring and analyzing your cached email messages:
@@ -883,8 +886,8 @@ python rule_wizard.py --cache-file data/cache-discovery.db
 Install the dependencies and run the tests:
 
 ```bash
-pip install -r requirements.txt  # if available
-pytest
+pip install -r requirements.txt
+pytest   # collects tests/ only (see pyproject.toml)
 ```
 
 ### Key Development Modules
@@ -928,13 +931,14 @@ Several standalone scripts and test suites assist with troubleshooting and devel
 * `python -m core.tools.move_diagnostics [--destination MAILBOX] [--ensure-destination]` – Appends fresh test messages to `INBOX` and exercises the `UID MOVE` and fallback copy/delete flows, logging IMAP server responses and verifying message arrival.
 * `python -c "from core.tools.cache_viewer import main; main()"` – Interactive cache browser for exploring cached emails with sorting, filtering, and message counts. Useful for understanding your mailbox structure and testing rule patterns.
 * `python -m core.tools.coverage_analyzer` – Analyzes rule patterns and shows coverage statistics to identify gaps in your filtering rules.
+* `python scripts/diagnostics/check_imap_connection.py` – Step-by-step IMAP connectivity check (socket, SSL, login). **Connects to the live server.**
+* `python scripts/diagnostics/check_folder_status.py` – Runs STATUS against every folder to find one that hangs. **Connects to the live server.**
+* `python scripts/merge_worker_dbs.py` – Recovery fallback: manually merge `thread_*.db` worker files if a parallel cache build fails to merge automatically.
+* `python scripts/diagnostics/wizard_smoke.py` – Smoke-checks the rule wizard entry point against the real `data/` cache (imports, component init, cache validation).
 
 All tools reuse the credentials and logging configuration from `data/secrets.json`.
 
 **Testing infrastructure:**
-* `pytest` – Run the full test suite (228+ test functions across 20+ test files)
-* `python test_integration_wizard.py` – Comprehensive integration test suite verifying all rule wizard components
-* `python test_wizard_smoke.py` – Smoke test suite verifying entry point initialization and error handling
-* `python test_rule_builder_nested.py` – Tests for nested rule condition evaluation
-* `python test_match_type_selection.py` – Tests for pattern matching and suggestion logic
-* `RULE_WIZARD_USAGE.md` – Complete user guide with step-by-step examples and troubleshooting
+* `pytest` – Run the test suite. Collection is scoped to `tests/` via `pyproject.toml`; scripts elsewhere named `test_*.py` are diagnostics, not tests.
+
+One-off scripts from completed migrations and past debugging sessions live in `.archive/` for reference.

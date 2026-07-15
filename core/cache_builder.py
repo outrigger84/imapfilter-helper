@@ -1232,8 +1232,8 @@ def build_cache_parallel(
             disable=not show_progress,
         )
 
-        # Reuse connection pool (may be closed, so create new one)
-        retry_pool = IMAPConnectionPool(secrets_path, max_workers, logger)
+        # The shared pool was shut down after the first pass; shutdown() resets
+        # it, so process_single_folder can acquire fresh connections from it.
 
         # Submit retry tasks
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as retry_executor:
@@ -1256,6 +1256,9 @@ def build_cache_parallel(
                         failed_folders.append(task)
                 retry_bar.update(1)
 
+        # Log out connections created during this retry round
+        pool.shutdown()
+
         # Merge retry results
         logger.log("INFO", "retry_merge_start", {}, console="🔄 Merging retry results...")
 
@@ -1276,18 +1279,22 @@ def build_cache_parallel(
         for open_attempt in range(max_open_retries):
             try:
                 main_db = sqlite3.connect(str(db_path), timeout=60.0, check_same_thread=False)
-                # Set PRAGMAs with retries in case of locking
-                for pragma_attempt in range(3):
+                # Try to set PRAGMAs, but don't fail if the database is locked —
+                # same tolerant behavior as the first-pass merge above.
+                try:
+                    main_db.execute("PRAGMA busy_timeout=60000")
+                    main_db.execute("PRAGMA synchronous=NORMAL")
                     try:
                         main_db.execute("PRAGMA journal_mode=DELETE")
-                        main_db.execute("PRAGMA busy_timeout=60000")
-                        main_db.execute("PRAGMA synchronous=NORMAL")
-                        break
                     except sqlite3.OperationalError as pragma_error:
-                        if "database is locked" in str(pragma_error) and pragma_attempt < 2:
-                            time.sleep(0.5)
-                            continue
+                        if "database is locked" in str(pragma_error):
+                            logger.log("INFO", "pragma_lock_skip", {}, console="⚠️  Database locked for PRAGMA changes - proceeding anyway")
+                        else:
+                            raise
+                except sqlite3.OperationalError as pragma_error:
+                    if "database is locked" not in str(pragma_error):
                         raise
+                    logger.log("INFO", "pragma_lock_skip", {}, console="⚠️  Database locked for PRAGMA changes - proceeding anyway")
                 break
             except sqlite3.OperationalError as open_error:
                 if "database is locked" in str(open_error) and open_attempt < max_open_retries - 1:
@@ -1409,8 +1416,6 @@ def build_cache_parallel(
                     temp_db_path.unlink()
                 except Exception:
                     pass
-
-        retry_pool.shutdown()
 
     # Report permanently failed folders
     if failed_folders:
