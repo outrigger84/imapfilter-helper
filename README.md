@@ -20,7 +20,7 @@ A helper CLI that orchestrates cache building, rule evaluation, and action execu
 │   ├── cli.py                 # Command parser and handlers
 │   ├── cache_builder.py        # Header fetching and caching (supports parallel per-folder)
 │   ├── rule_engine.py          # Rule loading and evaluation
-│   ├── executor.py             # Action execution against IMAP (parallelized with threading)
+│   ├── executor/               # Action execution against IMAP (serial + threaded parallel)
 │   ├── stream_executor.py      # Stream-based execution for memory efficiency
 │   ├── stream_processor.py     # Message streaming utilities
 │   ├── rule_validator.py       # Rule JSON validation and schema checking
@@ -34,7 +34,7 @@ A helper CLI that orchestrates cache building, rule evaluation, and action execu
 │   ├── ui_components.py        # TUI helper components
 │   ├── wizard_cache.py         # 6-hour persistent cache for wizard operations
 │   └── tools/                  # Utilities and helpers
-│       ├── rule_wizard_core.py # Rule wizard core logic
+│       ├── rule_wizard_core/   # Rule wizard core logic (selector, builder, wizard, …)
 │       ├── cache_viewer.py     # Interactive cache browser with sorting/filtering
 │       ├── coverage_analyzer.py# Pattern coverage analysis for rules
 │       ├── sample_messages.py  # Copy test messages for inspection
