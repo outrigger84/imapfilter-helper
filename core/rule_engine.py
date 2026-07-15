@@ -545,6 +545,10 @@ def evaluate_rules(
     folder_match_counts: dict[str, int] = {}
     rule_match_counts: dict[str, int] = {}
     action_type_counts: dict[str, int] = {}
+    # Header rows to drop (same-folder no-op moves). Deleting from `headers`
+    # while `cur` is still iterating it is undefined behavior in SQLite, so
+    # deletions are collected here and applied after the scan completes.
+    stale_header_keys: list[tuple[str, str]] = []
     folders_bar = tqdm(
         total=len(folder_totals) if folder_totals else None,
         desc="🧩 Evaluating folders",
@@ -684,10 +688,8 @@ def evaluate_rules(
                                 console=f"⊘ {rule_name}: {folder}/{uid} already in target folder {target}",
                             )
                             # Remove from cache since the email is already in the target location
-                            db.execute(
-                                "DELETE FROM headers WHERE folder=? AND uid=?",
-                                (folder, uid),
-                            )
+                            # (deferred until after the scan — see stale_header_keys above)
+                            stale_header_keys.append((folder, uid))
                             continue
 
                         # Calculate effective priority to ensure execution order:
@@ -770,6 +772,12 @@ def evaluate_rules(
 
     _finalize_folder()
     folders_bar.close()
+    if stale_header_keys:
+        db.executemany(
+            "DELETE FROM headers WHERE folder=? AND uid=?",
+            stale_header_keys,
+        )
+        db.commit()
     timer.stop()
     timer.count = total_matches
     folder_summary = sorted(folder_match_counts.items(), key=lambda kv: (-kv[1], kv[0]))

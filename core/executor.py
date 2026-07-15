@@ -115,6 +115,42 @@ def _is_connection_dead(exc: Exception) -> bool:
     )
 
 
+def _uidvalidity_mismatch(
+    db: sqlite3.Connection,
+    client: imaplib.IMAP4,
+    folder: str,
+) -> tuple[str, str] | None:
+    """Compare the live UIDVALIDITY of the just-SELECTed folder with the cached one.
+
+    Cached UIDs are only meaningful while the folder's UIDVALIDITY is unchanged
+    (RFC 3501); after a reset the same UID can address a different message, so
+    executing stale actions could move — and expunge — the wrong mail.
+
+    Must be called immediately after a successful SELECT of ``folder`` (imaplib
+    pops the untagged UIDVALIDITY response on read). Returns (cached, live) on
+    mismatch, or None when the values match or either side is unavailable
+    (pre-guard caches have no snapshot; some test doubles report none).
+    """
+    from core.imap_client import get_selected_uidvalidity
+
+    live = get_selected_uidvalidity(client)
+    if not live:
+        return None
+    try:
+        row = db.execute(
+            "SELECT uidvalidity FROM folder_uidvalidity WHERE folder=?",
+            (folder,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    if row is None or not row[0]:
+        return None
+    cached = str(row[0])
+    if cached != live:
+        return cached, live
+    return None
+
+
 # ============================================================================
 # Phase 2, Part C: Verification and Backup Helpers
 # ============================================================================
@@ -989,6 +1025,7 @@ def _perform_batch_move_operations(
     done = failed = 0
     successful_moves = []
     fallback_actions: list[dict] = []
+    store_retry_actions: list[dict] = []
     chunks = [to_move[i : i + _BATCH_SIZE] for i in range(0, len(to_move), _BATCH_SIZE)]
     total = len(to_move)
     _LOG_INTERVAL = 5000
@@ -999,6 +1036,7 @@ def _perform_batch_move_operations(
             continue
 
         chunk_ok = False
+        chunk_copied = False  # COPY landed in target; only the STORE may still be owed
         try:
             if supports_uid_move:
                 b_typ, _ = client.uid("MOVE", uid_set, f'"{encoded_target}"')
@@ -1006,6 +1044,7 @@ def _perform_batch_move_operations(
             else:
                 b_typ, _ = client.uid("COPY", uid_set, f'"{encoded_target}"')
                 if b_typ == "OK":
+                    chunk_copied = True
                     s_typ, _ = client.uid("STORE", uid_set, "+FLAGS", "(\\Deleted)")
                     chunk_ok = s_typ == "OK"
         except imaplib.IMAP4.error as exc:
@@ -1039,11 +1078,59 @@ def _perform_batch_move_operations(
                     {"folder": folder, "target": target, "done": done, "total": total},
                     console=f"  ↳ {folder} → {target}: {done:,}/{total:,} moved",
                 )
+        elif chunk_copied:
+            # COPY succeeded but STORE +\Deleted failed. Re-running the full
+            # move would COPY again and duplicate the messages in the target,
+            # so these only get the STORE retried below.
+            store_retry_actions.extend(chunk)
         else:
             fallback_actions.extend(chunk)
 
         if progress_callback is not None:
             progress_callback(chunk_size)
+
+    # Per-message STORE retry for chunks that were copied but not flagged.
+    for action in store_retry_actions:
+        store_ok = False
+        store_error = ""
+        try:
+            s_typ, s_resp = client.uid("STORE", action["uid"], "+FLAGS", "(\\Deleted)")
+            store_ok = s_typ == "OK"
+            if not store_ok:
+                store_error = _imap_response_text(s_resp)
+        except imaplib.IMAP4.error as exc:
+            store_error = str(exc)
+
+        if store_ok:
+            main_db.execute(
+                "UPDATE actions SET status='done', executed_at=? WHERE id=?",
+                (now_iso(), action["id"]),
+            )
+            main_db.execute(
+                "DELETE FROM headers WHERE folder=? AND uid=?",
+                (folder, action["uid"]),
+            )
+            successful_moves.append((action, None))
+            done += 1
+        else:
+            error_msg = (
+                f"Copied to {target} but STORE \\Deleted failed"
+                f"{': ' + store_error if store_error else ''} — "
+                "message now exists in both source and target"
+            )
+            main_db.execute(
+                "UPDATE actions SET status='failed', executed_at=?, error_message=? WHERE id=?",
+                (now_iso(), error_msg, action["id"]),
+            )
+            failed += 1
+            if logger:
+                logger.log(
+                    "ERROR",
+                    "worker_move_store_retry_failed",
+                    {"folder": folder, "target": target, "uid": action["uid"], "error": store_error},
+                )
+    if store_retry_actions:
+        main_db.commit()
 
     # Per-message fallback for any chunks the batch command rejected.
     for action in fallback_actions:
@@ -2398,6 +2485,9 @@ def execute_actions(
                     )
                 db.commit()
                 stats["failed"] += len(current_items)
+                folders_bar.update(1)
+                current_items = []
+                current_key = None
                 return
 
             if backup_result.failed > 0:
@@ -2472,6 +2562,38 @@ def execute_actions(
                 )
                 if sel_typ != "OK":
                     raise imaplib.IMAP4.error(f"Cannot open folder {folder}")
+
+                mismatch = _uidvalidity_mismatch(db, client, folder)
+                if mismatch is not None:
+                    cached_uv, live_uv = mismatch
+                    error_msg = (
+                        f"UIDVALIDITY changed for {folder} "
+                        f"(cached {cached_uv}, server {live_uv}); "
+                        "cached UIDs are stale — rebuild the cache"
+                    )
+                    for a_id, _, _, _, _ in current_items:
+                        db.execute(
+                            "UPDATE actions SET status='failed', executed_at=?, error_message=? WHERE id=?",
+                            (now_iso(), error_msg, a_id),
+                        )
+                        actions_bar.update(1)
+                    db.commit()
+                    stats["failed"] += len(current_items)
+                    logger.log(
+                        "ERROR",
+                        "execute_uidvalidity_mismatch",
+                        {
+                            "folder": folder,
+                            "cached": cached_uv,
+                            "live": live_uv,
+                            "count": len(current_items),
+                        },
+                        console=(
+                            f"🛑 {folder}: UIDVALIDITY changed (cached {cached_uv}, "
+                            f"server {live_uv}) — {len(current_items)} actions failed; rebuild cache"
+                        ),
+                    )
+                    raise imaplib.IMAP4.error(error_msg)
 
                 target_ready = target is None
                 successful_moves: list[tuple[int, str]] = []  # Track (action_id, uid) for pre-EXPUNGE verification
@@ -2638,6 +2760,7 @@ def execute_actions(
                 _MOVE_CHUNK = 500
                 batch_succeeded = False
                 batch_fallback: list = []  # items whose chunk failed → per-message retry
+                batch_store_retry: list = []  # COPY landed but STORE failed → retry STORE only
 
                 if items_to_move and target and not dry_run:
                     method = "UID MOVE" if supports_uid_move else "UID COPY+STORE"
@@ -2651,6 +2774,7 @@ def execute_actions(
                         if not uid_set:
                             continue
                         chunk_ok = False
+                        chunk_copied = False  # COPY landed in target; only the STORE may still be owed
                         try:
                             if supports_uid_move:
                                 b_typ, b_resp = client.uid("MOVE", uid_set, f'"{target}"')
@@ -2707,6 +2831,7 @@ def execute_actions(
                                 if b_typ == "OK":
                                     if not target_ready:
                                         target_ready = True
+                                    chunk_copied = True
                                     s_typ, s_resp = client.uid("STORE", uid_set, "+FLAGS", "(\\Deleted)")
                                     log_imap_call(
                                         "imap_uid_store_batch",
@@ -2756,6 +2881,11 @@ def execute_actions(
                                 msgs_bar.update(1)
                                 actions_bar.update(1)
                             batch_done_count += len(chunk)
+                        elif chunk_copied:
+                            # Re-running the full move would COPY again and
+                            # duplicate the chunk in the target; only the
+                            # STORE +\Deleted gets retried per-message below.
+                            batch_store_retry.extend(chunk)
                         else:
                             batch_fallback.extend(chunk)
 
@@ -2776,6 +2906,48 @@ def execute_actions(
                                 + (f" ({len(batch_fallback)} retrying per-msg)" if batch_fallback else "")
                             ),
                         )
+
+                    # STORE-only retry for chunks that were copied but not flagged.
+                    for a_id, uid, _, _, _ in batch_store_retry:
+                        store_ok = False
+                        store_error = ""
+                        try:
+                            s_typ, s_resp = client.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
+                            log_imap_call(
+                                "imap_uid_store_retry",
+                                op_label="UID STORE +FLAGS (retry)",
+                                status=s_typ,
+                                response=s_resp,
+                                folder=folder,
+                                target=target,
+                                uid=uid,
+                            )
+                            store_ok = s_typ == "OK"
+                            if not store_ok:
+                                store_error = _imap_response_text(s_resp)
+                        except imaplib.IMAP4.error as store_exc:
+                            store_error = str(store_exc)
+
+                        if store_ok:
+                            _record_success(a_id, uid)
+                        else:
+                            error_msg = (
+                                f"Copied to {target} but STORE \\Deleted failed"
+                                f"{': ' + store_error if store_error else ''} — "
+                                "message now exists in both source and target"
+                            )
+                            db.execute(
+                                "UPDATE actions SET status='failed', executed_at=?, error_message=? WHERE id=?",
+                                (now_iso(), error_msg, a_id),
+                            )
+                            stats["failed"] += 1
+                            logger.log(
+                                "ERROR",
+                                "execute_move_store_retry_failed",
+                                {"folder": folder, "target": target, "uid": uid, "error": store_error},
+                            )
+                        msgs_bar.update(1)
+                        actions_bar.update(1)
 
                     batch_succeeded = len(batch_fallback) == 0
 
@@ -3484,6 +3656,40 @@ def _execute_folder_worker(
                         )
                         actions_failed += 1
                     main_db.commit()
+                    if strict:
+                        raise imaplib.IMAP4.error(error_msg)
+                    continue
+
+                mismatch = _uidvalidity_mismatch(main_db, client, grp_folder)
+                if mismatch is not None:
+                    cached_uv, live_uv = mismatch
+                    error_msg = (
+                        f"UIDVALIDITY changed for {grp_folder} "
+                        f"(cached {cached_uv}, server {live_uv}); "
+                        "cached UIDs are stale — rebuild the cache"
+                    )
+                    for action in group_actions:
+                        main_db.execute(
+                            "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
+                            ("failed", now_iso(), error_msg, action["id"]),
+                        )
+                        actions_failed += 1
+                    main_db.commit()
+                    logger.log(
+                        "ERROR",
+                        "execute_uidvalidity_mismatch",
+                        {
+                            "worker_id": worker_id,
+                            "folder": grp_folder,
+                            "cached": cached_uv,
+                            "live": live_uv,
+                            "count": len(group_actions),
+                        },
+                        console=(
+                            f"🛑 {grp_folder}: UIDVALIDITY changed (cached {cached_uv}, "
+                            f"server {live_uv}) — {len(group_actions)} actions failed; rebuild cache"
+                        ),
+                    )
                     if strict:
                         raise imaplib.IMAP4.error(error_msg)
                     continue

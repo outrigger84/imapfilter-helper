@@ -1635,6 +1635,7 @@ def handle_clear_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
         db.execute("DELETE FROM headers")
         db.execute("DELETE FROM actions")
         db.execute("DELETE FROM folders")
+        db.execute("DELETE FROM folder_uidvalidity")
 
     logger.log(
         "INFO",

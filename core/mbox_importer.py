@@ -442,38 +442,33 @@ def _append_folder_batch(
                         continue
 
                 failed += 1
-                failed_indices.append(idx)
                 logger.log("WARN", "append_failed",
                            {"folder": folder, "resp": resp_str},
                            console=f"    ⚠️  APPEND rejected ({resp_str})")
-                if err_mbox is not None and msg is not None:
-                    with (err_lock or _null_context()):
-                        try:
-                            err_mbox.add(msg)
-                        except Exception:
-                            pass  # Message too corrupted to write to error mbox
-                if msg_id:
-                    with (progress_lock or _null_context()):
-                        _record_uploaded(progress_path, msg_id)
+                # Only mark the message as handled (removed from the source mbox
+                # in phase 6, skipped on retry) once it is safely in the error
+                # mbox — otherwise a failed message would exist nowhere.
+                if _preserve_failed_message(err_mbox, err_lock, msg, logger, folder):
+                    failed_indices.append(idx)
+                    if msg_id and progress_path is not None:
+                        with (progress_lock or _null_context()):
+                            _record_uploaded(progress_path, msg_id)
 
         except imaplib.IMAP4.abort:
             # Connection is dead; propagate so the caller can reconnect and retry.
             raise
         except Exception as exc:
             failed += 1
-            failed_indices.append(idx)
             logger.log("WARN", "append_error",
                        {"folder": folder, "error": str(exc)})
-            if err_mbox is not None and msg is not None:
-                with (err_lock or _null_context()):
-                    try:
-                        err_mbox.add(msg)
-                    except Exception:
-                        pass  # Message too corrupted to write to error mbox
-            msg_id = index_to_msgid.get(idx, "")
-            if msg_id:
-                with (progress_lock or _null_context()):
-                    _record_uploaded(progress_path, msg_id)
+            # Same invariant as the APPEND-rejected branch: never mark a failed
+            # message as handled unless the error mbox actually holds it.
+            if _preserve_failed_message(err_mbox, err_lock, msg, logger, folder):
+                failed_indices.append(idx)
+                msg_id = (index_to_msgid or {}).get(idx, "")
+                if msg_id and progress_path is not None:
+                    with (progress_lock or _null_context()):
+                        _record_uploaded(progress_path, msg_id)
 
     if err_mbox is not None:
         with (err_lock or _null_context()):
@@ -486,6 +481,29 @@ def _append_folder_batch(
 def _null_context():
     """No-op context manager used when no lock is needed (single-threaded path)."""
     yield
+
+
+def _preserve_failed_message(err_mbox, err_lock, msg, logger, folder: str) -> bool:
+    """Write a failed message to the error mbox; return True only on success.
+
+    Callers must not remove the message from the source mbox (or record it as
+    processed) unless this returns True — a message that failed to upload and
+    could not be preserved must stay in the source mbox for the next run.
+    """
+    if err_mbox is None or msg is None:
+        return False
+    with (err_lock or _null_context()):
+        try:
+            err_mbox.add(msg)
+            return True
+        except Exception as exc:
+            logger.log(
+                "ERROR",
+                "error_mbox_write_failed",
+                {"folder": folder, "error": str(exc)},
+                console="    ❌ Could not preserve failed message in error mbox; keeping it in source",
+            )
+            return False
 
 
 def _safe_logout(client: imaplib.IMAP4_SSL) -> None:

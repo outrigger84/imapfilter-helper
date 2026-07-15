@@ -204,8 +204,7 @@ def _flush_batch_moves(
                 logger.log("INFO", "stream_batch_moved", {"folder": source_folder, "target": target, "count": len(chunk)},
                            console=f"   ✅ Moved {len(chunk)} msgs {source_folder} → {target}")
             if resume_log:
-                for uid in chunk:
-                    resume_log.mark_processed(source_folder, uid)
+                resume_log.mark_processed_batch({source_folder: chunk})
 
     if need_expunge:
         try:
@@ -603,6 +602,9 @@ def stream_execute(
             client.close()
         except (imaplib.IMAP4.error, AttributeError):
             pass
+
+    if resume_log:
+        resume_log.flush()
 
     timer.stop()
     timer.count = processed_count

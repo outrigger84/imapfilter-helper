@@ -123,6 +123,14 @@ def main():
             )
             folders_rows = folders_cursor.fetchall()
 
+            # Read UIDVALIDITY snapshots (absent in temp DBs from older builds)
+            try:
+                uidvalidity_rows = temp_db.execute(
+                    "SELECT folder, uidvalidity, updated_at FROM folder_uidvalidity"
+                ).fetchall()
+            except sqlite3.OperationalError:
+                uidvalidity_rows = []
+
             temp_db.close()
 
             if args.verbose:
@@ -145,6 +153,16 @@ def main():
                         "INSERT OR REPLACE INTO folders (name, parent, updated_at) VALUES (?, ?, ?)",
                         folders_rows
                     )
+
+                    if uidvalidity_rows:
+                        main_db.execute(
+                            "CREATE TABLE IF NOT EXISTS folder_uidvalidity "
+                            "(folder TEXT PRIMARY KEY, uidvalidity TEXT, updated_at TEXT)"
+                        )
+                        main_db.executemany(
+                            "INSERT OR REPLACE INTO folder_uidvalidity (folder, uidvalidity, updated_at) VALUES (?, ?, ?)",
+                            uidvalidity_rows
+                        )
 
                     insert_successful = True
                     break

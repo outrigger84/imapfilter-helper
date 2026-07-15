@@ -96,6 +96,26 @@ def imap_login(secrets_path: Path, logger: JsonLogger) -> imaplib.IMAP4:
     return mail
 
 
+def get_selected_uidvalidity(client: imaplib.IMAP4) -> str | None:
+    """Return the UIDVALIDITY of the currently selected mailbox, if reported.
+
+    Must be called after a successful SELECT/EXAMINE. imaplib pops the
+    untagged response, so the value is only readable once per SELECT.
+    Returns None when the server did not report UIDVALIDITY.
+    """
+    try:
+        _, data = client.response("UIDVALIDITY")
+    except Exception:
+        return None
+    if not data or data[0] is None:
+        return None
+    value = data[0]
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("ascii", errors="ignore")
+    value = str(value).strip()
+    return value or None
+
+
 def list_all_folders(client: imaplib.IMAP4, parent: str | None = None) -> List[str]:
     """
     List folders from IMAP server.

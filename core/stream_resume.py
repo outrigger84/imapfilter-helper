@@ -11,11 +11,27 @@ from core.logging_utils import JsonLogger
 class ResumeLog:
     """Track which messages have been processed for resume capability."""
 
+    #: mark_processed() writes to disk after this many unsaved marks; callers
+    #: must flush() at natural boundaries (folder change, end of run).
+    SAVE_INTERVAL = 100
+
     def __init__(self, log_file: Path):
         """Initialize resume log."""
         self.log_file = Path(log_file)
         self.processed: dict[str, Set[str]] = {}  # folder -> set of UIDs
+        self._unsaved = 0
         self._load()
+
+    @staticmethod
+    def _norm_uid(uid) -> str:
+        """Normalize a UID to str — IMAP responses hand around bytes UIDs.
+
+        Without this, is_processed(folder, b'123') never matches the str
+        UIDs recorded by mark_processed and resume filtering is a no-op.
+        """
+        if isinstance(uid, (bytes, bytearray)):
+            return uid.decode("ascii", "ignore")
+        return str(uid)
 
     def _load(self) -> None:
         """Load resume state from disk."""
@@ -43,28 +59,40 @@ class ResumeLog:
         with self.log_file.open("w") as f:
             json.dump(data, f, indent=2)
 
-    def is_processed(self, folder: str, uid: str) -> bool:
+    def is_processed(self, folder: str, uid) -> bool:
         """Check if a message has already been processed."""
-        return uid in self.processed.get(folder, set())
+        return self._norm_uid(uid) in self.processed.get(folder, set())
 
-    def mark_processed(self, folder: str, uid: str) -> None:
-        """Mark a message as processed."""
+    def mark_processed(self, folder: str, uid) -> None:
+        """Mark a message as processed.
+
+        Saves to disk every SAVE_INTERVAL marks (a full-file JSON rewrite per
+        message is O(n²) over a run); call flush() to persist the remainder.
+        """
         if folder not in self.processed:
             self.processed[folder] = set()
-        self.processed[folder].add(uid)
-        self._save()
+        self.processed[folder].add(self._norm_uid(uid))
+        self._unsaved += 1
+        if self._unsaved >= self.SAVE_INTERVAL:
+            self.flush()
 
     def mark_processed_batch(self, updates: dict[str, list[str]]) -> None:
         """Mark multiple messages as processed (more efficient for batches)."""
         for folder, uids in updates.items():
             if folder not in self.processed:
                 self.processed[folder] = set()
-            self.processed[folder].update(uids)
+            self.processed[folder].update(self._norm_uid(uid) for uid in uids)
+        self.flush()
+
+    def flush(self) -> None:
+        """Persist any unsaved marks to disk."""
         self._save()
+        self._unsaved = 0
 
     def clear(self) -> None:
         """Clear all resume state."""
         self.processed.clear()
+        self._unsaved = 0
         if self.log_file.exists():
             self.log_file.unlink()
 

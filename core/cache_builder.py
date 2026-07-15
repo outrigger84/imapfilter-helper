@@ -22,10 +22,41 @@ from tqdm import tqdm
 from core.connection_pool import IMAPConnectionPool
 from core.database import init_db
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
-from core.imap_client import safe_search_all
+from core.imap_client import get_selected_uidvalidity, safe_search_all
 
 
 VALID_LIMIT_ORDERS = {"newest", "oldest", "random"}
+
+UIDVALIDITY_TABLE_SQL = (
+    "CREATE TABLE IF NOT EXISTS folder_uidvalidity "
+    "(folder TEXT PRIMARY KEY, uidvalidity TEXT, updated_at TEXT)"
+)
+
+
+def _record_uidvalidity(db: sqlite3.Connection, client, folder: str) -> None:
+    """Store the folder's UIDVALIDITY (read from the current SELECT) in the cache.
+
+    The executor compares this against the live value before moving messages,
+    so a UIDVALIDITY reset between cache-build and execute can never cause a
+    stale UID to address the wrong message.
+    """
+    uidvalidity = get_selected_uidvalidity(client)
+    if not uidvalidity:
+        return
+    db.execute(
+        "INSERT OR REPLACE INTO folder_uidvalidity (folder, uidvalidity, updated_at) "
+        "VALUES (?,?,?)",
+        (folder, uidvalidity, now_iso()),
+    )
+
+
+def _read_uidvalidity_rows(db: sqlite3.Connection) -> list[tuple]:
+    """Read folder_uidvalidity rows from a worker temp DB; empty if the table is absent."""
+    try:
+        cursor = db.execute("SELECT folder, uidvalidity, updated_at FROM folder_uidvalidity")
+        return cursor.fetchall()
+    except sqlite3.OperationalError:
+        return []
 MEGA_FOLDER_THRESHOLD = 10000  # Messages per folder before splitting
 FETCH_BATCH_SIZE = 200  # UIDs per IMAP FETCH call (probe-tuned for high-latency servers)
 
@@ -361,6 +392,8 @@ def build_cache(
             if sel_typ != "OK":
                 logger.log("INFO", "cache_folder_skipped", {"folder": folder}, console=f"⚠️ Skipped {folder}")
                 continue
+
+            _record_uidvalidity(db, client, folder)
 
             uids = safe_search_all(client, undeleted_only=True)
             if not uids:
@@ -730,6 +763,7 @@ def build_cache_parallel(
                 "CREATE TABLE IF NOT EXISTS folders "
                 "(id INTEGER PRIMARY KEY, name TEXT, parent TEXT, updated_at TEXT)"
             )
+            db.execute(UIDVALIDITY_TABLE_SQL)
 
             # Select folder in read-only mode
             sel_typ, _ = client.select(f'"{folder}"', readonly=True)
@@ -737,6 +771,8 @@ def build_cache_parallel(
                 logger.log("INFO", "cache_folder_skipped", {"folder": folder}, console=f"⚠️ Skipped {folder}")
                 folders_bar.update(1)
                 return folder, 0, None
+
+            _record_uidvalidity(db, client, folder)
 
             # Get undeleted messages — use shared cache so chunk workers for the
             # same mega-folder don't each issue a full UID SEARCH.
@@ -1073,6 +1109,8 @@ def build_cache_parallel(
                 folders_cursor = temp_db.execute("SELECT name, parent, updated_at FROM folders")
                 folders_rows = folders_cursor.fetchall()
 
+                uidvalidity_rows = _read_uidvalidity_rows(temp_db)
+
                 temp_db.close()
                 temp_db = None
 
@@ -1106,6 +1144,13 @@ def build_cache_parallel(
                             time.sleep(delay)
                             continue
                         raise
+
+                if uidvalidity_rows:
+                    main_db.execute(UIDVALIDITY_TABLE_SQL)
+                    main_db.executemany(
+                        "INSERT OR REPLACE INTO folder_uidvalidity (folder, uidvalidity, updated_at) VALUES (?, ?, ?)",
+                        uidvalidity_rows,
+                    )
 
                 logger.log(
                     "INFO",
@@ -1329,6 +1374,8 @@ def build_cache_parallel(
                     folders_cursor = temp_db.execute("SELECT name, parent, updated_at FROM folders")
                     folders_rows = folders_cursor.fetchall()
 
+                    uidvalidity_rows = _read_uidvalidity_rows(temp_db)
+
                     temp_db.close()
                     temp_db = None
 
@@ -1362,6 +1409,13 @@ def build_cache_parallel(
                                 time.sleep(delay)
                                 continue
                             raise
+
+                    if uidvalidity_rows:
+                        main_db.execute(UIDVALIDITY_TABLE_SQL)
+                        main_db.executemany(
+                            "INSERT OR REPLACE INTO folder_uidvalidity (folder, uidvalidity, updated_at) VALUES (?, ?, ?)",
+                            uidvalidity_rows,
+                        )
 
                     logger.log(
                         "INFO",
