@@ -626,3 +626,364 @@ def test_handle_compact_cache(monkeypatch, cli_context):
     assert result == 0
     assert seen["db"] is db
     assert seen["logger"] is logger
+
+
+def test_parser_accepts_per_folder_on_phase_commands():
+    parser = cli.build_parser()
+    for cmd in ["build-cache", "evaluate", "execute", "run-all", "eval-execute"]:
+        parsed = parser.parse_args([cmd, "--per-folder"])
+        assert parsed.per_folder is True
+
+
+def test_parser_rejects_per_folder_on_stream():
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["stream", "--per-folder"])
+
+
+def test_handle_build_cache_per_folder(monkeypatch, cli_context):
+    cfg, db, logger = cli_context
+    args = argparse.Namespace(
+        cmd="build-cache",
+        all_folders=False,
+        folder=["Beta", "Alpha"],
+        limit=None,
+        order=None,
+        backup=False,
+        per_folder=True,
+    )
+    calls = []
+
+    class FakeClient:
+        def logout(self) -> None:
+            return None
+
+    def fake_login(path, log):
+        return FakeClient()
+
+    def fake_build_cache(client, database, folders, **kwargs):
+        calls.append(list(folders))
+        return types.SimpleNamespace(elapsed=0.0), len(folders), 1
+
+    monkeypatch.setattr(cli, "imap_login", fake_login)
+    monkeypatch.setattr(cli, "build_cache", fake_build_cache)
+
+    result = cli.handle_build_cache(args, cfg, db, logger)
+
+    assert result == 0
+    assert calls == [["Alpha"], ["Beta"]]
+
+
+def test_handle_evaluate_per_folder(monkeypatch, cli_context):
+    cfg, db, logger = cli_context
+    args = argparse.Namespace(
+        cmd="evaluate",
+        dry_run=True,
+        verbose=False,
+        debug_headers=False,
+        all_folders=False,
+        folder=["Beta", "Alpha"],
+        limit=None,
+        per_folder=True,
+    )
+    calls = []
+    load_calls = []
+
+    def fake_load_rules(path, log):
+        load_calls.append(path)
+        return []
+
+    def fake_evaluate_rules(database, rules, **kwargs):
+        calls.append((list(kwargs["folders"]), kwargs["scope"]))
+        return None, 0, 0
+
+    monkeypatch.setattr(cli, "load_rules", fake_load_rules)
+    monkeypatch.setattr(cli, "evaluate_rules", fake_evaluate_rules)
+
+    result = cli.handle_evaluate(args, cfg, db, logger)
+
+    assert result == 0
+    assert calls == [(["Alpha"], "all"), (["Beta"], "all")]
+    assert len(load_calls) == 1
+
+
+def test_handle_execute_per_folder_aggregates_stats(monkeypatch, cli_context):
+    cfg, db, logger = cli_context
+    args = argparse.Namespace(
+        cmd="execute",
+        dry_run=True,
+        strict=False,
+        verbose=False,
+        limit=None,
+        all_folders=False,
+        folder=["Beta", "Alpha"],
+        per_folder=True,
+    )
+    calls = []
+    records = []
+    orig_log = logger.log
+
+    def spy_log(level, message, context=None, console=None):
+        records.append((message, context))
+        return orig_log(level, message, context, console=console)
+
+    def fake_execute_actions(client, database, **kwargs):
+        folder = kwargs["folders"][0]
+        calls.append(folder)
+        stats = {"Alpha": {"done": 1, "failed": 0, "skipped": 2}, "Beta": {"done": 2, "failed": 1, "skipped": 0}}
+        return None, stats[folder]
+
+    monkeypatch.setattr(logger, "log", spy_log)
+    monkeypatch.setattr(cli, "execute_actions", fake_execute_actions)
+
+    result = cli.handle_execute(args, cfg, db, logger)
+
+    assert result == 0
+    assert calls == ["Alpha", "Beta"]
+    summary = next(ctx for message, ctx in records if message == "execute_summary")
+    assert summary["done"] == 3
+    assert summary["failed"] == 1
+    assert summary["skipped"] == 2
+
+
+def test_handle_execute_per_folder_respects_global_limit(monkeypatch, cli_context):
+    cfg, db, logger = cli_context
+    args = argparse.Namespace(
+        cmd="execute",
+        dry_run=False,
+        strict=False,
+        verbose=False,
+        limit=1,
+        all_folders=False,
+        folder=["Beta", "Alpha"],
+        per_folder=True,
+    )
+    calls = []
+
+    class FakeClient:
+        def logout(self) -> None:
+            return None
+
+    def fake_login(path, log):
+        return FakeClient()
+
+    def fake_execute_actions(client, database, **kwargs):
+        calls.append((kwargs["folders"][0], kwargs["limit"]))
+        return None, {"done": 1, "failed": 0, "skipped": 0}
+
+    monkeypatch.setattr(cli, "imap_login", fake_login)
+    monkeypatch.setattr(cli, "execute_actions", fake_execute_actions)
+
+    result = cli.handle_execute(args, cfg, db, logger)
+
+    assert result == 0
+    assert calls == [("Alpha", 1)]
+
+
+def test_handle_execute_per_folder_dry_run_limit_counts_pending(monkeypatch, cli_context):
+    cfg, db, logger = cli_context
+    args = argparse.Namespace(
+        cmd="execute",
+        dry_run=True,
+        strict=False,
+        verbose=False,
+        limit=2,
+        all_folders=False,
+        folder=["Beta", "Alpha"],
+        per_folder=True,
+    )
+    db.executemany(
+        "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+            ("1", "Alpha", "rule", "Junk", 100, "pending", "2024-01-01T00:00:00Z"),
+            ("2", "Alpha", "rule", "Junk", 100, "pending", "2024-01-01T00:00:00Z"),
+            ("3", "Beta", "rule", "Junk", 100, "pending", "2024-01-01T00:00:00Z"),
+        ],
+    )
+    db.commit()
+    calls = []
+
+    def fake_execute_actions(client, database, **kwargs):
+        calls.append((kwargs["folders"][0], kwargs["limit"]))
+        # Dry-run leaves actions pending and reports zero stats
+        return None, {"done": 0, "failed": 0, "skipped": 0}
+
+    monkeypatch.setattr(cli, "execute_actions", fake_execute_actions)
+
+    result = cli.handle_execute(args, cfg, db, logger)
+
+    assert result == 0
+    # Alpha's 2 pending actions exhaust the global limit; Beta is never reached
+    assert calls == [("Alpha", 2)]
+
+
+def test_handle_run_all_per_folder_interleaves(monkeypatch, cli_context):
+    cfg, db, logger = cli_context
+    args = argparse.Namespace(
+        cmd="run-all",
+        dry_run=False,
+        strict=False,
+        all_folders=True,
+        folder=None,
+        verbose=False,
+        debug_headers=False,
+        action_limit=None,
+        cache_limit=None,
+        cache_order=None,
+        backup=False,
+        per_folder=True,
+    )
+    calls = []
+    logins = []
+
+    class FakeClient:
+        def logout(self) -> None:
+            return None
+
+    def fake_login(path, log):
+        logins.append(path)
+        return FakeClient()
+
+    def fake_list_all_folders(_client):
+        return ["Beta", "Alpha"]
+
+    def fake_build_cache(client, database, folders, **kwargs):
+        calls.append(f"build:{folders[0]}")
+        return None, 1, 1
+
+    def fake_load_rules(path, log):
+        return [{"name": "noop", "conditions": []}]
+
+    def fake_evaluate_rules(database, rules, **kwargs):
+        calls.append(f"eval:{kwargs['folders'][0]}")
+        return None, len(rules), 0
+
+    def fake_execute_actions(client, database, **kwargs):
+        calls.append(f"exec:{kwargs['folders'][0]}")
+        return None, {"done": 0, "skipped": 0, "failed": 0, "suppressed": 0}
+
+    monkeypatch.setattr(cli, "imap_login", fake_login)
+    monkeypatch.setattr(cli, "list_all_folders", fake_list_all_folders)
+    monkeypatch.setattr(cli, "build_cache", fake_build_cache)
+    monkeypatch.setattr(cli, "load_rules", fake_load_rules)
+    monkeypatch.setattr(cli, "evaluate_rules", fake_evaluate_rules)
+    monkeypatch.setattr(cli, "execute_actions", fake_execute_actions)
+
+    result = cli.handle_run_all(args, cfg, db, logger)
+
+    assert result == 0
+    assert calls == [
+        "build:Alpha",
+        "eval:Alpha",
+        "exec:Alpha",
+        "build:Beta",
+        "eval:Beta",
+        "exec:Beta",
+    ]
+    assert len(logins) == 1
+
+
+def test_handle_run_all_per_folder_continues_on_error(monkeypatch, cli_context):
+    cfg, db, logger = cli_context
+    args = argparse.Namespace(
+        cmd="run-all",
+        dry_run=False,
+        strict=False,
+        all_folders=False,
+        folder=["Beta", "Alpha"],
+        verbose=False,
+        debug_headers=False,
+        action_limit=None,
+        cache_limit=None,
+        cache_order=None,
+        backup=False,
+        per_folder=True,
+    )
+    calls = []
+
+    class FakeClient:
+        def logout(self) -> None:
+            return None
+
+    def fake_login(path, log):
+        return FakeClient()
+
+    def fake_build_cache(client, database, folders, **kwargs):
+        calls.append(f"build:{folders[0]}")
+        return None, 1, 1
+
+    def fake_load_rules(path, log):
+        return []
+
+    def fake_evaluate_rules(database, rules, **kwargs):
+        folder = kwargs["folders"][0]
+        calls.append(f"eval:{folder}")
+        if folder == "Alpha":
+            raise RuntimeError("boom")
+        return None, 0, 0
+
+    def fake_execute_actions(client, database, **kwargs):
+        calls.append(f"exec:{kwargs['folders'][0]}")
+        return None, {"done": 0, "skipped": 0, "failed": 0, "suppressed": 0}
+
+    monkeypatch.setattr(cli, "imap_login", fake_login)
+    monkeypatch.setattr(cli, "build_cache", fake_build_cache)
+    monkeypatch.setattr(cli, "load_rules", fake_load_rules)
+    monkeypatch.setattr(cli, "evaluate_rules", fake_evaluate_rules)
+    monkeypatch.setattr(cli, "execute_actions", fake_execute_actions)
+
+    result = cli.handle_run_all(args, cfg, db, logger)
+
+    assert result == 1
+    assert calls == [
+        "build:Alpha",
+        "eval:Alpha",
+        "build:Beta",
+        "eval:Beta",
+        "exec:Beta",
+    ]
+
+
+def test_handle_eval_execute_per_folder_interleaves(monkeypatch, cli_context):
+    cfg, db, logger = cli_context
+    args = argparse.Namespace(
+        cmd="eval-execute",
+        dry_run=True,
+        strict=False,
+        verbose=False,
+        debug_headers=False,
+        limit=None,
+        all_folders=True,
+        folder=None,
+        per_folder=True,
+    )
+    db.executemany(
+        "INSERT INTO folders (name, parent, updated_at) VALUES (?, ?, ?)",
+        [
+            ("Beta", None, "2024-01-01T00:00:00Z"),
+            ("Alpha", None, "2024-01-01T00:00:00Z"),
+        ],
+    )
+    db.commit()
+    calls = []
+
+    def fake_load_rules(path, log):
+        return []
+
+    def fake_evaluate_rules(database, rules, **kwargs):
+        calls.append(f"eval:{kwargs['folders'][0]}")
+        return None, 0, 0
+
+    def fake_execute_actions(client, database, **kwargs):
+        calls.append(f"exec:{kwargs['folders'][0]}")
+        return None, {"done": 0, "skipped": 0, "failed": 0, "suppressed": 0}
+
+    monkeypatch.setattr(cli, "load_rules", fake_load_rules)
+    monkeypatch.setattr(cli, "evaluate_rules", fake_evaluate_rules)
+    monkeypatch.setattr(cli, "execute_actions", fake_execute_actions)
+
+    result = cli.handle_eval_execute(args, cfg, db, logger)
+
+    assert result == 0
+    assert calls == ["eval:Alpha", "exec:Alpha", "eval:Beta", "exec:Beta"]
