@@ -503,6 +503,7 @@ def evaluate_rules(
     debug_headers: bool = False,
     folders: Sequence[str] | None = None,
     limit: int | None = None,
+    show_folder_bar: bool = True,
 ) -> tuple[PhaseTimer, int, int]:
     # Sort by priority ascending so lower numbers (higher precedence) are evaluated first.
     # evaluate_rules is first-match-wins: it breaks after the first rule that matches each email.
@@ -567,7 +568,7 @@ def evaluate_rules(
         dynamic_ncols=True,
         leave=True,
         position=0,
-        disable=not show_progress,
+        disable=not (show_progress and show_folder_bar),
     )
 
     current_folder: str | None = None

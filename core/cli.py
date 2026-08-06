@@ -841,6 +841,8 @@ def _run_cache_phase(
     parallel_workers: int,
     folder_sizes: dict[str, int] | None = None,
     temp_dir: Path | None = None,
+    show_folder_bar: bool = True,
+    reconnect_fn: Callable[[], imaplib.IMAP4] | None = None,
 ) -> tuple[PhaseTimer, int, int]:
     """Build the cache for *folders* and return ``(timer, folders_count, msg_count)``."""
     if parallel_workers > 1 and client is not None:
@@ -887,6 +889,8 @@ def _run_cache_phase(
         limit=cfg.cache.limit,
         order=cfg.cache.order,
         folder_sizes=folder_sizes,
+        show_folder_bar=show_folder_bar,
+        reconnect_fn=reconnect_fn,
     )
 
 
@@ -940,12 +944,16 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
                     parallel_workers=_cache_phase_workers(args, cfg, [folder], force_sequential=True),
                     folder_sizes=folder_sizes,
                     temp_dir=getattr(args, "temp_dir", None),
+                    show_folder_bar=False,
+                    reconnect_fn=lambda: imap_login(cfg.paths.secrets_file, logger),
                 )
                 totals["folders"] += fc
                 totals["messages"] += mc
                 totals["elapsed"] += timer.elapsed
 
-            failed = _for_each_folder(sorted(folders), logger, cache_one, label="build-cache")
+            failed = _for_each_folder(
+                sorted(folders), logger, cache_one, label="build-cache", show_progress=cfg.logging.show_progress
+            )
             folders_count, msg_count = totals["folders"], totals["messages"]
             elapsed = totals["elapsed"]
         else:
@@ -958,6 +966,7 @@ def handle_build_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
                 parallel_workers=_cache_phase_workers(args, cfg, folders),
                 folder_sizes=folder_sizes,
                 temp_dir=getattr(args, "temp_dir", None),
+                reconnect_fn=lambda: imap_login(cfg.paths.secrets_file, logger),
             )
             elapsed = timer.elapsed
 
@@ -1062,34 +1071,51 @@ def _for_each_folder(
     phase_fn: Callable[[str], bool | None],
     *,
     label: str,
+    show_progress: bool = True,
 ) -> list[str]:
     """Run *phase_fn* once per folder, continuing past failures.
 
     ``phase_fn`` may return True to stop the loop early (e.g. a global limit
     was exhausted). Returns the folders whose phases raised.
     """
+    from tqdm import tqdm  # Imported lazily to avoid global side effects
+
     failed: list[str] = []
     total = len(folder_list)
-    for index, folder in enumerate(folder_list, start=1):
-        logger.log(
-            "INFO",
-            "per_folder_progress",
-            {"folder": folder, "index": index, "total": total, "command": label},
-            console=f"📁 [{index}/{total}] Processing folder: {folder}",
-        )
-        try:
-            stop = phase_fn(folder)
-        except Exception as exc:
-            failed.append(folder)
+    folder_bar = tqdm(
+        total=total,
+        desc=f"📁 {label}",
+        unit="folder",
+        dynamic_ncols=True,
+        leave=True,
+        disable=not show_progress,
+    )
+    try:
+        for index, folder in enumerate(folder_list, start=1):
+            folder_bar.set_postfix_str(folder)
             logger.log(
-                "WARNING",
-                "per_folder_failed",
-                {"folder": folder, "command": label, "error": str(exc)},
-                console=f"⚠️ Folder failed, continuing: {folder} ({exc})",
+                "INFO",
+                "per_folder_progress",
+                {"folder": folder, "index": index, "total": total, "command": label},
+                console=f"📁 [{index}/{total}] Processing folder: {folder}",
             )
-            continue
-        if stop:
-            break
+            try:
+                stop = phase_fn(folder)
+            except Exception as exc:
+                failed.append(folder)
+                logger.log(
+                    "WARNING",
+                    "per_folder_failed",
+                    {"folder": folder, "command": label, "error": str(exc)},
+                    console=f"⚠️ Folder failed, continuing: {folder} ({exc})",
+                )
+                continue
+            finally:
+                folder_bar.update(1)
+            if stop:
+                break
+    finally:
+        folder_bar.close()
     return failed
 
 
@@ -1137,6 +1163,7 @@ def handle_evaluate(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLo
                 debug_headers=args.debug_headers,
                 folders=[folder],
                 limit=totals["remaining"],
+                show_folder_bar=False,
             )
             totals["matches"] += matches
             if totals["remaining"] is not None:
@@ -1145,7 +1172,9 @@ def handle_evaluate(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLo
                     return True
             return False
 
-        failed = _for_each_folder(folder_list, logger, evaluate_one, label="evaluate")
+        failed = _for_each_folder(
+            folder_list, logger, evaluate_one, label="evaluate", show_progress=cfg.logging.show_progress
+        )
         logger.log(
             "INFO",
             "evaluate_per_folder_summary",
@@ -1191,6 +1220,7 @@ def _run_execute_phase(
     folder_order: str,
     force_sequential: bool = False,
     backup_all: bool = False,
+    show_folder_bar: bool = True,
 ) -> tuple[PhaseTimer, dict]:
     """Execute pending actions for *folders* via the parallel or sequential implementation."""
     parallel_workers = getattr(args, "parallel_workers", None)
@@ -1235,6 +1265,7 @@ def _run_execute_phase(
         backup_dir=cfg.paths.backup_dir,
         disabled_action_types=disabled_action_types,
         folder_order=folder_order,
+        show_folder_bar=show_folder_bar,
     )
 
 
@@ -1294,6 +1325,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                     folder_order=folder_order,
                     force_sequential=True,
                     backup_all=getattr(args, "backup_all", False) and is_last,
+                    show_folder_bar=False,
                 )
                 _merge_exec_stats(totals, stats)
                 if state["remaining"] is not None:
@@ -1304,7 +1336,9 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                         return True
                 return False
 
-            failed = _for_each_folder(folder_list, logger, execute_one, label="execute")
+            failed = _for_each_folder(
+                folder_list, logger, execute_one, label="execute", show_progress=cfg.logging.show_progress
+            )
             stats = totals
         else:
             _timer, stats = _run_execute_phase(
@@ -1431,6 +1465,8 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                     folders=[folder],
                     parallel_workers=_cache_phase_workers(args, cfg, [folder], force_sequential=True),
                     temp_dir=getattr(args, "temp_dir", None),
+                    show_folder_bar=False,
+                    reconnect_fn=None if args.dry_run else lambda: imap_login(cfg.paths.secrets_file, logger),
                 )
                 totals["folders"] += fc
                 totals["messages"] += mc
@@ -1444,6 +1480,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                     verbose=cfg.logging.verbose,
                     debug_headers=args.debug_headers,
                     folders=[folder],
+                    show_folder_bar=False,
                 )
                 totals["matches"] += matches
                 totals["rules"] = rc
@@ -1461,6 +1498,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                     folder_order=folder_order,
                     force_sequential=True,
                     backup_all=getattr(args, "backup_all", False) and is_last,
+                    show_folder_bar=False,
                 )
                 _merge_exec_stats(exec_totals, stats)
                 if state["remaining"] is not None:
@@ -1471,7 +1509,9 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                         return True
                 return False
 
-            failed = _for_each_folder(loop_folders, logger, run_one, label="run-all")
+            failed = _for_each_folder(
+                loop_folders, logger, run_one, label="run-all", show_progress=cfg.logging.show_progress
+            )
             folders_count, msg_count = totals["folders"], totals["messages"]
             rules_count, matches = totals["rules"], totals["matches"]
             stats = exec_totals
@@ -1489,6 +1529,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                 parallel_workers=cache_workers,
                 folder_sizes=folder_sizes,
                 temp_dir=getattr(args, "temp_dir", None),
+                reconnect_fn=None if args.dry_run else lambda: imap_login(cfg.paths.secrets_file, logger),
             )
             _eval_timer, rules_count, matches = evaluate_rules(
                 db,
@@ -1625,6 +1666,7 @@ def handle_eval_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: Js
                     verbose=cfg.logging.verbose,
                     debug_headers=args.debug_headers,
                     folders=[folder],
+                    show_folder_bar=False,
                 )
                 totals["matches"] += matches
                 totals["rules"] = rc
@@ -1642,6 +1684,7 @@ def handle_eval_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: Js
                     folder_order=folder_order,
                     force_sequential=True,
                     backup_all=getattr(args, "backup_all", False) and is_last,
+                    show_folder_bar=False,
                 )
                 _merge_exec_stats(exec_totals, stats)
                 if state["remaining"] is not None:
@@ -1652,7 +1695,9 @@ def handle_eval_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: Js
                         return True
                 return False
 
-            failed = _for_each_folder(folder_list, logger, eval_execute_one, label="eval-execute")
+            failed = _for_each_folder(
+                folder_list, logger, eval_execute_one, label="eval-execute", show_progress=cfg.logging.show_progress
+            )
             rules_count, matches = totals["rules"], totals["matches"]
             stats = exec_totals
         else:

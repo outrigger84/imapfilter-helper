@@ -15,12 +15,13 @@ from datetime import timezone
 from email.parser import HeaderParser as _HeaderParser
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 from tqdm import tqdm
 
 from core.connection_pool import IMAPConnectionPool
 from core.database import init_db
+from core.executor.helpers import _is_connection_dead
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 from core.imap_client import get_selected_uidvalidity, safe_search_all
 
@@ -353,8 +354,46 @@ def build_cache(
     limit: int | None,
     order: str,
     folder_sizes: dict[str, int] | None = None,
+    show_folder_bar: bool = True,
+    reconnect_fn: Callable[[], imaplib.IMAP4] | None = None,
 ) -> tuple[PhaseTimer, int, int]:
     timer = PhaseTimer("cache")
+
+    def _do_reconnect() -> bool:
+        """Reconnect after a dropped connection so later folders don't cascade-fail.
+
+        Returns True on success; the fresh client replaces the enclosing
+        ``client`` variable for all remaining folders in this call.
+        """
+        nonlocal client
+        if reconnect_fn is None:
+            return False
+        for attempt in range(1, 4):
+            try:
+                logger.log(
+                    "WARN",
+                    "imap_reconnecting",
+                    {"attempt": attempt},
+                    console=f"   🔄 SSL connection lost — reconnecting (attempt {attempt}/3)...",
+                )
+                client = reconnect_fn()
+                logger.log(
+                    "INFO",
+                    "imap_reconnected",
+                    {"attempt": attempt},
+                    console="   ✅ Reconnected to IMAP server",
+                )
+                return True
+            except Exception as conn_exc:
+                logger.log(
+                    "ERROR",
+                    "imap_reconnect_failed",
+                    {"attempt": attempt, "error": str(conn_exc)},
+                    console=f"   ❌ Reconnect attempt {attempt} failed: {conn_exc}",
+                )
+                if attempt < 3:
+                    time.sleep(5 * attempt)
+        return False
 
     if client is None:
         logger.log(
@@ -374,7 +413,7 @@ def build_cache(
         dynamic_ncols=True,
         leave=True,
         position=0,
-        disable=not show_progress,
+        disable=not (show_progress and show_folder_bar),
     )
     total_msgs = 0
 
@@ -388,7 +427,13 @@ def build_cache(
         folders_bar.set_postfix_str(postfix)
         logger.log("INFO", "cache_folder_start", {"folder": folder})
         try:
-            sel_typ, _ = client.select(f'"{folder}"', readonly=True)
+            try:
+                sel_typ, _ = client.select(f'"{folder}"', readonly=True)
+            except (imaplib.IMAP4.error, OSError) as sel_exc:
+                if _is_connection_dead(sel_exc) and _do_reconnect():
+                    sel_typ, _ = client.select(f'"{folder}"', readonly=True)
+                else:
+                    raise
             if sel_typ != "OK":
                 logger.log("INFO", "cache_folder_skipped", {"folder": folder}, console=f"⚠️ Skipped {folder}")
                 continue
@@ -455,15 +500,33 @@ def build_cache(
                     )
                     consecutive_imap_errors = 0
                 except OSError as exc:
-                    logger.log(
-                        "WARNING",
-                        "cache_fetch_socket_error",
-                        {"folder": folder, "batch_start": batch_start, "error": str(exc)},
-                        console=f"⚠️ {folder} batch@{batch_start}: network error (aborting folder): {exc}",
-                    )
-                    raise RuntimeError(
-                        f"Network/socket error in {folder}, aborting folder"
-                    ) from exc
+                    if _is_connection_dead(exc) and _do_reconnect():
+                        try:
+                            client.select(f'"{folder}"', readonly=True)
+                            typ, msg_data = client.uid(
+                                "FETCH", uid_set, "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)"
+                            )
+                            consecutive_imap_errors = 0
+                        except (imaplib.IMAP4.error, OSError) as retry_exc:
+                            logger.log(
+                                "WARNING",
+                                "cache_fetch_socket_error",
+                                {"folder": folder, "batch_start": batch_start, "error": str(retry_exc)},
+                                console=f"⚠️ {folder} batch@{batch_start}: network error after reconnect (aborting folder): {retry_exc}",
+                            )
+                            raise RuntimeError(
+                                f"Network/socket error in {folder}, aborting folder"
+                            ) from retry_exc
+                    else:
+                        logger.log(
+                            "WARNING",
+                            "cache_fetch_socket_error",
+                            {"folder": folder, "batch_start": batch_start, "error": str(exc)},
+                            console=f"⚠️ {folder} batch@{batch_start}: network error (aborting folder): {exc}",
+                        )
+                        raise RuntimeError(
+                            f"Network/socket error in {folder}, aborting folder"
+                        ) from exc
                 except imaplib.IMAP4.error as exc:
                     logger.log(
                         "WARNING",

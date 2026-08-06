@@ -50,6 +50,7 @@ def execute_actions(
     backup_dir: Path | None = None,
     disabled_action_types: set[str] | None = None,
     folder_order: str = "alpha",
+    show_folder_bar: bool = True,
 ) -> tuple[PhaseTimer, Dict[str, int]]:
     if not dry_run and client is None:
         raise ValueError("An IMAP client is required when not running in dry-run mode")
@@ -253,7 +254,7 @@ def execute_actions(
         dynamic_ncols=True,
         leave=True,
         position=1,
-        disable=not show_progress,
+        disable=not (show_progress and show_folder_bar),
     )
 
     stats = {"done": 0, "skipped": 0, "failed": 0, "suppressed": suppressed}

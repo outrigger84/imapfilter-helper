@@ -218,6 +218,71 @@ def test_build_cache_stores_matching_uids(cache_context):
         assert found, f"UID {uid_value} not found in search response {search_resp!r}"
 
 
+class _DeadClient:
+    """Every call raises a dropped-connection error, like a stale IMAP socket."""
+
+    def select(self, mailbox: str, readonly: bool = True):
+        raise OSError("socket error: EOF occurred in violation of protocol (_ssl.c:2406)")
+
+
+def test_build_cache_reconnects_instead_of_cascading(monkeypatch, cache_context):
+    """A dead connection at the start of the folder list must not doom every
+    later folder — build_cache should reconnect once and keep caching."""
+    cfg, db, logger = cache_context
+
+    monkeypatch.setattr(
+        "core.cache_builder.safe_search_all", lambda _client, **_kwargs: [b"1", b"2"]
+    )
+
+    fresh_client = _FakeClient()
+    reconnect_calls = []
+
+    def reconnect_fn():
+        reconnect_calls.append(True)
+        return fresh_client
+
+    timer, folders, messages = build_cache(
+        _DeadClient(),
+        db,
+        ["INBOX", "Archive"],
+        show_progress=False,
+        logger=logger,
+        limit=None,
+        order="newest",
+        reconnect_fn=reconnect_fn,
+    )
+
+    # Reconnect happens once (on the first folder); the fresh client then
+    # serves the rest of the list, so both folders end up cached rather than
+    # cascading into instant failures.
+    assert len(reconnect_calls) == 1
+    assert folders == 2
+    assert messages == 4
+    cur = db.cursor()
+    cur.execute("SELECT COUNT(*) FROM headers")
+    (count,) = cur.fetchone()
+    assert count == 4
+
+
+def test_build_cache_folder_fails_when_reconnect_unavailable(cache_context):
+    """Without a reconnect_fn, a dead connection still just fails the folder
+    (previous behavior) instead of raising out of build_cache entirely."""
+    cfg, db, logger = cache_context
+
+    timer, folders, messages = build_cache(
+        _DeadClient(),
+        db,
+        ["INBOX"],
+        show_progress=False,
+        logger=logger,
+        limit=None,
+        order="newest",
+    )
+
+    assert folders == 1
+    assert messages == 0
+
+
 def test_compact_cache_removes_handled_headers(cache_context):
     _cfg, db, logger = cache_context
 

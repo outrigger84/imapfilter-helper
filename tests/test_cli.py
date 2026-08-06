@@ -661,8 +661,11 @@ def test_handle_build_cache_per_folder(monkeypatch, cli_context):
     def fake_login(path, log):
         return FakeClient()
 
+    show_folder_bar_calls = []
+
     def fake_build_cache(client, database, folders, **kwargs):
         calls.append(list(folders))
+        show_folder_bar_calls.append(kwargs["show_folder_bar"])
         return types.SimpleNamespace(elapsed=0.0), len(folders), 1
 
     monkeypatch.setattr(cli, "imap_login", fake_login)
@@ -672,6 +675,9 @@ def test_handle_build_cache_per_folder(monkeypatch, cli_context):
 
     assert result == 0
     assert calls == [["Alpha"], ["Beta"]]
+    # The per-folder loop's own aggregate bar replaces these per-call bars,
+    # which would otherwise always show a useless "1/1".
+    assert show_folder_bar_calls == [False, False]
 
 
 def test_handle_evaluate_per_folder(monkeypatch, cli_context):
@@ -693,8 +699,11 @@ def test_handle_evaluate_per_folder(monkeypatch, cli_context):
         load_calls.append(path)
         return []
 
+    show_folder_bar_calls = []
+
     def fake_evaluate_rules(database, rules, **kwargs):
         calls.append((list(kwargs["folders"]), kwargs["scope"]))
+        show_folder_bar_calls.append(kwargs["show_folder_bar"])
         return None, 0, 0
 
     monkeypatch.setattr(cli, "load_rules", fake_load_rules)
@@ -705,6 +714,7 @@ def test_handle_evaluate_per_folder(monkeypatch, cli_context):
     assert result == 0
     assert calls == [(["Alpha"], "all"), (["Beta"], "all")]
     assert len(load_calls) == 1
+    assert show_folder_bar_calls == [False, False]
 
 
 def test_handle_execute_per_folder_aggregates_stats(monkeypatch, cli_context):
@@ -727,9 +737,12 @@ def test_handle_execute_per_folder_aggregates_stats(monkeypatch, cli_context):
         records.append((message, context))
         return orig_log(level, message, context, console=console)
 
+    show_folder_bar_calls = []
+
     def fake_execute_actions(client, database, **kwargs):
         folder = kwargs["folders"][0]
         calls.append(folder)
+        show_folder_bar_calls.append(kwargs["show_folder_bar"])
         stats = {"Alpha": {"done": 1, "failed": 0, "skipped": 2}, "Beta": {"done": 2, "failed": 1, "skipped": 0}}
         return None, stats[folder]
 
@@ -740,6 +753,7 @@ def test_handle_execute_per_folder_aggregates_stats(monkeypatch, cli_context):
 
     assert result == 0
     assert calls == ["Alpha", "Beta"]
+    assert show_folder_bar_calls == [False, False]
     summary = next(ctx for message, ctx in records if message == "execute_summary")
     assert summary["done"] == 3
     assert summary["failed"] == 1
@@ -848,8 +862,11 @@ def test_handle_run_all_per_folder_interleaves(monkeypatch, cli_context):
     def fake_list_all_folders(_client):
         return ["Beta", "Alpha"]
 
+    show_folder_bar_calls = []
+
     def fake_build_cache(client, database, folders, **kwargs):
         calls.append(f"build:{folders[0]}")
+        show_folder_bar_calls.append(kwargs["show_folder_bar"])
         return None, 1, 1
 
     def fake_load_rules(path, log):
@@ -857,10 +874,12 @@ def test_handle_run_all_per_folder_interleaves(monkeypatch, cli_context):
 
     def fake_evaluate_rules(database, rules, **kwargs):
         calls.append(f"eval:{kwargs['folders'][0]}")
+        show_folder_bar_calls.append(kwargs["show_folder_bar"])
         return None, len(rules), 0
 
     def fake_execute_actions(client, database, **kwargs):
         calls.append(f"exec:{kwargs['folders'][0]}")
+        show_folder_bar_calls.append(kwargs["show_folder_bar"])
         return None, {"done": 0, "skipped": 0, "failed": 0, "suppressed": 0}
 
     monkeypatch.setattr(cli, "imap_login", fake_login)
@@ -882,6 +901,9 @@ def test_handle_run_all_per_folder_interleaves(monkeypatch, cli_context):
         "exec:Beta",
     ]
     assert len(logins) == 1
+    # Every per-folder phase call suppresses its own redundant "1/1" folder bar;
+    # the aggregate progress now comes from _for_each_folder's own bar instead.
+    assert show_folder_bar_calls == [False] * 6
 
 
 def test_handle_run_all_per_folder_continues_on_error(monkeypatch, cli_context):
