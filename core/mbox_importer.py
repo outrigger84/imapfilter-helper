@@ -20,7 +20,7 @@ from tqdm import tqdm
 from core.connection_pool import IMAPConnectionPool
 from core.imap_client import imap_login
 from core.logging_utils import JsonLogger
-from core.rule_engine import find_matching_rule, load_rules, _parse_header_date
+from core.rule_engine import decode_header_value, find_matching_rule, load_rules, _parse_header_date
 
 
 def _quote_mailbox(name: str) -> str:
@@ -270,13 +270,16 @@ def _classify_messages(
                 bar.update(1)
                 continue
 
-            header_dict = {k.lower(): v for k, v in msg.items()}
+            # msg.items() can yield email.header.Header objects (instead of
+            # str) for headers containing raw 8-bit bytes that aren't valid
+            # encoded-words; normalize so downstream rule matching sees str.
+            header_dict = {k.lower(): decode_header_value(v) for k, v in msg.items()}
 
             if no_move:
                 target = default_folder
                 unmatched_count += 1
                 if verbose:
-                    subject = msg.get("subject", "(no subject)")
+                    subject = header_dict.get("subject", "(no subject)")
                     print(f"  [{i+1}] {subject[:60]} → {target} (--no-move)")
             else:
                 # Mbox messages carry no IMAP flags, but age_days_* conditions
@@ -291,13 +294,13 @@ def _classify_messages(
                     target = action.get("target", default_folder)
 
                     if verbose:
-                        subject = msg.get("subject", "(no subject)")
+                        subject = header_dict.get("subject", "(no subject)")
                         print(f"  [{i+1}] {subject[:60]} → {target} (rule: {matching_rule.get('name', '?')})")
                 else:
                     target = default_folder
                     unmatched_count += 1
                     if verbose:
-                        subject = msg.get("subject", "(no subject)")
+                        subject = header_dict.get("subject", "(no subject)")
                         print(f"  [{i+1}] {subject[:60]} → {target} (no rule matched)")
 
             folder_indices[target].append(i)
@@ -418,7 +421,7 @@ def _append_folder_batch(
                             _record_uploaded(progress_path, msg_id)
 
                 if verbose:
-                    subject = msg.get("subject", "(no subject)")
+                    subject = decode_header_value(msg.get("subject", "(no subject)"))
                     print(f"    ✓ {subject[:60]}")
             else:
                 resp_str = " ".join(

@@ -98,16 +98,27 @@ def _extract_raw_header(data: str) -> str:
     return data
 
 
+def decode_header_value(value: Any) -> str:
+    """Coerce a header value (str or email.header.Header) into a decoded str.
+
+    ``email`` policies (e.g. compat32) return an ``email.header.Header``
+    instead of ``str`` when a header contains raw 8-bit bytes that aren't
+    valid encoded-words. Callers that expect plain strings (e.g. rule
+    matching) must normalize through this first.
+    """
+    try:
+        return str(email.header.make_header(email.header.decode_header(value)))
+    except Exception:
+        return str(value)
+
+
 def _parse_header_map(raw_header: str) -> dict[str, str]:
     """Parse the raw header string into a lowercase-keyed mapping, MIME-decoded."""
 
     message = _HEADER_PARSER.parsestr(raw_header or "", headersonly=True)
     result = {}
     for key, value in message.items():
-        try:
-            result[key.lower()] = str(email.header.make_header(email.header.decode_header(value)))
-        except Exception:
-            result[key.lower()] = value
+        result[key.lower()] = decode_header_value(value)
     return result
 
 
