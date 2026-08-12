@@ -260,6 +260,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Auto-confirm all --prune-empty-folders deletions without prompting",
     )
     p_exec.add_argument(
+        "--prune-log",
+        dest="prune_log",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="Append a plain-text list of pruned (or, in --dry-run, candidate) folders to this file",
+    )
+    p_exec.add_argument(
         "--per-folder",
         action="store_true",
         dest="per_folder",
@@ -376,6 +384,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--yes",
         action="store_true",
         help="Auto-confirm all --prune-empty-folders deletions without prompting",
+    )
+    p_run.add_argument(
+        "--prune-log",
+        dest="prune_log",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="Append a plain-text list of pruned (or, in --dry-run, candidate) folders to this file",
     )
     p_run.add_argument(
         "--per-folder",
@@ -1382,6 +1398,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                 auto=getattr(args, "yes", False),
                 dry_run=args.dry_run,
                 logger=logger,
+                prune_log_file=getattr(args, "prune_log", None),
             )
         finally:
             if prune_client is not None:
@@ -1600,6 +1617,7 @@ def handle_run_all(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
                 auto=getattr(args, "yes", False),
                 dry_run=args.dry_run,
                 logger=logger,
+                prune_log_file=getattr(args, "prune_log", None),
             )
         finally:
             if prune_client is not None:

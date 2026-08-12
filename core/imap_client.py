@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Iterable, List
 
 from tqdm import tqdm
-from core.logging_utils import JsonLogger
+from core.logging_utils import JsonLogger, now_iso
 
 
 def _ensure_large_imap_buffer() -> None:
@@ -269,16 +269,21 @@ def prune_empty_folders(
     auto: bool = False,
     dry_run: bool = False,
     logger: "JsonLogger | None" = None,
+    prune_log_file: "Path | str | None" = None,
 ) -> None:
     """
     Delete empty leaf folders from the mail server.
 
     Args:
-        client:  Authenticated IMAP connection (read-only LIST/STATUS suffices
-                 for dry_run).
-        auto:    If True, delete without prompting. If False, prompt per folder.
-        dry_run: List candidates without deleting anything.
-        logger:  Optional logger for structured output.
+        client:         Authenticated IMAP connection (read-only LIST/STATUS
+                         suffices for dry_run).
+        auto:            If True, delete without prompting. If False, prompt per folder.
+        dry_run:        List candidates without deleting anything.
+        logger:         Optional logger for structured output.
+        prune_log_file: Optional path to a plain-text file. Each run appends a
+                         timestamped block listing every folder that was
+                         actually removed (or, in dry-run mode, every
+                         candidate that would be removed).
     """
     if client is None:
         print("ℹ️  --prune-empty-folders: no IMAP connection available — skipping")
@@ -296,11 +301,13 @@ def prune_empty_folders(
             if logger:
                 logger.log("INFO", "prune_folder", {"folder": folder, "status": "dry_run"})
         print("\nℹ️  No folders were deleted (dry-run mode)")
+        _write_prune_log(prune_log_file, candidates, dry_run=True)
         return
 
     print(f"\n🗑️  Found {len(candidates)} empty folder(s) to prune:")
     removed = 0
     skipped = 0
+    removed_folders: list[str] = []
     for folder in candidates:
         if auto:
             ok = delete_folder(client, folder)
@@ -308,6 +315,7 @@ def prune_empty_folders(
             print(f"  {'✅' if ok else '❌'} {status}: {folder}")
             if ok:
                 removed += 1
+                removed_folders.append(folder)
             if logger:
                 logger.log("INFO", "prune_folder", {"folder": folder, "status": status})
         else:
@@ -317,12 +325,34 @@ def prune_empty_folders(
                 print(f"  {'✅ Removed' if ok else '❌ Failed'}: {folder}")
                 if ok:
                     removed += 1
+                    removed_folders.append(folder)
                 if logger:
                     logger.log("INFO", "prune_folder", {"folder": folder, "status": "removed" if ok else "failed"})
             else:
                 skipped += 1
 
     print(f"\n✅ Pruning complete — {removed} removed, {skipped} skipped")
+    _write_prune_log(prune_log_file, removed_folders, dry_run=False)
+
+
+def _write_prune_log(
+    prune_log_file: "Path | str | None",
+    folders: list[str],
+    *,
+    dry_run: bool,
+) -> None:
+    """Append a timestamped list of pruned folders to a plain-text file."""
+    if not prune_log_file:
+        return
+    path = Path(prune_log_file)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = f"=== {now_iso()} — {'would remove' if dry_run else 'removed'} {len(folders)} folder(s) ==="
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(header + "\n")
+        for folder in folders:
+            handle.write(folder + "\n")
+        if not folders:
+            handle.write("(none)\n")
 
 
 def safe_search_all(client: imaplib.IMAP4, undeleted_only: bool = False) -> Iterable[bytes]:
