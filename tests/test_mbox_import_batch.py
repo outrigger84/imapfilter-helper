@@ -19,6 +19,7 @@ from core.mbox_importer import (
     _build_work_items,
     _ensure_folder,
     _order_work_items,
+    _progress_path_for,
     _ThreadMboxHandleCache,
     run_mbox_import,
 )
@@ -123,6 +124,81 @@ def _patch_imap_login(monkeypatch: pytest.MonkeyPatch, server: FakeIMAPServer) -
     factory = lambda *args, **kwargs: FakeIMAPClient(server)
     monkeypatch.setattr("core.connection_pool.imap_login", factory)
     monkeypatch.setattr("core.mbox_importer.imap_login", factory)
+
+
+# ---------------------------------------------------------------------------
+# _progress_path_for: ENAMETOOLONG fallback for very long mbox filenames
+# ---------------------------------------------------------------------------
+
+def test_progress_path_for_normal_name_just_appends_suffix(tmp_path):
+    mbox_path = tmp_path / "Folder2.mbox"
+
+    progress_path = _progress_path_for(mbox_path)
+
+    assert progress_path == tmp_path / "Folder2.mbox.progress"
+
+
+def test_progress_path_for_near_limit_name_falls_back_to_short_hash(tmp_path):
+    # 254-byte .mbox name (as seen in the real dataset) — appending ".progress"
+    # (9 bytes) would push the on-disk filename over the 255-byte POSIX limit
+    # and raise ENAMETOOLONG when opened.
+    long_stem = "2026-07-29-" * 12 + "converted_merged.70001-80000-" + "error-" * 12
+    long_name = (long_stem + "error.mbox")[:254 - len(".mbox")] + ".mbox"
+    assert len(long_name.encode()) <= 254
+    mbox_path = tmp_path / long_name
+
+    progress_path = _progress_path_for(mbox_path)
+
+    assert len(progress_path.name.encode("utf-8")) <= 255
+    assert progress_path.parent == tmp_path
+    assert progress_path.name.startswith(".mbox_import_progress_")
+    assert progress_path.suffix == ".progress"
+    # deterministic: calling it again for the same source path gives the same result
+    assert _progress_path_for(mbox_path) == progress_path
+    # a different source path gets a different fallback name (no collisions)
+    other_path = tmp_path / (long_name[:-5] + "X.mbox")
+    assert _progress_path_for(other_path) != progress_path
+
+
+def test_run_mbox_import_handles_extremely_long_mbox_filename(tmp_path, monkeypatch):
+    """Regression test: a real-world filename whose .progress derivative
+    exceeds the filesystem's 255-byte limit must not crash the batch — the
+    file should still classify, upload, and clean up normally.
+    """
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+
+    long_name = (
+        "2026-07-29-2026-07-29-2026-07-26-2026-07-25-2026-07-21-2026-07-19-"
+        "2026-07-18-2026-07-18-2026-07-16-2026-07-15-2026-07-15-2026-07-15-"
+        "2026-07-11-converted_merged.70001-80000-error-error-error-error-"
+        "error-error-error-error-error-error-error-error-error.mbox"
+    )
+    assert len(long_name.encode()) == 254  # matches the real failing file exactly
+    file_a = _make_mbox_file(tmp_path / long_name, [("hello", "<a1@x>")])
+
+    server = FakeIMAPServer(existing_folders={"INBOX"})
+    _patch_imap_login(monkeypatch, server)
+    logger = JsonLogger(tmp_path / "log.json")
+
+    rc = run_mbox_import(
+        mbox_paths=[file_a],
+        rules_dir=rules_dir,
+        secrets_path=_secrets_file(tmp_path),
+        default_folder="INBOX",
+        dry_run=False,
+        verbose=False,
+        limit=None,
+        preserve_flags=True,
+        error_mbox_path=None,
+        logger=logger,
+        parallel_workers=1,
+    )
+
+    assert rc == 0
+    assert len(server.appended["INBOX"]) == 1
+    assert sum(1 for _ in mailbox.mbox(str(file_a))) == 0
+    assert not _progress_path_for(file_a).exists()  # cleared on a clean run
 
 
 # ---------------------------------------------------------------------------

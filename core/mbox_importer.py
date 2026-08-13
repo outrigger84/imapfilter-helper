@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime
 import email.errors
 import email.utils
+import hashlib
 import imaplib
 import mailbox
 import os
@@ -224,6 +225,27 @@ def _ensure_folder(client: imaplib.IMAP4_SSL, folder: str, logger: JsonLogger) -
 # ---------------------------------------------------------------------------
 # Progress file — tracks uploaded Message-IDs for crash recovery
 # ---------------------------------------------------------------------------
+
+_MAX_FILENAME_BYTES = 255  # ext4/most POSIX filesystems
+
+
+def _progress_path_for(mbox_path: Path) -> Path:
+    """Derive the progress-file path for one mbox file.
+
+    Normally just appends .progress to the filename, but some mbox files
+    accumulate very long names (e.g. repeated failed-run prefixes from
+    earlier tooling), and a name that's already near the filesystem's
+    255-byte limit overflows once .progress is appended, raising
+    ENAMETOOLONG. Fall back to a short, deterministic hash-based name in
+    that case so progress tracking still works and stays consistently keyed
+    to the same source file across runs (needed for resume).
+    """
+    candidate = mbox_path.with_suffix(mbox_path.suffix + ".progress")
+    if len(candidate.name.encode("utf-8", "surrogateescape")) <= _MAX_FILENAME_BYTES:
+        return candidate
+    digest = hashlib.sha256(str(mbox_path).encode("utf-8", "surrogateescape")).hexdigest()[:16]
+    return mbox_path.parent / f".mbox_import_progress_{digest}.progress"
+
 
 def _load_progress(progress_path: Path) -> set[str]:
     """Return the set of Message-IDs already uploaded (from a previous run)."""
@@ -832,7 +854,7 @@ def run_mbox_import(
     per_file_unmatched: dict[Path, int] = {}
 
     for mbox_path in mbox_paths:
-        progress_path = mbox_path.with_suffix(mbox_path.suffix + ".progress")
+        progress_path = _progress_path_for(mbox_path)
         progress_paths[mbox_path] = progress_path
 
         uploaded_ids = _load_progress(progress_path)
