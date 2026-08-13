@@ -641,6 +641,100 @@ def test_parser_rejects_per_folder_on_stream():
         parser.parse_args(["stream", "--per-folder"])
 
 
+def test_mbox_import_parser_accepts_multiple_files_and_dirs():
+    parser = cli.build_parser()
+    parsed = parser.parse_args(["mbox-import", "a.mbox", "b.mbox", "some_dir"])
+    assert parsed.mbox_files == [Path("a.mbox"), Path("b.mbox"), Path("some_dir")]
+
+
+def test_mbox_import_parser_requires_at_least_one_path():
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["mbox-import"])
+
+
+def test_mbox_import_parser_chunk_size_default_and_override():
+    parser = cli.build_parser()
+    default = parser.parse_args(["mbox-import", "a.mbox"])
+    assert default.chunk_size == 2000
+
+    overridden = parser.parse_args(["mbox-import", "a.mbox", "--chunk-size", "500"])
+    assert overridden.chunk_size == 500
+
+
+def test_resolve_mbox_inputs_expands_directory(tmp_path):
+    mbox_dir = tmp_path / "export"
+    mbox_dir.mkdir()
+    (mbox_dir / "b.mbox").write_text("")
+    (mbox_dir / "a.mbox").write_text("")
+    (mbox_dir / "notes.txt").write_text("")
+
+    resolved, errors = cli._resolve_mbox_inputs([mbox_dir])
+
+    assert resolved == [mbox_dir / "a.mbox", mbox_dir / "b.mbox"]
+    assert errors == []
+
+
+def test_resolve_mbox_inputs_collects_all_missing_paths(tmp_path):
+    real_file = tmp_path / "real.mbox"
+    real_file.write_text("")
+
+    resolved, errors = cli._resolve_mbox_inputs([
+        real_file,
+        tmp_path / "missing1.mbox",
+        tmp_path / "missing2.mbox",
+    ])
+
+    assert resolved == [real_file]
+    assert len(errors) == 2
+
+
+def test_handle_mbox_import_expands_directory_and_calls_batch(monkeypatch, cli_context, tmp_path):
+    cfg, db, logger = cli_context
+    mbox_dir = tmp_path / "export"
+    mbox_dir.mkdir()
+    (mbox_dir / "a.mbox").write_text("")
+    (mbox_dir / "b.mbox").write_text("")
+
+    args = argparse.Namespace(
+        mbox_files=[mbox_dir],
+        default_folder="INBOX",
+        dry_run=False,
+        verbose=False,
+        limit=None,
+        no_preserve_flags=False,
+        error_mbox=None,
+        parallel_workers=3,
+        no_move=False,
+        folder_order="alpha",
+        chunk_size=500,
+    )
+
+    seen = {}
+
+    def fake_run_mbox_import(**kwargs):
+        seen.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("core.mbox_importer.run_mbox_import", fake_run_mbox_import)
+
+    result = cli.handle_mbox_import(args, cfg, db, logger)
+
+    assert result == 0
+    assert seen["mbox_paths"] == [mbox_dir / "a.mbox", mbox_dir / "b.mbox"]
+    assert seen["chunk_size"] == 500
+    assert seen["parallel_workers"] == 3
+
+
+def test_handle_mbox_import_returns_1_when_no_valid_inputs(cli_context, tmp_path):
+    cfg, db, logger = cli_context
+    args = argparse.Namespace(mbox_files=[tmp_path / "does_not_exist.mbox"])
+
+    result = cli.handle_mbox_import(args, cfg, db, logger)
+
+    assert result == 1
+
+
 def test_handle_build_cache_per_folder(monkeypatch, cli_context):
     cfg, db, logger = cli_context
     args = argparse.Namespace(

@@ -660,12 +660,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_mbox = sub.add_parser(
         "mbox-import",
-        help="Upload an MBOX file to IMAP, routing each message directly to its target folder via rules",
+        help="Upload one or more MBOX files to IMAP, routing each message directly to its target folder via rules",
     )
     p_mbox.add_argument(
-        "mbox_file",
+        "mbox_files",
         type=Path,
-        help="Path to the MBOX file to import",
+        nargs="+",
+        help="Path(s) to MBOX file(s) and/or directories of *.mbox files to import. "
+             "Multiple files share one IMAP connection pool for the whole batch.",
     )
     p_mbox.add_argument(
         "--default-folder",
@@ -685,7 +687,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_mbox.add_argument(
         "--limit",
         type=int,
-        help="Process only the first N messages from the MBOX file",
+        help="Process only the first N messages from EACH MBOX file (per-file, not batch-wide)",
     )
     p_mbox.add_argument(
         "--no-preserve-flags",
@@ -696,13 +698,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--error-mbox",
         type=Path,
         metavar="PATH",
-        help="Append failed messages to this MBOX file for later retry",
+        help="Append failed messages to this MBOX file for later retry "
+             "(one combined file for the whole batch when multiple files are given)",
     )
     p_mbox.add_argument(
         "--parallel-workers",
         type=int,
         default=1,
-        help="Number of parallel IMAP connections for uploading (default: 1 = sequential)",
+        help="Number of IMAP connections shared across the whole batch (default: 1 = sequential)",
+    )
+    p_mbox.add_argument(
+        "--chunk-size",
+        type=int,
+        default=2000,
+        help="Max messages per (file, folder) work unit — larger destination folders are "
+             "split into multiple chunks so several connections can drain them together "
+             "(default: 2000)",
     )
     p_mbox.add_argument(
         "--no-move",
@@ -2109,24 +2120,47 @@ def handle_review_sections(args: argparse.Namespace, cfg: AppConfig, db, logger:
     )
 
 
+def _resolve_mbox_inputs(paths: list[Path]) -> tuple[list[Path], list[str]]:
+    """Expand directories into their *.mbox files and validate every input path.
+
+    Returns (resolved_files, errors). Directories are expanded via a sorted
+    glob; plain files are validated to exist and have a .mbox-like name is
+    not required (callers may point at any file). All bad entries are
+    collected rather than failing on the first, since a batch run may name
+    many paths at once.
+    """
+    resolved: list[Path] = []
+    errors: list[str] = []
+    for path in paths:
+        if path.is_dir():
+            mbox_files = sorted(path.glob("*.mbox"))
+            if not mbox_files:
+                errors.append(f"No *.mbox files found in directory: {path}")
+                continue
+            resolved.extend(mbox_files)
+        elif path.exists():
+            resolved.append(path)
+        else:
+            errors.append(f"MBOX path not found: {path}")
+    return resolved, errors
+
+
 def handle_mbox_import(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
     """Handle the ``mbox-import`` command."""
     from core.mbox_importer import run_mbox_import
 
     del db  # mbox-import does not use the local cache
 
-    mbox_path = Path(args.mbox_file)
-    if not mbox_path.exists():
-        logger.log(
-            "ERROR",
-            "mbox_file_not_found",
-            {"path": str(mbox_path)},
-            console=f"❌ MBOX file not found: {mbox_path}",
-        )
+    mbox_paths, errors = _resolve_mbox_inputs([Path(p) for p in args.mbox_files])
+    for error in errors:
+        logger.log("ERROR", "mbox_input_invalid", {"error": error}, console=f"❌ {error}")
+    if not mbox_paths:
+        logger.log("ERROR", "mbox_no_valid_inputs", {},
+                   console="❌ No valid MBOX files to import")
         return 1
 
     return run_mbox_import(
-        mbox_path=mbox_path,
+        mbox_paths=mbox_paths,
         rules_dir=cfg.paths.rules_dir,
         secrets_path=cfg.paths.secrets_file,
         default_folder=args.default_folder,
@@ -2139,6 +2173,7 @@ def handle_mbox_import(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
         parallel_workers=getattr(args, "parallel_workers", 1),
         no_move=getattr(args, "no_move", False),
         folder_order=getattr(args, "folder_order", "alpha"),
+        chunk_size=getattr(args, "chunk_size", 2000),
     )
 
 
