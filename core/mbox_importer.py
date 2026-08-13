@@ -511,7 +511,8 @@ def _append_folder_batch(
     progress_path: Optional[Path] = None,
     progress_lock: Optional[threading.Lock] = None,
     index_to_msgid: Optional[dict[int, str]] = None,
-    show_inner_bar: bool = True,
+    message_bar: Optional[tqdm] = None,
+    message_bar_lock: Optional[threading.Lock] = None,
 ) -> tuple[int, int, list[int], list[int]]:
     """Upload messages (read one-at-a-time by index) to one IMAP folder via APPEND.
 
@@ -520,8 +521,16 @@ def _append_folder_batch(
     the end to avoid invalidating remaining indices mid-run.
 
     err_lock and progress_lock should be supplied when called from multiple threads
-    to serialise writes to the shared err_mbox and progress file.
+    to serialise writes to the shared err_mbox and progress file. message_bar is a
+    single tqdm counter shared across every concurrent worker (one bar, not one per
+    chunk, so N workers don't render N colliding bars) — message_bar_lock guards
+    its .update() calls, since tqdm's own counter increment isn't thread-safe.
     """
+    def _bump(n: int = 1) -> None:
+        if message_bar is not None:
+            with (message_bar_lock or _null_context()):
+                message_bar.update(n)
+
     if not _ensure_folder(client, folder, logger):
         if err_mbox is not None:
             with (err_lock or _null_context()):
@@ -531,6 +540,7 @@ def _append_folder_batch(
                     except Exception:
                         pass
                 err_mbox.flush()
+        _bump(len(indices))
         return 0, len(indices), [], list(indices)
 
     quoted = _quote_mailbox(folder)
@@ -539,10 +549,9 @@ def _append_folder_batch(
     successful_indices: list[int] = []
     failed_indices: list[int] = []
 
-    bar = tqdm(indices, desc=f"  {folder}", unit="msg", position=1,
-               leave=False, disable=not show_inner_bar)
-    for idx in bar:
+    for i, idx in enumerate(indices):
         msg = None
+        aborted = False
         try:
             msg = mbox[idx]
             payload = _message_to_crlf_bytes(msg)
@@ -583,8 +592,10 @@ def _append_folder_batch(
                 # folder (iCloud deduplicates by Message-ID and returns this error
                 # rather than silently accepting the duplicate).
                 msg_id = (index_to_msgid or {}).get(idx, "").strip()
+                already_exists = False
                 if "unavailable" in resp_str.lower() and msg_id:
                     if _message_exists_in_folder(client, msg_id):
+                        already_exists = True
                         uploaded += 1
                         successful_indices.append(idx)
                         logger.log("INFO", "append_already_exists",
@@ -593,23 +604,27 @@ def _append_folder_batch(
                         if progress_path is not None and index_to_msgid is not None:
                             with (progress_lock or _null_context()):
                                 _record_uploaded(progress_path, msg_id)
-                        continue
 
-                failed += 1
-                logger.log("WARN", "append_failed",
-                           {"folder": folder, "resp": resp_str},
-                           console=f"    ⚠️  APPEND rejected ({resp_str})")
-                # Only mark the message as handled (removed from the source mbox
-                # in phase 6, skipped on retry) once it is safely in the error
-                # mbox — otherwise a failed message would exist nowhere.
-                if _preserve_failed_message(err_mbox, err_lock, msg, logger, folder):
-                    failed_indices.append(idx)
-                    if msg_id and progress_path is not None:
-                        with (progress_lock or _null_context()):
-                            _record_uploaded(progress_path, msg_id)
+                if not already_exists:
+                    failed += 1
+                    logger.log("WARN", "append_failed",
+                               {"folder": folder, "resp": resp_str},
+                               console=f"    ⚠️  APPEND rejected ({resp_str})")
+                    # Only mark the message as handled (removed from the source
+                    # mbox in phase 6, skipped on retry) once it is safely in the
+                    # error mbox — otherwise a failed message would exist nowhere.
+                    if _preserve_failed_message(err_mbox, err_lock, msg, logger, folder):
+                        failed_indices.append(idx)
+                        if msg_id and progress_path is not None:
+                            with (progress_lock or _null_context()):
+                                _record_uploaded(progress_path, msg_id)
 
         except imaplib.IMAP4.abort:
-            # Connection is dead; propagate so the caller can reconnect and retry.
+            # Connection is dead; propagate so the caller can reconnect and
+            # retry. This message and every remaining one in the chunk never
+            # got attempted, so bump the counter for all of them at once in
+            # the finally block below rather than leaving it permanently short.
+            aborted = True
             raise
         except Exception as exc:
             failed += 1
@@ -623,11 +638,12 @@ def _append_folder_batch(
                 if msg_id and progress_path is not None:
                     with (progress_lock or _null_context()):
                         _record_uploaded(progress_path, msg_id)
+        finally:
+            _bump(len(indices) - i if aborted else 1)
 
     if err_mbox is not None:
         with (err_lock or _null_context()):
             err_mbox.flush()
-    bar.close()
     return uploaded, failed, successful_indices, failed_indices
 
 
@@ -745,6 +761,8 @@ def _process_work_item(
     progress_path: Path,
     progress_lock: threading.Lock,
     index_to_msgid: dict[int, str],
+    message_bar: Optional[tqdm] = None,
+    message_bar_lock: Optional[threading.Lock] = None,
 ) -> tuple[Path, str, int, int, list[int], list[int]]:
     """Upload one WorkItem's messages using a pooled connection.
 
@@ -772,7 +790,8 @@ def _process_work_item(
             progress_path=progress_path,
             progress_lock=progress_lock,
             index_to_msgid=index_to_msgid,
-            show_inner_bar=False,
+            message_bar=message_bar,
+            message_bar_lock=message_bar_lock,
         )
     except (imaplib.IMAP4.abort, imaplib.IMAP4.error, OSError) as exc:
         conn_healthy = False
@@ -929,6 +948,7 @@ def run_mbox_import(
     results_lock = threading.Lock()
     err_lock = threading.Lock()
     progress_lock = threading.Lock()
+    message_bar_lock = threading.Lock()
 
     per_file_successful: dict[Path, list[int]] = defaultdict(list)
     per_file_failed: dict[Path, list[int]] = defaultdict(list)
@@ -961,7 +981,14 @@ def run_mbox_import(
             logger.log("INFO", "imap_connect", {"workers": num_workers, "work_items": len(work_items)},
                        console=f"🔐 Connecting to IMAP (pool: {num_workers} workers, {len(work_items)} chunks) ...")
             pool = IMAPConnectionPool(secrets_path, max_connections=num_workers, logger=logger)
+            total_messages = sum(len(item.indices) for item in work_items)
             items_bar = tqdm(total=len(work_items), desc="Uploading", unit="chunk", position=0)
+            # One shared counter across every worker (not one bar per chunk,
+            # which would render N colliding bars) so progress stays visible
+            # even while a single chunk of up to chunk_size messages is
+            # still in flight — chunk-level completion alone can go quiet
+            # for a long stretch on a slow/high-latency IMAP server.
+            messages_bar = tqdm(total=total_messages, desc="Messages", unit="msg", position=1)
 
             try:
                 with ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -976,6 +1003,8 @@ def run_mbox_import(
                             progress_path=progress_paths[item.mbox_path],
                             progress_lock=progress_lock,
                             index_to_msgid=per_file_index_to_msgid[item.mbox_path],
+                            message_bar=messages_bar,
+                            message_bar_lock=message_bar_lock,
                         )
                         for item in work_items
                     ]
@@ -1003,6 +1032,7 @@ def run_mbox_import(
                             _finish_file(finished_file)
             finally:
                 items_bar.close()
+                messages_bar.close()
     finally:
         if pool is not None:
             pool.shutdown()

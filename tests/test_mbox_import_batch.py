@@ -5,6 +5,8 @@ SELECT-skip/CREATE-branch fix, and per-file cleanup timing.
 from __future__ import annotations
 
 import email.message
+import imaplib
+import io
 import json
 import mailbox
 import threading
@@ -12,10 +14,12 @@ from collections import defaultdict
 from pathlib import Path
 
 import pytest
+from tqdm import tqdm
 
 from core.logging_utils import JsonLogger
 from core.mbox_importer import (
     WorkItem,
+    _append_folder_batch,
     _build_work_items,
     _ensure_folder,
     _order_work_items,
@@ -199,6 +203,134 @@ def test_run_mbox_import_handles_extremely_long_mbox_filename(tmp_path, monkeypa
     assert len(server.appended["INBOX"]) == 1
     assert sum(1 for _ in mailbox.mbox(str(file_a))) == 0
     assert not _progress_path_for(file_a).exists()  # cleared on a clean run
+
+
+# ---------------------------------------------------------------------------
+# _append_folder_batch: shared message-level progress counter
+# ---------------------------------------------------------------------------
+
+def _silent_bar(total: int) -> tqdm:
+    """A real tqdm bar (so .n tracks correctly) with output suppressed."""
+    return tqdm(total=total, file=io.StringIO())
+
+
+def test_append_folder_batch_bumps_message_bar_per_success(tmp_path):
+    logger = JsonLogger(tmp_path / "log.json")
+    mbox_path = _make_mbox_file(tmp_path / "a.mbox", [
+        ("s1", "<1@x>"), ("s2", "<2@x>"), ("s3", "<3@x>"),
+    ])
+    box = mailbox.mbox(str(mbox_path))
+    server = FakeIMAPServer(existing_folders={"INBOX"})
+    client = FakeIMAPClient(server)
+    bar = _silent_bar(3)
+
+    uploaded, failed, succ, fail_idxs = _append_folder_batch(
+        client, "INBOX", [0, 1, 2], box,
+        preserve_flags=False, verbose=False, logger=logger,
+        message_bar=bar, message_bar_lock=threading.Lock(),
+    )
+
+    assert uploaded == 3
+    assert failed == 0
+    assert bar.n == 3
+
+
+def test_append_folder_batch_bumps_full_chunk_when_folder_select_fails(tmp_path):
+    logger = JsonLogger(tmp_path / "log.json")
+    mbox_path = _make_mbox_file(tmp_path / "a.mbox", [("s1", "<1@x>"), ("s2", "<2@x>")])
+    box = mailbox.mbox(str(mbox_path))
+    server = FakeIMAPServer(existing_folders=set())  # nothing exists
+    client = FakeIMAPClient(server)
+    client.create = lambda name: ("NO", [b"Cannot create"])  # force _ensure_folder to give up
+    bar = _silent_bar(2)
+
+    uploaded, failed, succ, fail_idxs = _append_folder_batch(
+        client, "Nope", [0, 1], box,
+        preserve_flags=False, verbose=False, logger=logger,
+        message_bar=bar, message_bar_lock=threading.Lock(),
+    )
+
+    assert failed == 2
+    assert bar.n == 2
+
+
+class _AbortOnSecondAppendClient(FakeIMAPClient):
+    """Simulates a connection that dies partway through a chunk."""
+
+    def __init__(self, server):
+        super().__init__(server)
+        self._append_count = 0
+
+    def append(self, mailbox_name, flags, date_time, payload):
+        self._append_count += 1
+        if self._append_count == 2:
+            raise imaplib.IMAP4.abort("simulated connection drop")
+        return super().append(mailbox_name, flags, date_time, payload)
+
+
+def test_append_folder_batch_bumps_remaining_on_mid_chunk_abort(tmp_path):
+    logger = JsonLogger(tmp_path / "log.json")
+    mbox_path = _make_mbox_file(tmp_path / "a.mbox", [
+        ("s1", "<1@x>"), ("s2", "<2@x>"), ("s3", "<3@x>"),
+    ])
+    box = mailbox.mbox(str(mbox_path))
+    server = FakeIMAPServer(existing_folders={"INBOX"})
+    client = _AbortOnSecondAppendClient(server)
+    bar = _silent_bar(3)
+
+    with pytest.raises(imaplib.IMAP4.abort):
+        _append_folder_batch(
+            client, "INBOX", [0, 1, 2], box,
+            preserve_flags=False, verbose=False, logger=logger,
+            message_bar=bar, message_bar_lock=threading.Lock(),
+        )
+
+    # message 1 succeeded (bumped 1); message 2 aborts mid-chunk, and its
+    # bump covers itself plus the never-attempted message 3, so the bar
+    # still reaches the full chunk total instead of stalling short forever.
+    assert bar.n == 3
+
+
+def test_run_mbox_import_message_bar_reaches_total_across_files(tmp_path, monkeypatch):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    file_a = _make_mbox_file(tmp_path / "a.mbox", [("m1", "<1@x>"), ("m2", "<2@x>")])
+    file_b = _make_mbox_file(tmp_path / "b.mbox", [("m3", "<3@x>")])
+
+    server = FakeIMAPServer(existing_folders={"INBOX"})
+    _patch_imap_login(monkeypatch, server)
+    logger = JsonLogger(tmp_path / "log.json")
+
+    created_bars: list[tqdm] = []
+    real_tqdm = tqdm
+
+    def spy_tqdm(*args, **kwargs):
+        bar = real_tqdm(*args, **kwargs)
+        created_bars.append(bar)
+        return bar
+
+    monkeypatch.setattr("core.mbox_importer.tqdm", spy_tqdm)
+
+    rc = run_mbox_import(
+        mbox_paths=[file_a, file_b],
+        rules_dir=rules_dir,
+        secrets_path=_secrets_file(tmp_path),
+        default_folder="INBOX",
+        dry_run=False,
+        verbose=False,
+        limit=None,
+        preserve_flags=True,
+        error_mbox_path=None,
+        logger=logger,
+        parallel_workers=2,
+        chunk_size=10,
+    )
+
+    assert rc == 0
+    message_bars = [b for b in created_bars if getattr(b, "desc", None) == "Messages"]
+    assert len(message_bars) == 1
+    assert message_bars[0].n == 3
+    assert message_bars[0].total == 3
 
 
 # ---------------------------------------------------------------------------
