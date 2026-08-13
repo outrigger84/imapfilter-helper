@@ -231,12 +231,25 @@ def test_prune_dry_run_lists_candidates_without_deleting(capsys):
     assert client.deleted == []
 
 
+def test_prune_never_presents_parent_of_nonempty_subfolder(capsys):
+    # "Archive" itself has 0 messages but still has a non-empty child
+    # ("Archive/Full"), so it must never be shown as a prune candidate —
+    # doing so would confuse the user into thinking it's safe to delete.
+    client = _FakePruneClient()
+    prune_empty_folders(client, auto=True, dry_run=True)
+
+    out = capsys.readouterr().out
+    assert "  • Archive\n" not in out
+    assert '"Archive"' not in client.deleted
+
+
 def test_prune_deletes_when_not_dry_run():
     client = _FakePruneClient()
     prune_empty_folders(client, auto=True, dry_run=False)
     assert '"Archive/Empty"' in client.deleted
     assert '"INBOX"' not in client.deleted
     assert '"Archive/Full"' not in client.deleted
+    assert '"Archive"' not in client.deleted
 
 
 # ---------------------------------------------------------------------------
