@@ -662,6 +662,15 @@ def test_mbox_import_parser_chunk_size_default_and_override():
     assert overridden.chunk_size == 500
 
 
+def test_mbox_import_parser_no_source_dedup_default_and_flag():
+    parser = cli.build_parser()
+    default = parser.parse_args(["mbox-import", "a.mbox"])
+    assert default.no_source_dedup is False
+
+    disabled = parser.parse_args(["mbox-import", "a.mbox", "--no-source-dedup"])
+    assert disabled.no_source_dedup is True
+
+
 def test_resolve_mbox_inputs_expands_directory(tmp_path):
     mbox_dir = tmp_path / "export"
     mbox_dir.mkdir()
@@ -724,6 +733,40 @@ def test_handle_mbox_import_expands_directory_and_calls_batch(monkeypatch, cli_c
     assert seen["mbox_paths"] == [mbox_dir / "a.mbox", mbox_dir / "b.mbox"]
     assert seen["chunk_size"] == 500
     assert seen["parallel_workers"] == 3
+
+
+def test_handle_mbox_import_forwards_dedup_flag(monkeypatch, cli_context, tmp_path):
+    cfg, db, logger = cli_context
+    mbox_file = tmp_path / "a.mbox"
+    mbox_file.write_text("")
+
+    args = argparse.Namespace(
+        mbox_files=[mbox_file],
+        default_folder="INBOX",
+        dry_run=False,
+        verbose=False,
+        limit=None,
+        no_preserve_flags=False,
+        error_mbox=None,
+        parallel_workers=1,
+        no_move=False,
+        folder_order="alpha",
+        chunk_size=2000,
+        no_source_dedup=True,
+    )
+
+    seen = {}
+
+    def fake_run_mbox_import(**kwargs):
+        seen.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("core.mbox_importer.run_mbox_import", fake_run_mbox_import)
+
+    result = cli.handle_mbox_import(args, cfg, db, logger)
+
+    assert result == 0
+    assert seen["dedup"] is False
 
 
 def test_handle_mbox_import_returns_1_when_no_valid_inputs(cli_context, tmp_path):

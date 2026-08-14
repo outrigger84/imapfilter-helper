@@ -726,6 +726,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Accepted for consistency; mbox-import does not apply keyword actions",
     )
     p_mbox.add_argument(
+        "--no-source-dedup",
+        action="store_true",
+        help="Disable client-side duplicate detection across the batch "
+             "(by default, messages with a Message-ID or content already "
+             "seen elsewhere in this batch are skipped before upload)",
+    )
+    p_mbox.add_argument(
         "--folder-order",
         dest="folder_order",
         choices=["most-first", "least-first", "alpha"],
@@ -2174,6 +2181,7 @@ def handle_mbox_import(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
         no_move=getattr(args, "no_move", False),
         folder_order=getattr(args, "folder_order", "alpha"),
         chunk_size=getattr(args, "chunk_size", 2000),
+        dedup=not getattr(args, "no_source_dedup", False),
     )
 
 

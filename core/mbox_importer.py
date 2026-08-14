@@ -278,17 +278,29 @@ def _classify_messages(
     verbose: bool,
     uploaded_ids: set[str],
     no_move: bool = False,
-) -> tuple[dict[str, list[int]], int, dict[int, str], list[int]]:
+    seen_keys: Optional[dict[str, tuple[Path, int]]] = None,
+    dedup: bool = True,
+) -> tuple[dict[str, list[int]], int, dict[int, str], list[int], list[int]]:
     """Stream through MBOX and record the target folder index for each message.
 
     Skips messages whose Message-ID is already in uploaded_ids (progress recovery).
 
+    When dedup is enabled, also skips messages whose dedup key (Message-ID,
+    or a content hash when Message-ID is absent) was already seen — either
+    earlier in this same file or in a previously classified file sharing the
+    same seen_keys dict, so duplicates anywhere in the batch are only
+    uploaded once.
+
     Returns:
-        folder_indices   — folder name → list of integer mbox keys
-        unmatched_count  — messages routed to default_folder due to no rule match
-        index_to_msgid   — mbox key → Message-ID (empty string if header absent)
-        skipped_indices  — mbox keys skipped because already uploaded (for cleanup)
+        folder_indices    — folder name → list of integer mbox keys
+        unmatched_count   — messages routed to default_folder due to no rule match
+        index_to_msgid    — mbox key → Message-ID (empty string if header absent)
+        skipped_indices   — mbox keys skipped because already uploaded (for cleanup)
+        duplicate_indices — mbox keys skipped as duplicates of an earlier message
+                             in this batch (for cleanup)
     """
+    if seen_keys is None:
+        seen_keys = {}
     sorted_rules = sorted(rules, key=lambda r: int(r.get("priority", 100)))
 
     mbox = mailbox.mbox(str(mbox_path))
@@ -301,6 +313,8 @@ def _classify_messages(
     unmatched_count = 0
     skipped_count = 0
     skipped_indices: list[int] = []
+    duplicate_count = 0
+    duplicate_indices: list[int] = []
 
     with tqdm(total=total, desc="Classifying messages", unit="msg") as bar:
         for i, msg in enumerate(mbox):
@@ -315,6 +329,22 @@ def _classify_messages(
                 skipped_indices.append(i)
                 bar.update(1)
                 continue
+
+            if dedup:
+                # Message-ID is the standard identity when present; fall back to
+                # a content hash for messages missing it (malformed/spam mail)
+                # so those can still be deduplicated across the batch.
+                dedup_key = (
+                    f"id:{msg_id}" if msg_id
+                    else f"sha256:{hashlib.sha256(_message_to_crlf_bytes(msg)).hexdigest()}"
+                )
+                if dedup_key in seen_keys:
+                    duplicate_count += 1
+                    duplicate_indices.append(i)
+                    index_to_msgid[i] = msg_id
+                    bar.update(1)
+                    continue
+                seen_keys[dedup_key] = (mbox_path, i)
 
             # msg.items() can yield email.header.Header objects (instead of
             # str) for headers containing raw 8-bit bytes that aren't valid
@@ -355,8 +385,10 @@ def _classify_messages(
 
     if skipped_count:
         print(f"   ⏭️  Skipped {skipped_count} already-uploaded messages (from progress file)")
+    if duplicate_count:
+        print(f"   🔁 Found {duplicate_count} duplicate(s) already seen in this batch (will not be uploaded)")
 
-    return dict(folder_indices), unmatched_count, index_to_msgid, skipped_indices
+    return dict(folder_indices), unmatched_count, index_to_msgid, skipped_indices, duplicate_indices
 
 
 # ---------------------------------------------------------------------------
@@ -838,6 +870,7 @@ def run_mbox_import(
     no_move: bool = False,
     folder_order: str = "alpha",
     chunk_size: int = 2000,
+    dedup: bool = True,
 ) -> int:
     """Main entry point for the mbox-import command.
 
@@ -871,6 +904,10 @@ def run_mbox_import(
     per_file_index_to_msgid: dict[Path, dict[int, str]] = {}
     per_file_skipped: dict[Path, list[int]] = {}
     per_file_unmatched: dict[Path, int] = {}
+    per_file_duplicates: dict[Path, list[int]] = {}
+    # Shared across every file's classify pass so a duplicate is caught no
+    # matter which file in the batch it first appeared in.
+    seen_keys: dict[str, tuple[Path, int]] = {}
 
     for mbox_path in mbox_paths:
         progress_path = _progress_path_for(mbox_path)
@@ -884,22 +921,34 @@ def run_mbox_import(
         logger.log("INFO", "mbox_classify_start", {"path": str(mbox_path)},
                    console=f"📂 Classifying messages from {mbox_path.name} ...")
 
-        folder_indices, unmatched_count, index_to_msgid, skipped_indices = _classify_messages(
-            mbox_path, rules, default_folder, limit, verbose, uploaded_ids, no_move=no_move
+        folder_indices, unmatched_count, index_to_msgid, skipped_indices, duplicate_indices = _classify_messages(
+            mbox_path, rules, default_folder, limit, verbose, uploaded_ids, no_move=no_move,
+            seen_keys=seen_keys, dedup=dedup,
         )
+
+        # Duplicates with a real Message-ID are recorded to this file's own
+        # progress file (mirroring the reactive "already exists" path) so a
+        # resumed run doesn't redo the dedup check for them.
+        for dup_idx in duplicate_indices:
+            dup_msg_id = index_to_msgid.get(dup_idx, "")
+            if dup_msg_id:
+                _record_uploaded(progress_path, dup_msg_id)
 
         total = sum(len(v) for v in folder_indices.values())
         matched_count = total - unmatched_count
         logger.log("INFO", "classify_done", {
             "path": str(mbox_path), "total": total, "matched": matched_count,
             "unmatched": unmatched_count, "folders": len(folder_indices),
+            "duplicates": len(duplicate_indices),
         }, console=f"✅ {mbox_path.name}: {total} messages → {len(folder_indices)} folders "
-                   f"({matched_count} matched by rules, {unmatched_count} unmatched)")
+                   f"({matched_count} matched by rules, {unmatched_count} unmatched, "
+                   f"{len(duplicate_indices)} duplicate)")
 
         per_file_folder_indices[mbox_path] = folder_indices
         per_file_index_to_msgid[mbox_path] = index_to_msgid
         per_file_skipped[mbox_path] = skipped_indices
         per_file_unmatched[mbox_path] = unmatched_count
+        per_file_duplicates[mbox_path] = duplicate_indices
 
     # Phase 4: Dry-run output
     if dry_run:
@@ -961,7 +1010,8 @@ def run_mbox_import(
         successful = per_file_successful.get(mbox_path, [])
         failed = per_file_failed.get(mbox_path, [])
         skipped = per_file_skipped.get(mbox_path, [])
-        indices_to_remove = set(successful) | set(skipped) | set(failed)
+        duplicates = per_file_duplicates.get(mbox_path, [])
+        indices_to_remove = set(successful) | set(skipped) | set(failed) | set(duplicates)
         _cleanup_uploaded_messages(mbox_path, indices_to_remove, logger)
         _finalize_progress_file(progress_paths[mbox_path], len(failed), logger)
         return len(failed)
@@ -1040,12 +1090,16 @@ def run_mbox_import(
         err_mbox.close()
 
     # Phase 8: Summary
+    total_duplicates = sum(len(v) for v in per_file_duplicates.values())
     status = "✅" if total_failed == 0 else "⚠️"
     summary = f"\n{status} mbox-import complete: {total_uploaded} uploaded, {total_failed} failed"
+    if total_duplicates:
+        summary += f", {total_duplicates} duplicate (skipped, not uploaded)"
     if total_failed > 0:
         summary += f"\n   Failed messages saved to: {error_mbox_path}"
     logger.log("INFO", "mbox_import_done", {
-        "total_uploaded": total_uploaded, "total_failed": total_failed, "files": len(mbox_paths),
+        "total_uploaded": total_uploaded, "total_failed": total_failed, "total_duplicates": total_duplicates,
+        "files": len(mbox_paths),
     }, console=summary)
 
     return 0 if total_failed == 0 else 1

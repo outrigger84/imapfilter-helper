@@ -54,6 +54,26 @@ def _make_mbox_file(path: Path, specs: list[tuple[str, str]]) -> Path:
     return path
 
 
+def _mk_message_no_msgid(subject: str, body: str = "body") -> email.message.EmailMessage:
+    """Like _mk_message but omits Message-ID, for hash-fallback dedup tests."""
+    msg = email.message.EmailMessage()
+    msg["From"] = "sender@example.com"
+    msg["To"] = "me@example.com"
+    msg["Subject"] = subject
+    msg["Date"] = "Mon, 01 Dec 2025 12:00:00 +0000"
+    msg.set_content(body)
+    return msg
+
+
+def _make_mbox_file_from_messages(path: Path, messages: list[email.message.EmailMessage]) -> Path:
+    box = mailbox.mbox(str(path))
+    for msg in messages:
+        box.add(msg)
+    box.flush()
+    box.close()
+    return path
+
+
 def _write_rule(rules_dir: Path, name: str, contains: str, target: str, priority: int = 10) -> None:
     (rules_dir / f"{name}.json").write_text(json.dumps({
         "name": name,
@@ -696,3 +716,195 @@ def test_run_mbox_import_dry_run_multiple_files_no_upload(tmp_path, monkeypatch)
     # dry-run must not touch the source files or write progress files
     assert sum(1 for _ in mailbox.mbox(str(file_a))) == 1
     assert sum(1 for _ in mailbox.mbox(str(file_b))) == 1
+
+
+# ---------------------------------------------------------------------------
+# Client-side pre-upload duplicate detection
+# ---------------------------------------------------------------------------
+
+def test_run_mbox_import_dedups_repeated_message_id_within_one_file(tmp_path, monkeypatch):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    file_a = _make_mbox_file(tmp_path / "a.mbox", [
+        ("first copy", "<dup@x>"),
+        ("second copy", "<dup@x>"),
+        ("unrelated", "<u1@x>"),
+    ])
+
+    server = FakeIMAPServer(existing_folders={"INBOX"})
+    _patch_imap_login(monkeypatch, server)
+    logger = JsonLogger(tmp_path / "log.json")
+
+    rc = run_mbox_import(
+        mbox_paths=[file_a],
+        rules_dir=rules_dir,
+        secrets_path=_secrets_file(tmp_path),
+        default_folder="INBOX",
+        dry_run=False,
+        verbose=False,
+        limit=None,
+        preserve_flags=True,
+        error_mbox_path=None,
+        logger=logger,
+    )
+
+    assert rc == 0
+    # only the first copy of <dup@x> plus the unrelated message are appended
+    assert len(server.appended["INBOX"]) == 2
+    # both the uploaded original and the skipped duplicate are swept from the source
+    assert sum(1 for _ in mailbox.mbox(str(file_a))) == 0
+
+
+def test_run_mbox_import_dedups_same_message_id_across_files(tmp_path, monkeypatch):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    file_a = _make_mbox_file(tmp_path / "a.mbox", [("copy in a", "<shared@x>")])
+    file_b = _make_mbox_file(tmp_path / "b.mbox", [("copy in b", "<shared@x>")])
+
+    server = FakeIMAPServer(existing_folders={"INBOX"})
+    _patch_imap_login(monkeypatch, server)
+    logger = JsonLogger(tmp_path / "log.json")
+
+    rc = run_mbox_import(
+        mbox_paths=[file_a, file_b],
+        rules_dir=rules_dir,
+        secrets_path=_secrets_file(tmp_path),
+        default_folder="INBOX",
+        dry_run=False,
+        verbose=False,
+        limit=None,
+        preserve_flags=True,
+        error_mbox_path=None,
+        logger=logger,
+    )
+
+    assert rc == 0
+    assert len(server.appended["INBOX"]) == 1
+    # file_a's copy was uploaded, file_b's copy was recognized as a duplicate —
+    # both get swept out of their respective source files
+    assert sum(1 for _ in mailbox.mbox(str(file_a))) == 0
+    assert sum(1 for _ in mailbox.mbox(str(file_b))) == 0
+
+
+def test_run_mbox_import_hash_fallback_dedups_identical_body_without_message_id(tmp_path, monkeypatch):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    file_a = _make_mbox_file_from_messages(tmp_path / "a.mbox", [
+        _mk_message_no_msgid("no id, same body", body="identical content"),
+        _mk_message_no_msgid("no id, same body", body="identical content"),
+    ])
+
+    server = FakeIMAPServer(existing_folders={"INBOX"})
+    _patch_imap_login(monkeypatch, server)
+    logger = JsonLogger(tmp_path / "log.json")
+
+    rc = run_mbox_import(
+        mbox_paths=[file_a],
+        rules_dir=rules_dir,
+        secrets_path=_secrets_file(tmp_path),
+        default_folder="INBOX",
+        dry_run=False,
+        verbose=False,
+        limit=None,
+        preserve_flags=True,
+        error_mbox_path=None,
+        logger=logger,
+    )
+
+    assert rc == 0
+    assert len(server.appended["INBOX"]) == 1
+    assert sum(1 for _ in mailbox.mbox(str(file_a))) == 0
+
+
+def test_run_mbox_import_hash_fallback_does_not_dedup_different_body(tmp_path, monkeypatch):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    file_a = _make_mbox_file_from_messages(tmp_path / "a.mbox", [
+        _mk_message_no_msgid("no id, body one", body="content A"),
+        _mk_message_no_msgid("no id, body two", body="content B"),
+    ])
+
+    server = FakeIMAPServer(existing_folders={"INBOX"})
+    _patch_imap_login(monkeypatch, server)
+    logger = JsonLogger(tmp_path / "log.json")
+
+    rc = run_mbox_import(
+        mbox_paths=[file_a],
+        rules_dir=rules_dir,
+        secrets_path=_secrets_file(tmp_path),
+        default_folder="INBOX",
+        dry_run=False,
+        verbose=False,
+        limit=None,
+        preserve_flags=True,
+        error_mbox_path=None,
+        logger=logger,
+    )
+
+    assert rc == 0
+    assert len(server.appended["INBOX"]) == 2
+
+
+def test_run_mbox_import_no_source_dedup_flag_disables_dedup(tmp_path, monkeypatch):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    file_a = _make_mbox_file(tmp_path / "a.mbox", [
+        ("first copy", "<dup@x>"),
+        ("second copy", "<dup@x>"),
+    ])
+
+    server = FakeIMAPServer(existing_folders={"INBOX"})
+    _patch_imap_login(monkeypatch, server)
+    logger = JsonLogger(tmp_path / "log.json")
+
+    rc = run_mbox_import(
+        mbox_paths=[file_a],
+        rules_dir=rules_dir,
+        secrets_path=_secrets_file(tmp_path),
+        default_folder="INBOX",
+        dry_run=False,
+        verbose=False,
+        limit=None,
+        preserve_flags=True,
+        error_mbox_path=None,
+        logger=logger,
+        dedup=False,
+    )
+
+    assert rc == 0
+    # both copies are uploaded — the fake server has no reject-based dedup of its own
+    assert len(server.appended["INBOX"]) == 2
+
+
+def test_run_mbox_import_dedup_composes_with_no_move(tmp_path, monkeypatch):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    _write_rule(rules_dir, "to-archive", "ARCHIVE", "Archive")
+    file_a = _make_mbox_file(tmp_path / "a.mbox", [
+        ("ARCHIVE first copy", "<dup@x>"),
+        ("ARCHIVE second copy", "<dup@x>"),
+    ])
+
+    server = FakeIMAPServer(existing_folders={"INBOX", "Archive"})
+    _patch_imap_login(monkeypatch, server)
+    logger = JsonLogger(tmp_path / "log.json")
+
+    rc = run_mbox_import(
+        mbox_paths=[file_a],
+        rules_dir=rules_dir,
+        secrets_path=_secrets_file(tmp_path),
+        default_folder="INBOX",
+        dry_run=False,
+        verbose=False,
+        limit=None,
+        preserve_flags=True,
+        error_mbox_path=None,
+        logger=logger,
+        no_move=True,
+    )
+
+    assert rc == 0
+    # --no-move routes everything to the default folder, but dedup still
+    # only lets the first copy of <dup@x> through
+    assert len(server.appended["INBOX"]) == 1
+    assert server.appended.get("Archive", []) == []
