@@ -904,6 +904,7 @@ def run_mbox_import(
     folder_order: str = "alpha",
     chunk_size: int = 2000,
     dedup: bool = True,
+    dedup_only: bool = False,
 ) -> int:
     """Main entry point for the mbox-import command.
 
@@ -913,6 +914,13 @@ def run_mbox_import(
     connections always have something to pull regardless of which file or
     folder it came from, and no single oversized destination folder can
     strand one connection while the rest sit idle.
+
+    When dedup_only is set, the run stops right after the per-file
+    classify + early-cleanup step below — duplicates and already-uploaded
+    messages are still detected and (unless dry_run) removed from the
+    source mbox(es), but no IMAP connection is ever made and nothing is
+    uploaded. Combine with dry_run to preview what would be removed
+    without touching the source files.
     """
 
     # Phase 1: Load rules (shared across every file in the batch)
@@ -941,6 +949,10 @@ def run_mbox_import(
     # Shared across every file's classify pass so a duplicate is caught no
     # matter which file in the batch it first appeared in.
     seen_keys: dict[str, tuple[Path, int]] = {}
+    # Tallied here (rather than read back from per_file_duplicates/skipped
+    # after the loop) because those are cleared to [] once removed from disk.
+    dedup_only_duplicates_total = 0
+    dedup_only_skipped_total = 0
 
     for mbox_path in mbox_paths:
         progress_path = _progress_path_for(mbox_path)
@@ -975,6 +987,9 @@ def run_mbox_import(
         # The remaining folder_indices/index_to_msgid (still keyed against
         # the pre-removal file) are shifted to match the post-removal mbox
         # key numbering that a fresh open will assign later during upload.
+        dedup_only_duplicates_total += len(duplicate_indices)
+        dedup_only_skipped_total += len(skipped_indices)
+
         if not dry_run:
             early_removed = sorted(set(skipped_indices) | set(duplicate_indices))
             if early_removed:
@@ -1000,6 +1015,25 @@ def run_mbox_import(
         per_file_skipped[mbox_path] = skipped_indices if dry_run else []
         per_file_unmatched[mbox_path] = unmatched_count
         per_file_duplicates[mbox_path] = duplicate_indices if dry_run else []
+
+    # Dedup-only: stop here. No IMAP connection is made and nothing is
+    # uploaded — duplicates/already-uploaded messages were already handled
+    # (or, in dry-run, just counted) in the per-file loop above.
+    if dedup_only:
+        status = "✅"
+        verb = "would be removed" if dry_run else "removed"
+        summary = (
+            f"\n{status} dedup-only complete: {dedup_only_duplicates_total} duplicate(s) "
+            f"and {dedup_only_skipped_total} already-uploaded message(s) {verb} "
+            f"from {len(mbox_paths)} file(s)"
+        )
+        logger.log("INFO", "mbox_dedup_only_done", {
+            "duplicates": dedup_only_duplicates_total,
+            "already_uploaded": dedup_only_skipped_total,
+            "dry_run": dry_run,
+            "files": len(mbox_paths),
+        }, console=summary)
+        return 0
 
     # Phase 4: Dry-run output
     if dry_run:

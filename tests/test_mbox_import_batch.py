@@ -973,3 +973,111 @@ def test_run_mbox_import_early_removal_remap_keeps_correct_message_per_folder(tm
     assert server.appended.get("INBOX", []) == []
     # already-uploaded, both duplicates, and all three real messages are gone
     assert sum(1 for _ in mailbox.mbox(str(file_a))) == 0
+
+
+# ---------------------------------------------------------------------------
+# --dedup-only: dedup + source cleanup without any IMAP connection/upload
+# ---------------------------------------------------------------------------
+
+def _remaining_subjects(mbox_path: Path) -> list[str]:
+    return [msg["Subject"] for msg in mailbox.mbox(str(mbox_path))]
+
+
+def test_run_mbox_import_dedup_only_removes_duplicates_without_uploading(tmp_path, monkeypatch):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    file_a = _make_mbox_file(tmp_path / "a.mbox", [
+        ("first copy", "<dup@x>"),
+        ("second copy", "<dup@x>"),
+        ("unrelated", "<u1@x>"),
+    ])
+
+    server = FakeIMAPServer(existing_folders={"INBOX"})
+    _patch_imap_login(monkeypatch, server)
+    logger = JsonLogger(tmp_path / "log.json")
+
+    rc = run_mbox_import(
+        mbox_paths=[file_a],
+        rules_dir=rules_dir,
+        secrets_path=_secrets_file(tmp_path),
+        default_folder="INBOX",
+        dry_run=False,
+        verbose=False,
+        limit=None,
+        preserve_flags=True,
+        error_mbox_path=None,
+        logger=logger,
+        dedup_only=True,
+    )
+
+    assert rc == 0
+    # dedup-only never opens an IMAP connection, so nothing was ever uploaded
+    assert server.appended == {}
+    # the duplicate is gone; the original and the unrelated message are untouched
+    assert _remaining_subjects(file_a) == ["first copy", "unrelated"]
+
+
+def test_run_mbox_import_dedup_only_dry_run_previews_without_deleting(tmp_path, monkeypatch):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    file_a = _make_mbox_file(tmp_path / "a.mbox", [
+        ("first copy", "<dup@x>"),
+        ("second copy", "<dup@x>"),
+        ("unrelated", "<u1@x>"),
+    ])
+
+    server = FakeIMAPServer(existing_folders={"INBOX"})
+    _patch_imap_login(monkeypatch, server)
+    logger = JsonLogger(tmp_path / "log.json")
+
+    rc = run_mbox_import(
+        mbox_paths=[file_a],
+        rules_dir=rules_dir,
+        secrets_path=_secrets_file(tmp_path),
+        default_folder="INBOX",
+        dry_run=True,
+        verbose=False,
+        limit=None,
+        preserve_flags=True,
+        error_mbox_path=None,
+        logger=logger,
+        dedup_only=True,
+    )
+
+    assert rc == 0
+    assert server.appended == {}
+    # dry-run: nothing removed from the source file
+    assert _remaining_subjects(file_a) == ["first copy", "second copy", "unrelated"]
+
+
+def test_run_mbox_import_dedup_only_also_removes_already_uploaded(tmp_path, monkeypatch):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    file_a = _make_mbox_file(tmp_path / "a.mbox", [
+        ("already-uploaded", "<already@x>"),
+        ("keep-me", "<keep@x>"),
+    ])
+    progress_path = _progress_path_for(file_a)
+    progress_path.write_text("<already@x>\n")
+
+    server = FakeIMAPServer(existing_folders={"INBOX"})
+    _patch_imap_login(monkeypatch, server)
+    logger = JsonLogger(tmp_path / "log.json")
+
+    rc = run_mbox_import(
+        mbox_paths=[file_a],
+        rules_dir=rules_dir,
+        secrets_path=_secrets_file(tmp_path),
+        default_folder="INBOX",
+        dry_run=False,
+        verbose=False,
+        limit=None,
+        preserve_flags=True,
+        error_mbox_path=None,
+        logger=logger,
+        dedup_only=True,
+    )
+
+    assert rc == 0
+    assert server.appended == {}
+    assert _remaining_subjects(file_a) == ["keep-me"]

@@ -733,6 +733,15 @@ def build_parser() -> argparse.ArgumentParser:
              "seen elsewhere in this batch are skipped before upload)",
     )
     p_mbox.add_argument(
+        "--dedup-only",
+        action="store_true",
+        dest="dedup_only",
+        help="Run duplicate/already-uploaded detection and remove those messages "
+             "from the source MBOX file(s), then stop — no IMAP connection is made "
+             "and nothing is uploaded. Combine with --dry-run to preview without "
+             "deleting anything.",
+    )
+    p_mbox.add_argument(
         "--folder-order",
         dest="folder_order",
         choices=["most-first", "least-first", "alpha"],
@@ -2182,6 +2191,7 @@ def handle_mbox_import(args: argparse.Namespace, cfg: AppConfig, db, logger: Jso
         folder_order=getattr(args, "folder_order", "alpha"),
         chunk_size=getattr(args, "chunk_size", 2000),
         dedup=not getattr(args, "no_source_dedup", False),
+        dedup_only=getattr(args, "dedup_only", False),
     )
 
 
