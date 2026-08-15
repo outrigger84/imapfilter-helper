@@ -908,3 +908,68 @@ def test_run_mbox_import_dedup_composes_with_no_move(tmp_path, monkeypatch):
     # only lets the first copy of <dup@x> through
     assert len(server.appended["INBOX"]) == 1
     assert server.appended.get("Archive", []) == []
+
+
+def _appended_subjects(server: FakeIMAPServer, folder: str) -> list[str]:
+    return [
+        email.message_from_bytes(payload)["Subject"]
+        for payload in server.appended.get(folder, [])
+    ]
+
+
+def test_run_mbox_import_early_removal_remap_keeps_correct_message_per_folder(tmp_path, monkeypatch):
+    """Regression test for the early-cleanup remap in _remap_after_early_removal.
+
+    mailbox.mbox renumbers surviving messages from scratch every time the
+    file is reopened, so removing already-uploaded/duplicate messages from
+    disk *before* the upload phase reopens the file requires shifting the
+    remaining indices to match. If that remap were missing or off, a work
+    item would fetch the wrong message by (now-stale) key and upload it to
+    the wrong folder — this test interleaves skips/duplicates between three
+    real messages routed to three different folders and checks that each
+    folder received exactly the message it was supposed to, by content.
+    """
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    _write_rule(rules_dir, "to-a", "keep-A", "FolderA", priority=1)
+    _write_rule(rules_dir, "to-b", "keep-B", "FolderB", priority=2)
+    _write_rule(rules_dir, "to-c", "keep-C", "FolderC", priority=3)
+
+    file_a = tmp_path / "a.mbox"
+    _make_mbox_file(file_a, [
+        ("already-uploaded", "<already@x>"),  # skipped via progress file
+        ("keep-A", "<a@x>"),
+        ("dup-of-A", "<a@x>"),                 # duplicate, removed early
+        ("keep-B", "<b@x>"),
+        ("dup-of-B", "<b@x>"),                 # duplicate, removed early
+        ("keep-C", "<c@x>"),
+    ])
+
+    # Seed progress so index 0 ("already-uploaded") is skipped like a resumed run.
+    progress_path = _progress_path_for(file_a)
+    progress_path.write_text("<already@x>\n")
+
+    server = FakeIMAPServer(existing_folders={"INBOX", "FolderA", "FolderB", "FolderC"})
+    _patch_imap_login(monkeypatch, server)
+    logger = JsonLogger(tmp_path / "log.json")
+
+    rc = run_mbox_import(
+        mbox_paths=[file_a],
+        rules_dir=rules_dir,
+        secrets_path=_secrets_file(tmp_path),
+        default_folder="INBOX",
+        dry_run=False,
+        verbose=False,
+        limit=None,
+        preserve_flags=True,
+        error_mbox_path=None,
+        logger=logger,
+    )
+
+    assert rc == 0
+    assert _appended_subjects(server, "FolderA") == ["keep-A"]
+    assert _appended_subjects(server, "FolderB") == ["keep-B"]
+    assert _appended_subjects(server, "FolderC") == ["keep-C"]
+    assert server.appended.get("INBOX", []) == []
+    # already-uploaded, both duplicates, and all three real messages are gone
+    assert sum(1 for _ in mailbox.mbox(str(file_a))) == 0

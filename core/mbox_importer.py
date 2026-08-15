@@ -1,6 +1,7 @@
 """MBOX importer: classify messages by rules and upload directly to target IMAP folders."""
 from __future__ import annotations
 
+import bisect
 import datetime
 import email.errors
 import email.utils
@@ -721,12 +722,13 @@ def _safe_logout(client: imaplib.IMAP4_SSL) -> None:
 # ---------------------------------------------------------------------------
 
 def _cleanup_uploaded_messages(mbox_path: Path, indices_to_remove: set[int], logger: JsonLogger) -> None:
-    """Remove processed messages from one source mbox in a single batch flush.
+    """Remove the given messages from one source mbox in a single batch flush.
 
-    Covers: successfully uploaded this run, already uploaded in a prior run
-    (skipped during classification), and messages that failed and were saved
-    to the error mbox — retries should be done from the error file, not the
-    source.
+    Called twice per file: once right after classification for messages
+    already uploaded in a prior run or duplicated elsewhere in the batch
+    (neither needs an upload attempt), and once after the upload phase for
+    that file's successes and failures — retries for the latter should be
+    done from the error mbox, not the source.
     """
     if not indices_to_remove:
         return
@@ -766,6 +768,37 @@ def _cleanup_uploaded_messages(mbox_path: Path, indices_to_remove: set[int], log
     remaining = sum(1 for _ in mailbox.mbox(str(mbox_path)))
     logger.log("INFO", "mbox_cleanup_done", {"remaining": remaining},
                console=f"✅ Cleanup complete — {remaining} messages remain in {mbox_path.name}")
+
+
+def _remap_after_early_removal(
+    removed: list[int],
+    folder_indices: dict[str, list[int]],
+    index_to_msgid: dict[int, str],
+) -> tuple[dict[str, list[int]], dict[int, str]]:
+    """Shift mbox keys down to match the numbering after an early removal flush.
+
+    mailbox.mbox assigns keys 0..n-1 by re-scanning the file from scratch on
+    open, so once the removed messages are flushed out, every surviving
+    message's key drops by the count of removed keys below it. folder_indices
+    and index_to_msgid were computed before that flush (against the old
+    numbering), so they must be shifted to match before the upload phase
+    re-opens the file — otherwise a work item would fetch the wrong message
+    by key and upload/record the wrong content.
+    """
+    removed_set = set(removed)
+    removed_sorted = sorted(removed_set)
+
+    def new_key(old: int) -> int:
+        return old - bisect.bisect_right(removed_sorted, old)
+
+    remapped_folders = {
+        folder: [new_key(i) for i in indices]
+        for folder, indices in folder_indices.items()
+    }
+    remapped_msgid = {
+        new_key(i): msgid for i, msgid in index_to_msgid.items() if i not in removed_set
+    }
+    return remapped_folders, remapped_msgid
 
 
 def _finalize_progress_file(progress_path: Path, total_failed: int, logger: JsonLogger) -> None:
@@ -934,6 +967,22 @@ def run_mbox_import(
             if dup_msg_id:
                 _record_uploaded(progress_path, dup_msg_id)
 
+        # Remove already-uploaded and duplicate messages from the source mbox
+        # now, before any upload starts, instead of waiting for this file's
+        # upload phase to finish. Neither depends on an upload outcome, so
+        # there's no reason to hold them until the success/fail cleanup pass.
+        # Skipped in dry-run mode, which must never touch the source file.
+        # The remaining folder_indices/index_to_msgid (still keyed against
+        # the pre-removal file) are shifted to match the post-removal mbox
+        # key numbering that a fresh open will assign later during upload.
+        if not dry_run:
+            early_removed = sorted(set(skipped_indices) | set(duplicate_indices))
+            if early_removed:
+                _cleanup_uploaded_messages(mbox_path, set(early_removed), logger)
+                folder_indices, index_to_msgid = _remap_after_early_removal(
+                    early_removed, folder_indices, index_to_msgid
+                )
+
         total = sum(len(v) for v in folder_indices.values())
         matched_count = total - unmatched_count
         logger.log("INFO", "classify_done", {
@@ -946,9 +995,11 @@ def run_mbox_import(
 
         per_file_folder_indices[mbox_path] = folder_indices
         per_file_index_to_msgid[mbox_path] = index_to_msgid
-        per_file_skipped[mbox_path] = skipped_indices
+        # Already removed from disk above (except in dry-run, which never
+        # reaches the cleanup phase below and can hold onto the originals).
+        per_file_skipped[mbox_path] = skipped_indices if dry_run else []
         per_file_unmatched[mbox_path] = unmatched_count
-        per_file_duplicates[mbox_path] = duplicate_indices
+        per_file_duplicates[mbox_path] = duplicate_indices if dry_run else []
 
     # Phase 4: Dry-run output
     if dry_run:
@@ -1006,7 +1057,13 @@ def run_mbox_import(
         per_file_remaining[item.mbox_path] += 1
 
     def _finish_file(mbox_path: Path) -> None:
-        """Run cleanup + progress-file finalization once a file's work is done."""
+        """Run cleanup + progress-file finalization once a file's work is done.
+
+        skipped/duplicates are normally already removed from disk during
+        classification (see the early-cleanup block above); they only
+        reach here non-empty in dry-run mode, where this function is never
+        called, so the union below is just successful|failed in practice.
+        """
         successful = per_file_successful.get(mbox_path, [])
         failed = per_file_failed.get(mbox_path, [])
         skipped = per_file_skipped.get(mbox_path, [])
