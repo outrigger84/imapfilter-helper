@@ -11,4 +11,16 @@ After=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/root/imapfilter-helper
-ExecStart=/root/imapfilter-helper/scripts/run_scheduled.sh 1500 --no-gotify run-all --folder INBOX
+# Dedicated cache file so this never collides with the default
+# data/cache.db, which manual/ad-hoc runs and testing use.
+#
+# build_cache() always does a full UID SEARCH + FETCH of every message
+# currently in the folder on every call -- there's no "skip if already
+# cached" logic anywhere in core/cache_builder.py -- so a stale row can
+# only come from a message that *left* INBOX by some means other than
+# this tool's own moves (e.g. filed manually in another mail client). The
+# clear-cache step below is essentially free (build_cache would redo the
+# same full fetch either way) and guarantees no such stale row can ever
+# accumulate in a cache file that otherwise lives forever.
+ExecStart=/root/imapfilter-helper/scripts/run_scheduled.sh 60 --no-gotify --cache-file data/cache-inbox.db clear-cache
+ExecStart=/root/imapfilter-helper/scripts/run_scheduled.sh 1500 --no-gotify --cache-file data/cache-inbox.db run-all --folder INBOX
