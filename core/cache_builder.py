@@ -306,7 +306,13 @@ def _parse_batch_fetch_response(
     """Parse a multi-UID IMAP FETCH response into per-UID results.
 
     imaplib returns a flat list of (envelope_bytes, header_bytes) tuples
-    interleaved with b")" separator items. Each tuple represents one message.
+    interleaved with plain bytes items. Each tuple carries the UID and the
+    header literal for one message, but servers (e.g. iCloud) commonly send
+    FLAGS/INTERNALDATE as the *closing* atoms of the response line, which
+    imaplib returns as a separate trailing bytes item immediately after that
+    message's tuple - not inside the tuple itself. That trailing item must be
+    merged into the most recently seen UID's result, or FLAGS/INTERNALDATE
+    are silently lost.
 
     Returns:
         Dict mapping uid_str -> (header_bytes, flags_list, internaldate_string)
@@ -315,30 +321,47 @@ def _parse_batch_fetch_response(
     if not msg_data:
         return results
     try:
+        last_uid_str: str | None = None
         for item in msg_data:
-            if not isinstance(item, tuple) or len(item) < 2:
-                continue
-            metadata = item[0] if isinstance(item[0], bytes) else b""
-            payload = item[1] if isinstance(item[1], (bytes, bytearray)) else b""
+            if isinstance(item, tuple) and len(item) >= 2:
+                metadata = item[0] if isinstance(item[0], bytes) else b""
+                payload = item[1] if isinstance(item[1], (bytes, bytearray)) else b""
 
-            # UID is present in the envelope when fetched via client.uid()
-            uid_match = re.search(rb'\bUID\s+(\d+)\b', metadata)
-            if not uid_match:
-                continue
-            uid_str = uid_match.group(1).decode()
+                # UID is present in the envelope when fetched via client.uid()
+                uid_match = re.search(rb'\bUID\s+(\d+)\b', metadata)
+                if not uid_match:
+                    continue
+                uid_str = uid_match.group(1).decode()
+                last_uid_str = uid_str
 
-            flags: list[str] = []
-            flags_match = re.search(rb'FLAGS \(([^)]*)\)', metadata)
-            if flags_match:
-                flags_str = flags_match.group(1).decode('ascii', 'ignore').strip()
-                flags = [f for f in flags_str.split() if f]
+                flags: list[str] = []
+                flags_match = re.search(rb'FLAGS \(([^)]*)\)', metadata)
+                if flags_match:
+                    flags_str = flags_match.group(1).decode('ascii', 'ignore').strip()
+                    flags = [f for f in flags_str.split() if f]
 
-            internaldate: str | None = None
-            date_match = re.search(rb'INTERNALDATE "([^"]*)"', metadata)
-            if date_match:
-                internaldate = date_match.group(1).decode('ascii', 'ignore')
+                internaldate: str | None = None
+                date_match = re.search(rb'INTERNALDATE "([^"]*)"', metadata)
+                if date_match:
+                    internaldate = date_match.group(1).decode('ascii', 'ignore')
 
-            results[uid_str] = (bytes(payload), flags, internaldate)
+                results[uid_str] = (bytes(payload), flags, internaldate)
+            elif isinstance(item, (bytes, bytearray)) and last_uid_str is not None:
+                metadata = bytes(item)
+                header_bytes, flags, internaldate = results[last_uid_str]
+
+                if not flags:
+                    flags_match = re.search(rb'FLAGS \(([^)]*)\)', metadata)
+                    if flags_match:
+                        flags_str = flags_match.group(1).decode('ascii', 'ignore').strip()
+                        flags = [f for f in flags_str.split() if f]
+
+                if not internaldate:
+                    date_match = re.search(rb'INTERNALDATE "([^"]*)"', metadata)
+                    if date_match:
+                        internaldate = date_match.group(1).decode('ascii', 'ignore')
+
+                results[last_uid_str] = (header_bytes, flags, internaldate)
     except Exception:
         pass
     return results

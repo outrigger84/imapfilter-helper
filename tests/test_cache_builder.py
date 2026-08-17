@@ -43,10 +43,42 @@ if "tqdm" not in sys.modules:  # pragma: no cover - test support
     tqdm_stub.write = _write
     sys.modules["tqdm"] = tqdm_stub
 
-from core.cache_builder import build_cache, compact_cache
+from core.cache_builder import _parse_batch_fetch_response, build_cache, compact_cache
 from core.config import build_default_config
 from core.database import init_db
 from core.logging_utils import JsonLogger
+
+
+def test_parse_batch_fetch_response_reads_trailing_flags_item():
+    # Real iCloud FETCH response shape for "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)":
+    # FLAGS/INTERNALDATE arrive as a separate bytes item *after* each
+    # message's (metadata, header) tuple, not inside the tuple itself.
+    msg_data = [
+        (b'1 (UID 100 BODY[HEADER] {5}', b'hdr1\n'),
+        b' FLAGS ($NotJunk NotJunk) INTERNALDATE "26-Apr-2026 21:52:19 +0000")',
+        (b'2 (UID 200 BODY[HEADER] {5}', b'hdr2\n'),
+        b' FLAGS (\\Seen) INTERNALDATE "12-May-2026 09:09:33 +0000")',
+        (b'3 (UID 300 BODY[HEADER] {5}', b'hdr3\n'),
+        b' FLAGS () INTERNALDATE "19-May-2026 09:01:37 +0000")',
+    ]
+
+    results = _parse_batch_fetch_response(msg_data)
+
+    assert results["100"] == (b"hdr1\n", ["$NotJunk", "NotJunk"], "26-Apr-2026 21:52:19 +0000")
+    assert results["200"] == (b"hdr2\n", ["\\Seen"], "12-May-2026 09:09:33 +0000")
+    assert results["300"] == (b"hdr3\n", [], "19-May-2026 09:01:37 +0000")
+
+
+def test_parse_batch_fetch_response_reads_inline_flags_item():
+    # Some servers put FLAGS/INTERNALDATE inside the tuple's metadata itself -
+    # must keep working for that shape too.
+    msg_data = [
+        (b'1 (UID 100 FLAGS (\\Seen custom) INTERNALDATE "28-Oct-2025 07:30:19 +0000" BODY[HEADER] {5}', b'hdr1\n'),
+    ]
+
+    results = _parse_batch_fetch_response(msg_data)
+
+    assert results["100"] == (b"hdr1\n", ["\\Seen", "custom"], "28-Oct-2025 07:30:19 +0000")
 
 
 BATCH_FETCH_QUERY = "(BODY.PEEK[HEADER] FLAGS INTERNALDATE)"
