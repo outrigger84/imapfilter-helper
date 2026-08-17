@@ -1,0 +1,14 @@
+[Unit]
+Description=IMAPFilter Helper - inbox sort
+Wants=network-online.target
+After=network-online.target
+# Uncomment (and create imapfilter-alert@.service) for a systemd-level alert
+# on top of the tool's own Gotify/Telegram notifications - those only fire
+# for failures the Python process itself catches, not an early crash before
+# the notifier loads:
+# OnFailure=imapfilter-alert@%n.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/imapfilter-helper
+ExecStart=/root/imapfilter-helper/scripts/run_scheduled.sh 1500 --no-gotify run-all --folder INBOX

@@ -24,6 +24,9 @@ data/review_*.md
 # --- Backups / editor droppings ---
 *.bak
 
+# --- Scheduler lock ---
+data/.scheduler.lock
+
 # --- Python build junk ---
 __pycache__/
 *.pyc
