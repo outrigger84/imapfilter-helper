@@ -1,5 +1,5 @@
 [Unit]
-Description=Run IMAPFilter Helper retention sweep weekly
+Description=Run IMAPFilter Helper all-folders resweep weekly
 
 [Timer]
 OnCalendar=weekly

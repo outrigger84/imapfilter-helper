@@ -27,7 +27,6 @@ A helper CLI that orchestrates cache building, rule evaluation, and action execu
 │   ├── imap_client.py          # IMAP protocol wrapper
 │   ├── database.py             # SQLite schema and migrations
 │   ├── backup.py               # Message backup utilities (mbox format)
-│   ├── keywords.py             # IMAP keywords and flag management (with batching)
 │   ├── connection_pool.py      # Connection pooling for performance
 │   ├── config.py               # Configuration management
 │   ├── logging_utils.py        # JSON logging and performance tracking
@@ -44,7 +43,6 @@ A helper CLI that orchestrates cache building, rule evaluation, and action execu
 │   ├── cache.db                # SQLite cache database
 │   ├── imapfilter-helper.log   # JSON-formatted logs (JSON-structured)
 │   ├── wizard_cache.json       # Persistent cache for rule wizard suggestions
-│   ├── keywords.json           # Predefined keywords list
 │   └── backups/                # Message backup mbox files
 ├── rules/                      # JSON rule files (user-managed)
 ├── scripts/                    # Standalone utilities and diagnostics
@@ -142,7 +140,6 @@ python -m core.cli --cache-file data/cache-personal.db run-all --folder Personal
 | `clear-pending` | Removes all pending actions from the queue without contacting the IMAP server. | *(no flags)* |
 | `clear-cache` | Deletes cached message headers, folder metadata, and any queued actions. | *(no flags)* |
 | `compact-cache` | Removes cached headers for messages whose actions have already been executed so future evaluations skip them. | *(no flags)* |
-| `keywords` | Manage predefined IMAP keywords and custom flags. Subcommands: `list` (show all), `add KEYWORD`, `remove KEYWORD`, `edit` (in default editor). | *(varies by subcommand)* |
 | `view-cache` | Interactive browser for exploring and analyzing cached emails. Sort by sender, subject, date, or folder. Search and filter messages in real-time. | `--limit N` – maximum emails to load (default: 1000).<br>`--folder NAME` – filter by folder name. |
 
 **Folder selection note:** When using `build-cache`, choose one of these mutually exclusive options:
@@ -318,8 +315,7 @@ Common headers: `from`, `to`, `cc`, `subject`, `date`, `message-id`
     "not": {
       "any": [
         {"header": "subject", "regex": "\\[SPAM\\]"},
-        {"header": "from", "contains": "no-reply"},
-        {"has_keyword": "Junk"}
+        {"header": "from", "contains": "no-reply"}
       ]
     }
   },
@@ -344,21 +340,6 @@ Common headers: `from`, `to`, `cc`, `subject`, `date`, `message-id`
 }
 ```
 
-**Combine positive and negative flags:**
-
-```json
-{
-  "name": "Unread important messages",
-  "conditions": {
-    "all": [
-      {"has_keyword": "important"},
-      {"not": {"has_keyword": "\\Seen"}}
-    ]
-  },
-  "action": {"type": "set_keywords", "keywords": ["priority"]}
-}
-```
-
 ### When to use which operator
 
 | Scenario | Use This | Example |
@@ -369,52 +350,56 @@ Common headers: `from`, `to`, `cc`, `subject`, `date`, `message-id`
 | Match exact value | `equals` | `{"header": "from", "equals": "user@example.com"}` |
 | Negate complex OR group | `not` wrapper | `{"not": {"any": [...]}}` |
 | Negate complex AND group | `not` wrapper | `{"not": {"all": [...]}}` |
-| Negate flag condition | `not` wrapper | `{"not": {"has_keyword": "\\Seen"}}` |
 
 **Priority:** Lower numbers execute first. Use priorities 1-1000 for flexibility.
 
 **Action types:**
 
 - **`"move"`** – Move the message to a target folder. Specifies `"target"` field with folder name.
-- **`"set_keywords"`** – Set IMAP keywords/flags on the message. Specifies `"keywords"` field with array of keyword names.
-  - Common keywords: `"\\Seen"`, `"\\Answered"`, `"\\Flagged"`, `"\\Draft"`, `"\\Deleted"`, or custom keywords like `"receipts"`, `"important"`, etc.
-  - Keywords are processed efficiently in batch operations to minimize IMAP server round trips.
 
-**Example with keyword action:**
+**Age-gated action brackets:**
 
-```json
-{
-  "name": "Mark important emails",
-  "conditions": {
-    "all": [
-      {"header": "from", "regex": "@company\\.com"},
-      {"header": "subject", "contains": "urgent"}
-    ]
-  },
-  "action": {
-    "type": "set_keywords",
-    "keywords": ["\\Flagged", "important"]
-  }
-}
-```
+A rule's `actions` list is normally a flat list of plain actions (like `{"type": "move", "target": "..."}`) that always apply once the rule's conditions match. An **age-gated bracket** is an alternative kind of list item that only applies its own nested actions when the message's age matches a condition — this lets a single rule branch on how old the matching message is, instead of needing a separate rule per age tier.
 
-**Example with multiple keywords in condition:**
+A bracket is any list item with a `"do"` key (a list of 0 or more ordinary actions) plus at least one age key:
+
+- `age_days_gt` / `age_days_gte` – older than / at least N days old
+- `age_days_lt` / `age_days_lte` – younger than / at most N days old
+- `age_days_eq` – exactly N days old (exclusive of the bound keys above)
+
+A bracket may combine one lower-bound key and one upper-bound key (ANDed together) to express a bounded band. Within one rule, brackets are evaluated top-to-bottom and **first-bracket-wins**: once one bracket's age condition is satisfied, its `do` list runs and any later brackets in the same rule are skipped. `"do": []` is a deliberate no-op — useful for "don't touch this yet" cases like young 2FA codes.
+
+If a rule's actions are *only* brackets and none of them match the message's age (a coverage gap), the rule is treated as if its `conditions` hadn't matched at all, and evaluation falls through to the next rule. Plain (non-bracket) actions always apply regardless of age.
+
+**Two-tier retention example** (replaces the older tag-then-sweep keyword design — see `rules/253470653_the_economist.json` for the live version):
 
 ```json
 {
-  "name": "Process unread messages",
-  "conditions": {
-    "all": [
-      {"has_keyword": "\\Seen", "not": true},
-      {"has_keyword": "important", "equals": true}
-    ]
-  },
-  "action": {
-    "type": "set_keywords",
-    "keywords": ["\\Flagged"]
-  }
+  "name": "The Economist",
+  "conditions": {"header": "from", "contains": "@economist.com"},
+  "actions": [
+    {"age_days_lte": 365, "do": [{"type": "move", "target": "The Economist"}]},
+    {"age_days_gt": 365,  "do": [{"type": "move", "target": "Deleted Messages"}]}
+  ]
 }
 ```
+
+The two brackets are mutually exclusive and exhaustive (every non-negative age is either `<= 365` or `> 365`), so exactly one always fires — avoiding the double-queue risk of mixing a plain action with a bracket in the same rule.
+
+**2FA no-op example** (do nothing while the code is still useful, delete it once it's stale):
+
+```json
+{
+  "name": "2FA codes",
+  "conditions": {"header": "subject", "contains": "verification code"},
+  "actions": [
+    {"age_days_lt": 1, "do": []},
+    {"age_days_gte": 1, "do": [{"type": "move", "target": "Deleted Messages"}]}
+  ]
+}
+```
+
+Since neither `evaluate`/`execute` nor `stream` re-check age on their own schedule beyond when they run, a rule using age-gated brackets needs to be re-evaluated periodically for the buckets to advance as mail ages — see the `imapfilter-resweep` systemd timer in `systemd/`, which runs a weekly `stream --all-folders --fresh` pass for exactly this purpose (the 30-minute inbox timer only ever scans `INBOX`, so mail already filed elsewhere needs this separate sweep to notice it crossed an age threshold).
 
 ### Rule management console
 
@@ -608,6 +593,12 @@ Push notifications are supported via **Gotify** and/or **Telegram**. Configure e
 
 **Why `min_priority` matters on large jobs:** Telegram bots are rate-limited to ~30 messages per minute. Without filtering, a job that moves 500 emails generates 500 individual "Action Executed" notifications, which quickly exhausts the rate limit and floods the chat. Setting `min_priority: 2` reduces that to a single "Execute Complete" summary.
 
+**`--notification-summary`** is a more direct fix for the same problem, for jobs that can touch far more than 500 messages (e.g. the weekly retention resweep against tens of thousands of matches). Rather than filtering by priority, it structurally replaces the per-match (`evaluate`/`eval-execute`/`stream`) and per-action (`execute`) notifications with **one digest per phase**:
+- Evaluate/stream phase: one message showing matches broken down by rule → target, e.g. `🏷️ Cal Responses` / `🗑️ → Deleted Messages: 26097`. A bracket that fired with an empty `do` (e.g. "stays in INBOX today") shows as `⏸️ (no action yet): N` rather than vanishing from the count.
+- Execute phase: the existing "Execute Complete" summary is always shown broken down into `📂 Moved` / `🗑️ Deleted` (trash-like targets) / `❌ Failed` / `⏭️ Skipped`, regardless of whether `--notification-summary` is set.
+
+It's a standalone flag — pass it on its own to get digests instead of per-event spam. If `--no-notifications` is also set, that wins and nothing is sent at all.
+
 Notifications are dispatched asynchronously on a background thread so they never block or slow down the main execution pipeline. If Telegram returns a `429 Too Many Requests` response, the notifier automatically honours the `retry_after` cooldown window before attempting the next send.
 
 To suppress all notifications for a single run, pass `--no-notifications`. To suppress only one notifier, use `--no-telegram` or `--no-gotify`.
@@ -760,6 +751,41 @@ The `--parallel-workers` flag controls how many IMAP connections are used simult
 ./imapfilter_helper.py clear-cache
 ```
 
+### Scheduled runs (systemd)
+
+Two systemd unit pairs live in `systemd/` for unattended operation, serialized against each other via a shared flock (`scripts/run_scheduled.sh`) so they can never run concurrently against the same cache/mailbox:
+
+- **`imapfilter-inbox.{service,timer}`** — runs `run-all --folder INBOX` every 30 minutes. Sorts new mail as it arrives.
+- **`imapfilter-resweep.{service,timer}`** — runs `stream --all-folders --fresh --notification-summary` weekly, excluding `INBOX`, `Deleted Messages`, `Junk`, `Sent Messages` (+ its subfolders), and `Drafts`. This is the *only* mechanism that re-evaluates age-gated action brackets (see "Age-gated action brackets" under "Rule format and structure" above; e.g. retention rules) on mail already filed outside `INBOX` — the inbox timer only ever looks at `INBOX`, so a message sorted into a folder once needs this separate sweep to notice it later crossed an age threshold. `--notification-summary` keeps this from sending one notification per match on a sweep that can easily touch tens of thousands of messages — see "Notifications" below.
+
+**To install** (copies the unit files and makes systemd aware of them, but does not start anything):
+
+```bash
+sudo cp systemd/imapfilter-inbox.service systemd/imapfilter-inbox.timer \
+        systemd/imapfilter-resweep.service systemd/imapfilter-resweep.timer \
+        /etc/systemd/system/
+sudo systemctl daemon-reload
+```
+
+**To enable and start a timer** (do this per timer, once you're comfortable with what it will do — for the resweep timer in particular, dry-run it manually first, since a full sweep can move a large number of messages the first time it catches up on a long-standing backlog):
+
+```bash
+sudo systemctl enable --now imapfilter-inbox.timer
+sudo systemctl enable --now imapfilter-resweep.timer
+```
+
+`--now` both enables (starts on every boot) and starts the timer immediately; drop it to just enable without starting right away. `imapfilter-resweep.timer` runs `OnCalendar=weekly` with a 10-minute randomized delay.
+
+**To check status or logs:**
+
+```bash
+systemctl list-timers | grep imapfilter
+systemctl status imapfilter-resweep.service
+journalctl -u imapfilter-resweep.service -n 50
+```
+
+**To disable** a timer without uninstalling it: `sudo systemctl disable --now imapfilter-resweep.timer`.
+
 ### Using Multiple Cache Instances
 
 The `--cache-file` argument allows you to maintain separate, independent cache databases for different purposes. This is useful for testing, isolation, and parallel processing.
@@ -900,7 +926,6 @@ pytest   # collects tests/ only (see pyproject.toml)
 * `core/stream_executor.py` – Memory-efficient message processing for large mailboxes using streaming approach
 * `core/stream_processor.py` – Message streaming utilities for batch processing
 * `core/connection_pool.py` – IMAP connection pooling to reduce connection overhead during parallel operations
-* `core/keywords.py` – Batched keyword/flag operations for efficient IMAP interactions
 
 **Validation & Quality:**
 * `core/rule_validator.py` – Validates rule JSON structure, schemas, and condition logic before execution
@@ -918,7 +943,7 @@ pytest   # collects tests/ only (see pyproject.toml)
 - Action execution uses threading with per-thread database isolation for safe concurrent operations
 
 **Batch Operations:**
-- Keyword operations batch process to reduce IMAP server round trips
+- Move operations batch process to reduce IMAP server round trips
 - Connection pooling reuses IMAP connections across parallel tasks
 
 **Smart Caching:**

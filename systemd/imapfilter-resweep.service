@@ -1,5 +1,5 @@
 [Unit]
-Description=IMAPFilter Helper - retention sweep
+Description=IMAPFilter Helper - all-folders resweep (retention + INBOX-timer safety net)
 Wants=network-online.target
 After=network-online.target
 # Uncomment (and create imapfilter-alert@.service) for a systemd-level alert
@@ -11,4 +11,29 @@ After=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/root/imapfilter-helper
-ExecStart=/root/imapfilter-helper/scripts/run_scheduled.sh 7200 --rules-dir rules-retention stream --all-folders --fresh
+# Runs the normal rules/ set against every folder except the ones below.
+# This is the only mechanism that re-evaluates age-gated action brackets
+# (e.g. retention rules) on mail already filed outside INBOX, since
+# imapfilter-inbox.timer only ever scans INBOX. Superseded the old
+# --rules-dir rules-retention tag-then-sweep design after custom IMAP
+# keywords proved unreliable on iCloud (see memory
+# icloud-custom-keyword-limit.md).
+#
+# Exclude list rather than an allow-list of bracket-rule folders on
+# purpose: the plan is for most rules to eventually carry age-gated
+# brackets, so an allow-list would need constant upkeep -- these five are
+# the ones that will never need a retention sweep regardless of how many
+# rules get brackets. --exclude-folders is an exact match (not a prefix),
+# so Sent Messages' two subfolders need listing separately.
+#
+# --notification-summary replaces the per-match/per-action notifications
+# with one digest per phase -- without it, a run touching tens of
+# thousands of matches would send one notification per match.
+ExecStart=/root/imapfilter-helper/scripts/run_scheduled.sh 7200 --notification-summary stream --all-folders --fresh \
+  --exclude-folders "INBOX" \
+  --exclude-folders "Deleted Messages" \
+  --exclude-folders "Junk" \
+  --exclude-folders "Sent Messages" \
+  --exclude-folders "Sent Messages/Away From Computer" \
+  --exclude-folders "Sent Messages/Tripit" \
+  --exclude-folders "Drafts"
