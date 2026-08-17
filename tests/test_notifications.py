@@ -178,6 +178,32 @@ def test_execute_summary_breaks_down_moved_vs_deleted_regardless_of_mode():
         assert "❌ Failed: 1" in body
 
 
+def test_execute_summary_includes_rule_target_breakdown_like_phase_summary():
+    """The plain `execute` command should list what actually moved where,
+    not just a bare done/failed/skipped count -- mirrors the evaluate
+    digest's per-rule breakdown so a long unattended run stays legible."""
+    by_rule_target = {
+        "Newsletters": {"Archive": 4, "Deleted Messages": 1},
+        "Spam Ring A": {"Deleted Messages": 2},
+    }
+    context = {
+        "done": 7, "done_trash": 3, "failed": 0, "skipped": 0,
+        "matches_by_rule_and_target": by_rule_target,
+    }
+
+    dispatcher, telegram = _dispatcher(summary_mode=False)
+    dispatcher.dispatch("INFO", "execute_summary", context)
+
+    assert len(telegram.sent) == 1
+    _title, body, _priority = telegram.sent[0]
+    assert "📂 Moved: 4" in body
+    assert "🗑️ Deleted: 3" in body
+    assert "🏷️ Newsletters" in body
+    assert "🏷️ Spam Ring A" in body
+    assert "📂 → Archive: 4" in body
+    assert "🗑️ → Deleted Messages: 2" in body
+
+
 def test_no_notifications_means_no_notifier_no_dispatch():
     """--no-notifications leaves the notifier unconstructed entirely (tested
     at the core/cli.py level) -- here we just confirm summary_mode alone,

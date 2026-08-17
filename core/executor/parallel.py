@@ -552,6 +552,10 @@ def execute_actions_parallel(
 
     # Group actions by source folder
     folder_actions: dict[str, list[dict]] = {}
+    # Rule -> target -> count, for the --notification-summary digest. Mirrors
+    # core/stream_executor.py's matches_by_rule_and_target: incremented as
+    # each pending action is read, regardless of whether it later succeeds.
+    matches_by_rule_and_target: dict[str, dict[str, int]] = {}
     for folder, action_id, uid, target, rule_name, priority, action_type, action_data in cursor.fetchall():
         if folder not in folder_actions:
             folder_actions[folder] = []
@@ -565,6 +569,12 @@ def execute_actions_parallel(
             "action_type": action_type,
             "action_data": action_data,
         })
+        digest_bucket = target if target else "(no action)"
+        digest_rule = rule_name or "(unnamed)"
+        matches_by_rule_and_target.setdefault(digest_rule, {})
+        matches_by_rule_and_target[digest_rule][digest_bucket] = (
+            matches_by_rule_and_target[digest_rule].get(digest_bucket, 0) + 1
+        )
 
     db.close()
 
@@ -783,6 +793,7 @@ def execute_actions_parallel(
         "skipped": 0,
         "suppressed": 0,
         "done_trash": total_done_trash,
+        "matches_by_rule_and_target": matches_by_rule_and_target,
     }
 
     logger.log(

@@ -171,6 +171,32 @@ class TelegramNotifier:
             return False
 
 
+def _rule_target_digest_lines(by_rule_target: dict) -> list[str]:
+    """Render a rule -> target -> count breakdown as digest lines, capped to
+    _DIGEST_MAX_RULES rules (busiest first). Shared by the evaluate/stream
+    "phase_summary" digest and the "execute_summary" digest so both read the
+    same way."""
+    rule_totals = sorted(
+        ((name, sum(targets.values())) for name, targets in by_rule_target.items()),
+        key=lambda kv: -kv[1],
+    )
+    shown = rule_totals[:_DIGEST_MAX_RULES]
+    lines = []
+    for rule_name, _total in shown:
+        lines.append(f"🏷️ {rule_name}")
+        targets = sorted(by_rule_target[rule_name].items(), key=lambda kv: -kv[1])
+        for target, count in targets:
+            if target == "(no action)":
+                lines.append(f"   ⏸️ (no action yet): {count}")
+            else:
+                emoji = "🗑️" if target.strip().lower() in TRASH_LIKE_TARGETS else "📂"
+                lines.append(f"   {emoji} → {target or '(no target)'}: {count}")
+    remaining = len(rule_totals) - len(shown)
+    if remaining > 0:
+        lines.append(f"… and {remaining} more rule(s)")
+    return lines
+
+
 class NotificationDispatcher:
     """Dispatch notifications based on event type."""
 
@@ -355,33 +381,20 @@ class NotificationDispatcher:
             moved = max(done - done_trash, 0)
             failed = context.get("failed", 0)
             skipped = context.get("skipped", 0)
-            body = (
+            lines = [
                 f"📂 Moved: {moved}\n🗑️ Deleted: {done_trash}\n"
                 f"❌ Failed: {failed}\n⏭️ Skipped: {skipped}"
-            )
+            ]
+            by_rule_target: dict = context.get("matches_by_rule_and_target", {})
+            lines.extend(_rule_target_digest_lines(by_rule_target))
+            body = "\n".join(lines)
             priority = 3 if failed > 0 else 2
 
         elif message == "phase_summary":
             total_matches = context.get("matches", 0)
             by_rule_target: dict = context.get("matches_by_rule_and_target", {})
-            rule_totals = sorted(
-                ((name, sum(targets.values())) for name, targets in by_rule_target.items()),
-                key=lambda kv: -kv[1],
-            )
-            shown = rule_totals[:_DIGEST_MAX_RULES]
             lines = [f"🎯 Total matches: {total_matches}"]
-            for rule_name, _total in shown:
-                lines.append(f"🏷️ {rule_name}")
-                targets = sorted(by_rule_target[rule_name].items(), key=lambda kv: -kv[1])
-                for target, count in targets:
-                    if target == "(no action)":
-                        lines.append(f"   ⏸️ (no action yet): {count}")
-                    else:
-                        emoji = "🗑️" if target.strip().lower() in TRASH_LIKE_TARGETS else "📂"
-                        lines.append(f"   {emoji} → {target or '(no target)'}: {count}")
-            remaining = len(rule_totals) - len(shown)
-            if remaining > 0:
-                lines.append(f"… and {remaining} more rule(s)")
+            lines.extend(_rule_target_digest_lines(by_rule_target))
             body = "\n".join(lines)
             priority = 2
 

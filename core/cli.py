@@ -1079,9 +1079,16 @@ def _resolve_per_folder_list(
     return all_folders
 
 
-def _merge_exec_stats(total: dict[str, int], stats: dict[str, int]) -> None:
+def _merge_exec_stats(total: dict, stats: dict) -> None:
     """Accumulate one folder's execution stats into the running totals."""
     for key, value in stats.items():
+        if key == "matches_by_rule_and_target":
+            merged: dict = total.setdefault(key, {})
+            for rule_name, targets in value.items():
+                merged_targets = merged.setdefault(rule_name, {})
+                for target, count in targets.items():
+                    merged_targets[target] = merged_targets.get(target, 0) + count
+            continue
         total[key] = total.get(key, 0) + value
 
 
@@ -1398,6 +1405,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
             "done_trash": stats.get("done_trash", 0),
             "failed": stats.get("failed", 0),
             "skipped": stats.get("skipped", 0),
+            "matches_by_rule_and_target": stats.get("matches_by_rule_and_target", {}),
         }
         if failed:
             summary_context["failed_folders"] = failed

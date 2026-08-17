@@ -910,7 +910,16 @@ def test_handle_execute_per_folder_aggregates_stats(monkeypatch, cli_context):
         folder = kwargs["folders"][0]
         calls.append(folder)
         show_folder_bar_calls.append(kwargs["show_folder_bar"])
-        stats = {"Alpha": {"done": 1, "failed": 0, "skipped": 2}, "Beta": {"done": 2, "failed": 1, "skipped": 0}}
+        stats = {
+            "Alpha": {
+                "done": 1, "failed": 0, "skipped": 2,
+                "matches_by_rule_and_target": {"RuleA": {"Archive": 1}},
+            },
+            "Beta": {
+                "done": 2, "failed": 1, "skipped": 0,
+                "matches_by_rule_and_target": {"RuleA": {"Archive": 1}, "RuleB": {"Trash": 1}},
+            },
+        }
         return None, stats[folder]
 
     monkeypatch.setattr(logger, "log", spy_log)
@@ -925,6 +934,11 @@ def test_handle_execute_per_folder_aggregates_stats(monkeypatch, cli_context):
     assert summary["done"] == 3
     assert summary["failed"] == 1
     assert summary["skipped"] == 2
+    # Per-folder runs merge rather than overwrite the rule/target breakdown.
+    assert summary["matches_by_rule_and_target"] == {
+        "RuleA": {"Archive": 2},
+        "RuleB": {"Trash": 1},
+    }
 
 
 def test_handle_execute_per_folder_respects_global_limit(monkeypatch, cli_context):

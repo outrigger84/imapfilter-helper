@@ -260,6 +260,10 @@ def execute_actions(
     )
 
     stats = {"done": 0, "skipped": 0, "failed": 0, "suppressed": suppressed, "done_trash": 0}
+    # Rule -> target -> count, for the --notification-summary digest. Mirrors
+    # core/stream_executor.py's matches_by_rule_and_target: incremented as
+    # each pending action is read, regardless of whether it later succeeds.
+    matches_by_rule_and_target: dict[str, dict[str, int]] = {}
 
     if verbose and suppressed:
         logger.log(
@@ -1452,6 +1456,12 @@ def execute_actions(
             break
         for a_id, uid, folder, _raw_target, rule_name, _priority, _created_at, action_type, action_data in rows:
             target = _encode_mailbox_utf7(_raw_target) if _raw_target else _raw_target
+            digest_bucket = _raw_target if _raw_target else "(no action)"
+            digest_rule = rule_name or "(unnamed)"
+            matches_by_rule_and_target.setdefault(digest_rule, {})
+            matches_by_rule_and_target[digest_rule][digest_bucket] = (
+                matches_by_rule_and_target[digest_rule].get(digest_bucket, 0) + 1
+            )
             # Group by (folder, target, action_type) for batch processing
             key = (folder, target, action_type)
             if current_key is not None and key != current_key:
@@ -1490,6 +1500,7 @@ def execute_actions(
 
     timer.stop()
     timer.count = stats["done"]
+    stats["matches_by_rule_and_target"] = matches_by_rule_and_target
 
     # Build summary message
     summary_parts = [
