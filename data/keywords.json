@@ -6,7 +6,9 @@
     "Archive",
     "Hold",
     "Personal",
-    "Retain365",
-    "Retain30"
+    "Retain-7",
+    "Retain-30",
+    "Retain-90",
+    "Retain-365"
   ]
 }
