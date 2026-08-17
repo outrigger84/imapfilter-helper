@@ -641,6 +641,17 @@ def test_parser_rejects_per_folder_on_stream():
         parser.parse_args(["stream", "--per-folder"])
 
 
+def test_parser_accepts_rules_dir_global_option():
+    parser = cli.build_parser()
+    parsed = parser.parse_args(["--rules-dir", "rules-retention", "evaluate"])
+    assert parsed.rules_dir == Path("rules-retention")
+
+
+def test_build_default_config_applies_rules_override(tmp_path):
+    cfg = build_default_config(tmp_path, rules_override=tmp_path / "rules-retention")
+    assert cfg.paths.rules_dir == (tmp_path / "rules-retention").resolve()
+
+
 def test_mbox_import_parser_accepts_multiple_files_and_dirs():
     parser = cli.build_parser()
     parsed = parser.parse_args(["mbox-import", "a.mbox", "b.mbox", "some_dir"])

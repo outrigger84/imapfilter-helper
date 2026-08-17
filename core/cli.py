@@ -60,6 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to cache database (default: data/cache.db)",
     )
     parser.add_argument(
+        "--rules-dir",
+        type=Path,
+        help="Path to rules directory (default: rules/)",
+    )
+    parser.add_argument(
         "--no-gotify",
         action="store_true",
         help="Disable Gotify notifications for this run",
@@ -2420,10 +2425,11 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    # Build config with optional cache override
+    # Build config with optional cache/rules overrides
     cfg = build_default_config(
         base_dir=base_dir,
-        cache_override=getattr(args, "cache_file", None)
+        cache_override=getattr(args, "cache_file", None),
+        rules_override=getattr(args, "rules_dir", None),
     )
     _ensure_layout(cfg)
 
@@ -2523,6 +2529,10 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
         db.close()
         if notifier is not None:
             notifier.shutdown()
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised via imapfilter_helper.py
+    raise SystemExit(main())
 
 
 __all__ = [
