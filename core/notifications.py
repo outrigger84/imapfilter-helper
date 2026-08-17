@@ -197,6 +197,29 @@ def _rule_target_digest_lines(by_rule_target: dict) -> list[str]:
     return lines
 
 
+def _exec_summary_lines(context: dict, *, key_prefix: str = "") -> tuple[list[str], int]:
+    """Moved/Deleted/Failed/Skipped counts plus the rule/target breakdown,
+    shared by execute_summary, run_summary, and eval_execute_summary.
+
+    run_summary and eval_execute_summary log their execute-phase stats
+    flattened under an "exec_" prefix (to keep them alongside the
+    cache/evaluate stats in the same context dict) -- key_prefix lets those
+    two reuse this same renderer instead of duplicating it.
+    """
+    done = context.get(f"{key_prefix}done", 0)
+    done_trash = context.get(f"{key_prefix}done_trash", 0)
+    moved = max(done - done_trash, 0)
+    failed = context.get(f"{key_prefix}failed", 0)
+    skipped = context.get(f"{key_prefix}skipped", 0)
+    lines = [
+        f"📂 Moved: {moved}\n🗑️ Deleted: {done_trash}\n"
+        f"❌ Failed: {failed}\n⏭️ Skipped: {skipped}"
+    ]
+    by_rule_target: dict = context.get(f"{key_prefix}matches_by_rule_and_target", {})
+    lines.extend(_rule_target_digest_lines(by_rule_target))
+    return lines, failed
+
+
 class NotificationDispatcher:
     """Dispatch notifications based on event type."""
 
@@ -246,6 +269,7 @@ class NotificationDispatcher:
             "execute_action_failed": ("❌ Action Failed", "warn"),
             "execute_pending_count": ("⚙️ Executing Actions", "info"),
             "run_summary": ("🎉 Sync Complete", "success"),
+            "eval_execute_summary": ("🔄 Eval-Execute Complete", "success"),
             "stream_summary": ("🌊 Stream Complete", "success"),
             "cache_folder_done": ("📁 Folder Cached", "info"),
             "cache_summary": ("🗄️ Cache Complete", "success"),
@@ -340,14 +364,23 @@ class NotificationDispatcher:
             priority = 1
 
         elif message == "run_summary":
-            # NOTE: handle_run_all logs this with flattened exec_* keys, not
-            # a nested "stats" dict, so this has always rendered zeros. Not
-            # fixed here -- out of scope, left exactly as before.
-            stats = context.get("stats", {})
-            body = f"📊 Total: {stats.get('total', 0)} messages\n"
-            body += f"🎯 Matched: {stats.get('matched', 0)} rules\n"
-            body += f"✅ Executed: {stats.get('executed', 0)} actions"
-            priority = 2
+            folders = context.get("folders", 0)
+            messages = context.get("messages", 0)
+            matches = context.get("matches", 0)
+            exec_lines, failed = _exec_summary_lines(context, key_prefix="exec_")
+            lines = [f"🗂️ Folders: {folders}\n✉️ Messages: {messages}\n🎯 Matches: {matches}"]
+            lines.extend(exec_lines)
+            body = "\n".join(lines)
+            priority = 3 if failed > 0 else 2
+
+        elif message == "eval_execute_summary":
+            rules = context.get("rules", 0)
+            matches = context.get("matches", 0)
+            exec_lines, failed = _exec_summary_lines(context, key_prefix="exec_")
+            lines = [f"🧩 Rules: {rules}\n🎯 Matches: {matches}"]
+            lines.extend(exec_lines)
+            body = "\n".join(lines)
+            priority = 3 if failed > 0 else 2
 
         elif message == "stream_summary":
             # Only reached when summary_mode is False -- summary_mode
@@ -376,17 +409,7 @@ class NotificationDispatcher:
             priority = 2
 
         elif message == "execute_summary":
-            done = context.get("done", 0)
-            done_trash = context.get("done_trash", 0)
-            moved = max(done - done_trash, 0)
-            failed = context.get("failed", 0)
-            skipped = context.get("skipped", 0)
-            lines = [
-                f"📂 Moved: {moved}\n🗑️ Deleted: {done_trash}\n"
-                f"❌ Failed: {failed}\n⏭️ Skipped: {skipped}"
-            ]
-            by_rule_target: dict = context.get("matches_by_rule_and_target", {})
-            lines.extend(_rule_target_digest_lines(by_rule_target))
+            lines, failed = _exec_summary_lines(context)
             body = "\n".join(lines)
             priority = 3 if failed > 0 else 2
 

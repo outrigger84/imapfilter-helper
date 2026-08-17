@@ -204,6 +204,55 @@ def test_execute_summary_includes_rule_target_breakdown_like_phase_summary():
     assert "🗑️ → Deleted Messages: 2" in body
 
 
+def test_run_summary_reads_flattened_exec_keys_not_a_nested_stats_dict():
+    """Regression test: run_summary used to read context["stats"], but
+    handle_run_all logs flattened exec_* keys instead, so this notification
+    always rendered zeros. It should now report the real counts and, like
+    execute_summary, the per-rule/target breakdown."""
+    context = {
+        "folders": 5, "messages": 120, "matches": 9,
+        "exec_done": 7, "exec_done_trash": 3, "exec_failed": 1, "exec_skipped": 0,
+        "exec_matches_by_rule_and_target": {"Newsletters": {"Archive": 4}},
+    }
+
+    dispatcher, telegram = _dispatcher(summary_mode=False)
+    dispatcher.dispatch("INFO", "run_summary", context)
+
+    assert len(telegram.sent) == 1
+    _title, body, priority = telegram.sent[0]
+    assert "🗂️ Folders: 5" in body
+    assert "✉️ Messages: 120" in body
+    assert "🎯 Matches: 9" in body
+    assert "📂 Moved: 4" in body
+    assert "🗑️ Deleted: 3" in body
+    assert "❌ Failed: 1" in body
+    assert "🏷️ Newsletters" in body
+    assert "📂 → Archive: 4" in body
+    assert priority == 3  # bumped because failed > 0
+
+
+def test_eval_execute_summary_is_dispatched():
+    """eval_execute_summary was logged but missing from notify_events, so it
+    was silently never sent. It should now fire with the same digest style
+    as execute_summary/run_summary."""
+    context = {
+        "rules": 12, "matches": 4,
+        "exec_done": 4, "exec_done_trash": 0, "exec_failed": 0, "exec_skipped": 0,
+        "exec_matches_by_rule_and_target": {"Spam Ring A": {"Deleted Messages": 4}},
+    }
+
+    dispatcher, telegram = _dispatcher(summary_mode=False)
+    dispatcher.dispatch("INFO", "eval_execute_summary", context)
+
+    assert len(telegram.sent) == 1
+    _title, body, priority = telegram.sent[0]
+    assert "🧩 Rules: 12" in body
+    assert "🎯 Matches: 4" in body
+    assert "📂 Moved: 4" in body
+    assert "🏷️ Spam Ring A" in body
+    assert priority == 2  # no failures
+
+
 def test_no_notifications_means_no_notifier_no_dispatch():
     """--no-notifications leaves the notifier unconstructed entirely (tested
     at the core/cli.py level) -- here we just confirm summary_mode alone,
