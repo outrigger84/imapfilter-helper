@@ -478,29 +478,52 @@ class TestEdgeCases:
         conflicts = detector.detect_all_conflicts()
         assert isinstance(conflicts, list)
 
-    def test_rules_with_keyword_actions(self):
-        """Test handling rules with keyword actions (non-move)."""
+    def test_rules_with_no_move_actions_dont_conflict(self):
+        """Rules whose actions never produce a move (e.g. an age-gated
+        bracket with an empty "do") shouldn't create move conflicts."""
         rules = [
             {
                 "name": "Rule 1",
                 "priority": 100,
                 "conditions": {"all": [{"header": "from", "contains": "example.com"}]},
-                "actions": [{"type": "set_keywords", "keywords": ["Retain365"]}],
+                "actions": [{"age_days_lt": 1, "do": []}],
             },
             {
                 "name": "Rule 2",
                 "priority": 100,
                 "conditions": {"all": [{"header": "from", "contains": "test"}]},
-                "actions": [{"type": "set_keywords", "keywords": ["Important"]}],
+                "actions": [{"age_days_lt": 1, "do": []}],
             },
         ]
 
         detector = ConflictDetector(rules)
         conflicts = detector.detect_all_conflicts()
-        # Keyword actions shouldn't create move conflicts
         assert not any(
             c.type == ConflictType.PRIORITY_CONFLICT for c in conflicts
         )
+
+    def test_conflict_detector_sees_through_age_brackets(self):
+        """A move target hidden inside an age-gated bracket must still be
+        seen by conflict detection (regression: previously such rules were
+        invisible to _has_move_action/_get_primary_target)."""
+        rules = [
+            {
+                "name": "Rule 1",
+                "priority": 100,
+                "conditions": {"all": [{"header": "from", "contains": "example.com"}]},
+                "actions": [{"age_days_gt": 30, "do": [{"type": "move", "target": "A"}]}],
+            },
+            {
+                "name": "Rule 2",
+                "priority": 100,
+                "conditions": {"all": [{"header": "from", "contains": "example.com"}]},
+                "actions": [{"age_days_gt": 30, "do": [{"type": "move", "target": "B"}]}],
+            },
+        ]
+
+        detector = ConflictDetector(rules)
+        conflicts = detector.detect_all_conflicts()
+        assert any(c.type == ConflictType.PRIORITY_CONFLICT for c in conflicts)
 
 
 if __name__ == "__main__":

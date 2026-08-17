@@ -229,35 +229,9 @@ def _extract_message_metadata(data: str) -> Tuple[dict, List[str], Optional[date
     return (header_dict, flags_list, date_object)
 
 
-def _evaluate_flag_condition(flags: List[str], condition: dict) -> bool:
-    """
-    Evaluate flag-based conditions against message flags.
-
-    Supports:
-    - has_keyword/has_flag: True if keyword exists in flags
-    - lacks_keyword/lacks_flag: True if keyword does NOT exist in flags
-
-    Args:
-        flags: List of IMAP flags/keywords for the message
-        condition: Condition dict with flag-related keys
-
-    Returns:
-        True if condition matches, False otherwise
-    """
-    # Check for has_keyword or has_flag
-    has_keyword = condition.get("has_keyword") or condition.get("has_flag")
-    if has_keyword:
-        return has_keyword in flags
-
-    # Check for lacks_keyword or lacks_flag
-    lacks_keyword = condition.get("lacks_keyword") or condition.get("lacks_flag")
-    if lacks_keyword:
-        return lacks_keyword not in flags
-
-    return False
-
-
-def _evaluate_age_condition(date: Optional[datetime], condition: dict) -> bool:
+def _evaluate_age_condition(
+    date: Optional[datetime], condition: dict, now: Optional[datetime] = None
+) -> bool:
     """
     Evaluate age-based conditions against message date.
 
@@ -269,6 +243,11 @@ def _evaluate_age_condition(date: Optional[datetime], condition: dict) -> bool:
     Args:
         date: Message date as datetime object (timezone-aware)
         condition: Condition dict with age-related keys
+        now: Reference "current time" to measure age against. Defaults to
+            datetime.now(timezone.utc) if not supplied -- callers evaluating
+            many conditions for the same message should compute this once
+            and pass it in, so condition-level and action-level age checks
+            can't disagree by a few microseconds right at a day boundary.
 
     Returns:
         True if condition matches, False if date is None or condition doesn't match
@@ -277,7 +256,7 @@ def _evaluate_age_condition(date: Optional[datetime], condition: dict) -> bool:
         return False
 
     # Ensure we're working with timezone-aware datetimes
-    now = datetime.now(timezone.utc)
+    now = now if now is not None else datetime.now(timezone.utc)
     msg_date = date
     if msg_date.tzinfo is None:
         msg_date = msg_date.replace(tzinfo=timezone.utc)
@@ -362,6 +341,7 @@ def _evaluate_condition_node(
     node: Any,
     flags: Optional[List[str]] = None,
     date: Optional[datetime] = None,
+    now: Optional[datetime] = None,
 ) -> bool:
     """
     Evaluate a condition or logical group against the header map.
@@ -371,6 +351,8 @@ def _evaluate_condition_node(
         node: Condition node (dict, list, or other)
         flags: Optional list of IMAP flags/keywords
         date: Optional message date as datetime
+        now: Reference "current time" for age comparisons (see
+            _evaluate_age_condition)
 
     Returns:
         True if condition matches, False otherwise
@@ -378,25 +360,17 @@ def _evaluate_condition_node(
 
     if isinstance(node, list):
         # Implicit AND for backward compatibility with legacy rule format.
-        return all(_evaluate_condition_node(header, item, flags, date) for item in node)
+        return all(_evaluate_condition_node(header, item, flags, date, now) for item in node)
 
     if isinstance(node, dict):
         matched = False
-
-        # Check for flag conditions
-        if flags is not None and any(
-            key in node for key in ["has_keyword", "has_flag", "lacks_keyword", "lacks_flag"]
-        ):
-            matched = True
-            if not _evaluate_flag_condition(flags, node):
-                return False
 
         # Check for age conditions
         if date is not None and any(
             key in node for key in ["age_days_gt", "age_days_lt", "age_days_eq"]
         ):
             matched = True
-            if not _evaluate_age_condition(date, node):
+            if not _evaluate_age_condition(date, node, now):
                 return False
 
         # Check for NOT wrapper
@@ -404,7 +378,7 @@ def _evaluate_condition_node(
             matched = True
             negated_condition = node.get("not")
             # Evaluate the negated condition and invert the result
-            if _evaluate_condition_node(header, negated_condition, flags, date):
+            if _evaluate_condition_node(header, negated_condition, flags, date, now):
                 return False
             # If we get here, negated condition was False, so NOT result is True
             # Continue evaluating other conditions in this node
@@ -414,7 +388,7 @@ def _evaluate_condition_node(
             candidates = node.get("all")
             if not isinstance(candidates, list):
                 candidates = [candidates]
-            if not all(_evaluate_condition_node(header, item, flags, date) for item in candidates):
+            if not all(_evaluate_condition_node(header, item, flags, date, now) for item in candidates):
                 return False
 
         if "any" in node:
@@ -425,7 +399,7 @@ def _evaluate_condition_node(
             # Empty OR group should never match.
             if not candidates:
                 return False
-            if not any(_evaluate_condition_node(header, item, flags, date) for item in candidates):
+            if not any(_evaluate_condition_node(header, item, flags, date, now) for item in candidates):
                 return False
 
         if matched:
@@ -441,6 +415,7 @@ def conditions_match(
     conditions: Any,
     flags: Optional[List[str]] = None,
     date: Optional[datetime] = None,
+    now: Optional[datetime] = None,
 ) -> bool:
     """
     Return True if the header satisfies the supplied condition tree.
@@ -450,6 +425,7 @@ def conditions_match(
         conditions: Condition tree to evaluate
         flags: Optional list of IMAP flags/keywords
         date: Optional message date as datetime
+        now: Reference "current time" for age comparisons
 
     Returns:
         True if conditions match, False otherwise
@@ -457,7 +433,7 @@ def conditions_match(
 
     if not conditions:
         return False
-    return _evaluate_condition_node(header, conditions, flags, date)
+    return _evaluate_condition_node(header, conditions, flags, date, now)
 
 
 def find_matching_rule(
@@ -465,6 +441,7 @@ def find_matching_rule(
     rules: Sequence[dict],
     flags: Optional[List[str]] = None,
     date: Optional[datetime] = None,
+    now: Optional[datetime] = None,
 ) -> dict | None:
     """
     Find the first matching rule for a message header.
@@ -473,22 +450,192 @@ def find_matching_rule(
     lower priority number = higher precedence, matching evaluate_rules).
     Returns the first matching rule or None if no rules match.
 
+    Note: this only evaluates a rule's `conditions`. It does not know about
+    age-gated action brackets (see expand_actions_for_age) -- a caller that
+    cares whether a matched rule's actions actually produce anything for a
+    given message's age must additionally call expand_actions_for_age on the
+    returned rule's actions and handle a `bracket_only_no_match` result by
+    retrying against the remaining lower-priority rules.
+
     Args:
         header: Parsed header dictionary with lowercase keys
         rules: List of rule dictionaries, sorted by priority ascending
         flags: Optional list of IMAP flags/keywords for the message.
-               Without this, has_keyword/lacks_keyword conditions never match.
         date: Optional message date. Without this, age_days_* conditions
               never match.
+        now: Reference "current time" for age comparisons
 
     Returns:
         The first matching rule dict, or None if no match
     """
     for rule in rules:
         conditions = rule.get("conditions")
-        if conditions_match(header, conditions, flags=flags, date=date):
+        if conditions_match(header, conditions, flags=flags, date=date, now=now):
             return rule
     return None
+
+
+_ACTION_AGE_LOWER_KEYS = ("age_days_gt", "age_days_gte")
+_ACTION_AGE_UPPER_KEYS = ("age_days_lt", "age_days_lte")
+_ACTION_AGE_KEYS = _ACTION_AGE_LOWER_KEYS + _ACTION_AGE_UPPER_KEYS + ("age_days_eq",)
+
+
+def _is_age_bracket(item: Any) -> bool:
+    """True if an actions-list item is an age-gated bracket rather than a
+    plain action -- i.e. it has a "do" key plus at least one age key."""
+    return isinstance(item, dict) and "do" in item and any(key in item for key in _ACTION_AGE_KEYS)
+
+
+def _bracket_gate_matches(age_days: Optional[int], bracket: dict) -> bool:
+    """Evaluate an age-gated action bracket's condition.
+
+    Unlike _evaluate_age_condition (which only ever checks the first age key
+    present on a dict, by design/legacy behavior), this ANDs together every
+    age key present, so a bracket can combine one lower-bound
+    (age_days_gt/age_days_gte) and one upper-bound (age_days_lt/age_days_lte)
+    key to express a bounded band. age_days_eq is exclusive of the others
+    (the rule validator rejects combining it with a bound).
+    """
+    if age_days is None:
+        return False
+
+    if "age_days_eq" in bracket:
+        threshold = bracket["age_days_eq"]
+        return isinstance(threshold, (int, float)) and age_days == threshold
+
+    matched_any = False
+    if "age_days_gt" in bracket:
+        threshold = bracket["age_days_gt"]
+        if not (isinstance(threshold, (int, float)) and age_days > threshold):
+            return False
+        matched_any = True
+    if "age_days_gte" in bracket:
+        threshold = bracket["age_days_gte"]
+        if not (isinstance(threshold, (int, float)) and age_days >= threshold):
+            return False
+        matched_any = True
+    if "age_days_lt" in bracket:
+        threshold = bracket["age_days_lt"]
+        if not (isinstance(threshold, (int, float)) and age_days < threshold):
+            return False
+        matched_any = True
+    if "age_days_lte" in bracket:
+        threshold = bracket["age_days_lte"]
+        if not (isinstance(threshold, (int, float)) and age_days <= threshold):
+            return False
+        matched_any = True
+
+    return matched_any
+
+
+def expand_actions_for_age(
+    actions: Sequence[dict],
+    msg_date: Optional[datetime],
+    now: datetime,
+) -> tuple[list[dict], bool]:
+    """Flatten a rule's actions list, resolving age-gated brackets.
+
+    A plain action item (no age key) always fires unconditionally. A bracket
+    item (age key + "do") only fires if no earlier bracket in this same list
+    already fired (first-bracket-wins among brackets, mirroring the outer
+    rule list's first-match-wins) and its age gate is satisfied; its "do"
+    list's items are then spliced into the result in place of the bracket.
+
+    Returns (expanded_actions, bracket_only_no_match). bracket_only_no_match
+    is True iff the actions list contains at least one bracket, no bracket's
+    gate was satisfied, and no plain (unconditional) action was present
+    either -- the caller should then treat the rule as not having matched
+    this email at all (fall through to the next rule), exactly as if
+    `conditions` hadn't matched.
+    """
+    if not any(_is_age_bracket(item) for item in actions if isinstance(item, dict)):
+        # No brackets at all -- preserve today's behavior unconditionally,
+        # including a genuinely empty/absent actions list (a silent no-op
+        # match, not a fall-through).
+        return list(actions), False
+
+    age_days: Optional[int] = None
+    if msg_date is not None:
+        aware_date = msg_date if msg_date.tzinfo is not None else msg_date.replace(tzinfo=timezone.utc)
+        age_days = (now - aware_date).days
+
+    expanded: list[dict] = []
+    bracket_fired = False
+    has_plain = False
+    for item in actions:
+        if not isinstance(item, dict):
+            continue
+        if _is_age_bracket(item):
+            if bracket_fired:
+                continue
+            if _bracket_gate_matches(age_days, item):
+                bracket_fired = True
+                do_items = item.get("do") or []
+                expanded.extend(a for a in do_items if isinstance(a, dict))
+        else:
+            has_plain = True
+            expanded.append(item)
+
+    bracket_only_no_match = not bracket_fired and not has_plain
+    return expanded, bracket_only_no_match
+
+
+def describe_age_bracket(bracket: dict) -> str:
+    """Human-readable description of an age-gated bracket's age condition,
+    e.g. "age > 30 days" or "age >= 30 days and age < 90 days"."""
+    labels = {
+        "age_days_gt": "age > {:g} days",
+        "age_days_gte": "age >= {:g} days",
+        "age_days_lt": "age < {:g} days",
+        "age_days_lte": "age <= {:g} days",
+        "age_days_eq": "age = {:g} days",
+    }
+    parts = [labels[k].format(bracket[k]) for k in labels if k in bracket]
+    return " and ".join(parts)
+
+
+def find_fired_bracket(
+    actions: Sequence[dict], msg_date: Optional[datetime], now: datetime
+) -> Optional[dict]:
+    """Return the age-gated bracket (raw dict) that fired for this actions
+    list and message age, or None if no bracket fired -- e.g. a plain-only
+    rule, or (if called without first checking expand_actions_for_age's
+    bracket_only_no_match) a coverage gap. Mirrors the first-bracket-wins
+    iteration in expand_actions_for_age; intended for describing *which*
+    bracket was responsible for a match already known to have succeeded
+    (e.g. for notifications/logging), not for deciding whether it matched.
+    """
+    age_days: Optional[int] = None
+    if msg_date is not None:
+        aware_date = msg_date if msg_date.tzinfo is not None else msg_date.replace(tzinfo=timezone.utc)
+        age_days = (now - aware_date).days
+
+    for item in actions:
+        if isinstance(item, dict) and _is_age_bracket(item):
+            if _bracket_gate_matches(age_days, item):
+                return item
+    return None
+
+
+def all_possible_move_targets(actions: Sequence[dict]) -> set[str]:
+    """Every folder a rule's actions could ever move a message to, across
+    all possible age outcomes -- ignores age gating entirely. For reporting/
+    conflict-analysis consumers ("what folder(s) can rule X move mail to")
+    rather than per-message evaluation; use expand_actions_for_age for that.
+    """
+    targets: set[str] = set()
+
+    def _collect(items: Sequence[dict]) -> None:
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if _is_age_bracket(item):
+                _collect(item.get("do") or [])
+            elif item.get("type", "move") == "move" and item.get("target"):
+                targets.add(item["target"])
+
+    _collect(actions)
+    return targets
 
 
 def evaluate_rules(
@@ -557,6 +704,7 @@ def evaluate_rules(
     folder_match_counts: dict[str, int] = {}
     rule_match_counts: dict[str, int] = {}
     action_type_counts: dict[str, int] = {}
+    matches_by_rule_and_target: dict[str, dict[str, int]] = {}
     # Header rows to drop (same-folder no-op moves). Deleting from `headers`
     # while `cur` is still iterating it is undefined behavior in SQLite, so
     # deletions are collected here and applied after the scan completes.
@@ -646,6 +794,7 @@ def evaluate_rules(
                 continue
 
             header, flags, date = _extract_message_metadata(data)
+            now = datetime.now(timezone.utc)
             current_folder_count += 1
             if msgs_bar is not None:
                 msgs_bar.update(1)
@@ -667,103 +816,124 @@ def evaluate_rules(
             email_matched = False
             for rule in rule_list:
                 conds = rule.get("conditions")
-                if conditions_match(header, conds, flags=flags, date=date):
-                    email_matched = True
-                    rule_name = rule.get("name") or "(unnamed)"
-                    total_matches += 1
-                    folder_match_counts[folder] = folder_match_counts.get(folder, 0) + 1
-                    rule_match_counts[rule_name] = rule_match_counts.get(rule_name, 0) + 1
+                if not conditions_match(header, conds, flags=flags, date=date, now=now):
+                    continue
 
-                    # Support both "action" (single) and "actions" (array)
-                    actions = rule.get("actions", [])
-                    if not actions and "action" in rule:
-                        actions = [rule.get("action")]
+                rule_name = rule.get("name") or "(unnamed)"
 
-                    base_priority = int(rule.get("priority", 100))
+                # Support both "action" (single) and "actions" (array)
+                actions = rule.get("actions", [])
+                if not actions and "action" in rule:
+                    actions = [rule.get("action")]
 
-                    # Create action entries with effective priorities
-                    for action_index, action in enumerate(actions):
-                        action_type = action.get("type", "move")
-                        target = action.get("target", "")
+                expanded_actions, bracket_only_no_match = expand_actions_for_age(actions, date, now)
+                if bracket_only_no_match:
+                    # Conditions matched, but none of this rule's age
+                    # brackets covered this message's age, and it has no
+                    # unconditional actions either -- treat this rule as not
+                    # having matched at all and fall through to the next
+                    # (lower-priority) rule.
+                    continue
 
-                        # Skip redundant same-folder move actions
-                        if action_type == "move" and target and folder == target:
-                            logger.log(
-                                "INFO",
-                                "skipped_same_folder_move",
-                                {
-                                    "rule": rule.get("name"),
-                                    "folder": folder,
-                                    "uid": uid,
-                                    "target": target,
-                                },
-                                console=f"⊘ {rule_name}: {folder}/{uid} already in target folder {target}",
-                            )
-                            # Remove from cache since the email is already in the target location
-                            # (deferred until after the scan — see stale_header_keys above)
-                            stale_header_keys.append((folder, uid))
-                            continue
+                email_matched = True
+                total_matches += 1
+                folder_match_counts[folder] = folder_match_counts.get(folder, 0) + 1
+                rule_match_counts[rule_name] = rule_match_counts.get(rule_name, 0) + 1
 
-                        # Calculate effective priority to ensure execution order:
-                        # - Keywords (1000) execute before moves (500) within the same rule
-                        # - Lower rule priority number wins (priority 10 beats priority 50)
-                        # - Invert base_priority so lower numbers yield higher effective_priority
-                        # - effective_priority = (1000 - rule_priority) * 10000 + type_priority - action_index
-                        type_priority = 1000 if action_type in ("set_keywords", "remove_keywords") else 500
-                        effective_priority = (1000 - base_priority) * 10000 + type_priority - action_index
+                base_priority = int(rule.get("priority", 100))
 
-                        # Serialize action data (keywords, etc.) as JSON if present
-                        action_data = None
-                        if action_type in ("set_keywords", "remove_keywords"):
-                            keywords = action.get("keywords", [])
-                            if keywords:
-                                action_data = json.dumps({"keywords": keywords})
+                # Which age bracket (if any) actually fired, so notifications
+                # can say e.g. "age >= 30 days" instead of just "moved".
+                fired_bracket = find_fired_bracket(actions, date, now)
+                age_gate_desc = describe_age_bracket(fired_bracket) if fired_bracket else None
 
-                        db.execute(
-                            "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at, action_type, action_data) "
-                            "VALUES (?,?,?,?,?,?,?,?,?)",
-                            (
-                                uid,
-                                folder,
-                                rule.get("name"),
-                                target,
-                                effective_priority,
-                                "pending" if not dry_run else "simulated",
-                                now_iso(),
-                                action_type,
-                                action_data,
-                            ),
-                        )
-                        action_type_counts[action_type] = action_type_counts.get(action_type, 0) + 1
+                if not expanded_actions:
+                    # A bracket fired with an empty "do" (deliberate no-op,
+                    # e.g. "stays in INBOX today") -- still a real decision,
+                    # so it belongs in the digest even though the action loop
+                    # below never runs for it.
+                    matches_by_rule_and_target.setdefault(rule_name, {})
+                    matches_by_rule_and_target[rule_name]["(no action)"] = (
+                        matches_by_rule_and_target[rule_name].get("(no action)", 0) + 1
+                    )
 
-                        # Log verbose output for each action
-                        console_msg: str | None = None
-                        if verbose:
-                            if action_type == "move":
-                                console_msg = f"✅ {rule_name} matched {folder}/{uid} → {target}"
-                            elif action_type in ("set_keywords", "remove_keywords"):
-                                keywords = action.get("keywords", [])
-                                console_msg = f"✅ {rule_name} matched {folder}/{uid} ({action_type}: {keywords})"
-                            else:
-                                console_msg = f"✅ {rule_name} matched {folder}/{uid} ({action_type})"
+                # Create action entries with effective priorities
+                for action_index, action in enumerate(expanded_actions):
+                    action_type = action.get("type", "move")
+                    target = action.get("target", "")
+
+                    matches_by_rule_and_target.setdefault(rule_name, {})
+                    matches_by_rule_and_target[rule_name][target] = (
+                        matches_by_rule_and_target[rule_name].get(target, 0) + 1
+                    )
+
+                    # Skip redundant same-folder move actions
+                    if action_type == "move" and target and folder == target:
                         logger.log(
                             "INFO",
-                            "rule_match",
+                            "skipped_same_folder_move",
                             {
                                 "rule": rule.get("name"),
-                                "priority": base_priority,
-                                "effective_priority": effective_priority,
                                 "folder": folder,
                                 "uid": uid,
-                                "action_type": action_type,
                                 "target": target,
-                                "dry_run": dry_run,
                             },
-                            console=console_msg,
+                            console=f"⊘ {rule_name}: {folder}/{uid} already in target folder {target}",
                         )
+                        # Remove from cache since the email is already in the target location
+                        # (deferred until after the scan — see stale_header_keys above)
+                        stale_header_keys.append((folder, uid))
+                        continue
 
-                    # First-match-wins: stop evaluating further rules for this email.
-                    break
+                    # Calculate effective priority to ensure execution order:
+                    # - Lower rule priority number wins (priority 10 beats priority 50)
+                    # - Invert base_priority so lower numbers yield higher effective_priority
+                    # - effective_priority = (1000 - rule_priority) * 10000 - action_index
+                    effective_priority = (1000 - base_priority) * 10000 - action_index
+
+                    db.execute(
+                        "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at, action_type, action_data) "
+                        "VALUES (?,?,?,?,?,?,?,?,?)",
+                        (
+                            uid,
+                            folder,
+                            rule.get("name"),
+                            target,
+                            effective_priority,
+                            "pending" if not dry_run else "simulated",
+                            now_iso(),
+                            action_type,
+                            None,
+                        ),
+                    )
+                    action_type_counts[action_type] = action_type_counts.get(action_type, 0) + 1
+
+                    # Log verbose output for each action
+                    console_msg: str | None = None
+                    if verbose:
+                        if action_type == "move":
+                            console_msg = f"✅ {rule_name} matched {folder}/{uid} → {target}"
+                        else:
+                            console_msg = f"✅ {rule_name} matched {folder}/{uid} ({action_type})"
+                    logger.log(
+                        "INFO",
+                        "rule_match",
+                        {
+                            "rule": rule.get("name"),
+                            "priority": base_priority,
+                            "effective_priority": effective_priority,
+                            "folder": folder,
+                            "uid": uid,
+                            "action_type": action_type,
+                            "target": target,
+                            "dry_run": dry_run,
+                            "age_gate": age_gate_desc,
+                        },
+                        console=console_msg,
+                    )
+
+                # First-match-wins: stop evaluating further rules for this email.
+                break
 
             if email_matched:
                 matched_email_count += 1
@@ -831,6 +1001,7 @@ def evaluate_rules(
             "matches_by_folder": folder_match_counts,
             "matches_by_rule": rule_match_counts,
             "actions_by_type": action_type_counts,
+            "matches_by_rule_and_target": matches_by_rule_and_target,
         },
         console=summary_console,
     )

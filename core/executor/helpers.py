@@ -6,6 +6,10 @@ import imaplib
 import sqlite3
 from typing import Iterable
 
+# Folder names (lowercased) treated as "trash-like" destinations -- used to
+# split move counts into "moved" vs "deleted" in summary notifications.
+TRASH_LIKE_TARGETS = ("deleted messages", "trash", "[gmail]/trash", "junk")
+
 
 def _encode_mailbox_utf7(mailbox: str) -> str:
     """Encode a mailbox name to IMAP modified UTF-7 (mUTF-7, RFC 3501).

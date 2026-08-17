@@ -268,55 +268,6 @@ class CacheQueryEngine:
 
         return counter.most_common(limit)
 
-    def extract_unique_keywords(self, limit: int = 500, min_count: int = 1) -> List[Tuple[str, int]]:
-        """Extract unique keywords/flags from cached messages with counts.
-
-        Args:
-            limit: Maximum number of unique keywords to return (default: 500)
-            min_count: Minimum message count to include keyword (default: 1)
-
-        Returns:
-            List of (keyword, count) tuples, sorted by count DESC, then by name
-
-        Example:
-            >>> engine.extract_unique_keywords(limit=50)
-            [("\\Seen", 1234), ("Important", 456), ("Work", 123), ...]
-        """
-        cursor = self.conn.cursor()
-        total_count = self._get_total_count()
-        cursor.execute("SELECT data FROM headers WHERE data IS NOT NULL")
-
-        progress_bar = tqdm(
-            cursor,
-            total=total_count,
-            desc="🏷️  Extracting keywords",
-            unit="msg",
-            dynamic_ncols=True,
-            disable=not self.show_progress,
-        )
-
-        counter = Counter()
-        for row in progress_bar:
-            data = row[0] if row else ""
-            try:
-                header_data = json.loads(data) if isinstance(data, str) else data
-                flags = header_data.get("flags", [])
-                if isinstance(flags, list):
-                    for flag in flags:
-                        if flag:  # Skip empty strings
-                            counter[flag] += 1
-            except (json.JSONDecodeError, TypeError, KeyError):
-                continue
-
-        # Filter by min_count and sort by count DESC, then name ASC
-        results = [
-            (keyword, count)
-            for keyword, count in counter.most_common()
-            if count >= min_count
-        ]
-
-        return results[:limit]
-
     def count_from_contains(self, pattern: str) -> int:
         """
         Count messages where From address contains the given pattern (case-insensitive).

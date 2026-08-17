@@ -323,16 +323,17 @@ class TestNotWrapper:
         }
         assert conditions_match(test_header, conditions) is True
 
-    def test_not_wrapper_with_flags(self):
-        """Test NOT wrapper with flag conditions."""
+    def test_not_wrapper_with_age(self):
+        """Test NOT wrapper with age conditions."""
+        from datetime import datetime, timedelta, timezone
+
         header = _parse_header_map("From: test@example.com\n\n")
-        flags = ["\\Seen", "important"]
+        old_date = datetime.now(timezone.utc) - timedelta(days=400)
+        recent_date = datetime.now(timezone.utc) - timedelta(days=5)
 
-        conditions = {"not": {"has_keyword": "\\Flagged"}}
-        assert conditions_match(header, conditions, flags=flags) is True
-
-        conditions = {"not": {"has_keyword": "\\Seen"}}
-        assert conditions_match(header, conditions, flags=flags) is False
+        conditions = {"not": {"age_days_gt": 365}}
+        assert conditions_match(header, conditions, date=recent_date) is True
+        assert conditions_match(header, conditions, date=old_date) is False
 
     def test_not_wrapper_nested_in_all(self, test_header):
         """Test NOT wrapper inside ALL group (typical use case)."""

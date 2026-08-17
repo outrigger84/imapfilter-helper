@@ -108,7 +108,7 @@ class ConditionAnalyzer:
             return conditions
 
         # If this is a simple condition (has operator like 'contains', 'equals')
-        if any(op in node for op in ("contains", "equals", "regex", "not_contains", "not_equals", "not_regex", "has_keyword", "lacks_keyword", "age_days_gt", "age_days_lt", "age_days_eq")):
+        if any(op in node for op in ("contains", "equals", "regex", "not_contains", "not_equals", "not_regex", "age_days_gt", "age_days_lt", "age_days_eq")):
             conditions.append(node)
             return conditions
 
@@ -235,11 +235,7 @@ class ConditionAnalyzer:
             # Only assume overlap if both are negations or if the non-negation is very general
             return val1_lower == val2_lower or val1_lower in val2_lower or val2_lower in val1_lower
 
-        # Flag/age conditions - can overlap if not contradictory
-        if op1 in ("has_keyword", "lacks_keyword"):
-            # Same keyword operation might not overlap
-            return val1_lower != val2_lower or op1 == op2
-
+        # Age conditions - can overlap if not contradictory
         if op1 in ("age_days_gt", "age_days_lt", "age_days_eq"):
             # Age conditions can overlap unless they're strict contradictions
             return True  # Conservative approach
@@ -823,7 +819,8 @@ class ConflictDetector:
         """Check if two rules have conflicting move targets.
 
         Only rules with move actions can conflict.
-        Rules with only keyword/flag actions don't conflict.
+        Rules with no move actions at all (e.g. an age-gated bracket whose
+        every "do" list is empty) don't conflict.
 
         Args:
             rule1: First rule
@@ -847,7 +844,13 @@ class ConflictDetector:
         return target1 != target2
 
     def _get_primary_target(self, rule: dict) -> Optional[str]:
-        """Get the primary move target for a rule.
+        """Get a representative move target for a rule.
+
+        Sees through age-gated action brackets via all_possible_move_targets
+        (a bracket rule may have more than one possible target depending on
+        message age; this returns one deterministically, for comparison
+        purposes -- callers wanting the full set should use
+        all_possible_move_targets directly).
 
         Args:
             rule: Rule dictionary
@@ -855,18 +858,18 @@ class ConflictDetector:
         Returns:
             Target folder name or None
         """
+        from core.rule_engine import all_possible_move_targets
+
         actions = rule.get("actions", [])
         if not actions:
             return None
 
-        for action in actions:
-            if isinstance(action, dict) and action.get("type") == "move":
-                return action.get("target")
-
-        return None
+        targets = all_possible_move_targets(actions)
+        return min(targets) if targets else None
 
     def _has_move_action(self, rule: dict) -> bool:
-        """Check if a rule has a move action.
+        """Check if a rule has a move action (including inside age-gated
+        action brackets).
 
         Args:
             rule: Rule dictionary
@@ -874,11 +877,10 @@ class ConflictDetector:
         Returns:
             True if rule has move action
         """
+        from core.rule_engine import all_possible_move_targets
+
         actions = rule.get("actions", [])
-        for action in actions:
-            if isinstance(action, dict) and action.get("type") == "move":
-                return True
-        return False
+        return bool(all_possible_move_targets(actions))
 
     def _determine_severity(self, overlap_pct: float, affected_count: Optional[int]) -> ConflictSeverity:
         """Determine conflict severity.

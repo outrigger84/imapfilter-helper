@@ -4,6 +4,7 @@ from __future__ import annotations
 import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from email.header import decode_header
 from pathlib import Path
 from typing import Optional
@@ -12,7 +13,8 @@ from tqdm import tqdm
 
 from core.rule_engine import (
     _extract_message_metadata,
-    find_matching_rule,
+    conditions_match,
+    expand_actions_for_age,
     load_rules,
 )
 
@@ -204,11 +206,28 @@ class RuleCoverageAnalyzer:
         print(f"🔍 Analyzing {total_count:,} messages...")
         for folder, uid, data in tqdm(all_rows, desc="Coverage analysis", unit="msg"):
             # Parse header, flags, and date from the cached payload. Flags and
-            # date must be supplied or has_keyword/age_days_* rules never match.
+            # date must be supplied or age_days_* rules never match.
             header, flags, date = _extract_message_metadata(data)
+            now = datetime.now(timezone.utc)
 
-            # Find matching rule
-            matching_rule = find_matching_rule(header, rules, flags=flags, date=date)
+            # Find matching rule. A rule whose conditions match but whose
+            # age-gated action brackets don't cover this message's age (and
+            # have no unconditional action either) doesn't count as covering
+            # it -- fall through to the next rule, matching evaluate_rules.
+            matching_rule = None
+            for candidate in rules:
+                if not conditions_match(
+                    header, candidate.get("conditions"), flags=flags, date=date, now=now
+                ):
+                    continue
+                actions = candidate.get("actions", [])
+                if not actions and "action" in candidate:
+                    actions = [candidate["action"]]
+                _expanded, bracket_only_no_match = expand_actions_for_age(actions, date, now)
+                if bracket_only_no_match:
+                    continue
+                matching_rule = candidate
+                break
 
             if matching_rule:
                 covered_count += 1

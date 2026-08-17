@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import imaplib
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
@@ -11,7 +12,8 @@ from tqdm import tqdm
 from core.backup import backup_messages
 from core.logging_utils import JsonLogger, PhaseTimer
 from core.rule_engine import (
-    find_matching_rule,
+    conditions_match,
+    expand_actions_for_age,
     _parse_header_map,
     _parse_header_date,
     _parse_internaldate,
@@ -261,6 +263,11 @@ def stream_execute(
 
     stats = {"done": 0, "skipped": 0, "failed": 0, "matched": 0}
     folder_move_counts: dict[str, int] = {}
+    # Rule -> target -> count, for the --notification-summary digest. Mirrors
+    # core/rule_engine.py's matches_by_rule_and_target: incremented as soon as
+    # a rule's decision is known, regardless of whether the move is actually
+    # performed (e.g. a same-folder no-op still counts as a real decision).
+    matches_by_rule_and_target: dict[str, dict[str, int]] = {}
     current_folder: str | None = None
     folder_open = False
     pending_expunge = False  # True when ≥1 COPY+STORE completed; flushed at folder boundary
@@ -302,11 +309,39 @@ def stream_execute(
             header = _parse_header_map(msg.header_text)
 
             # Find matching rule. Flags and date must be supplied here or
-            # has_keyword/lacks_keyword and age_days_* conditions never match.
+            # age_days_* conditions never match. A rule whose conditions
+            # match but whose age-gated action brackets don't cover this
+            # message's age (and have no unconditional action either) is
+            # treated as not-matched, falling through to the next
+            # lower-priority rule -- find_matching_rule only knows about
+            # `conditions`, so that fallthrough is implemented here rather
+            # than inside it.
             msg_date = _parse_internaldate(msg.internaldate)
             if msg_date is None:
                 msg_date = _parse_header_date(header.get("date"))
-            matching_rule = find_matching_rule(header, sorted_rules, flags=msg.flags, date=msg_date)
+            now = datetime.now(timezone.utc)
+
+            matching_rule = None
+            actions: list[dict] = []
+            for candidate in sorted_rules:
+                if not conditions_match(
+                    header, candidate.get("conditions"), flags=msg.flags, date=msg_date, now=now
+                ):
+                    continue
+
+                candidate_actions = candidate.get("actions", [])
+                if not candidate_actions and "action" in candidate:
+                    candidate_actions = [candidate["action"]]
+
+                expanded_actions, bracket_only_no_match = expand_actions_for_age(
+                    candidate_actions, msg_date, now
+                )
+                if bracket_only_no_match:
+                    continue
+
+                matching_rule = candidate
+                actions = expanded_actions
+                break
 
             if not matching_rule:
                 stats["skipped"] += 1
@@ -321,17 +356,20 @@ def stream_execute(
                     )
                 continue
 
-            # Support both "actions" (new format) and "action" (old format)
-            actions = matching_rule.get("actions", [])
-            if not actions and "action" in matching_rule:
-                actions = [matching_rule["action"]]
-
             # Find the move action to get the target folder
             target = None
             for act in actions:
                 if act.get("type") == "move":
                     target = act.get("target")
                     break
+
+            rule_name_for_digest = matching_rule.get("name") or "(unnamed)"
+            digest_bucket = target if target else "(no action)"
+            matches_by_rule_and_target.setdefault(rule_name_for_digest, {})
+            matches_by_rule_and_target[rule_name_for_digest][digest_bucket] = (
+                matches_by_rule_and_target[rule_name_for_digest].get(digest_bucket, 0) + 1
+            )
+
             if target:
                 target = _encode_mailbox_utf7(target)
             if not target:
@@ -614,6 +652,10 @@ def stream_execute(
         for folder, count in sorted(folder_move_counts.items(), key=lambda x: -x[1])
     )
 
+    total_digest_matches = sum(
+        sum(targets.values()) for targets in matches_by_rule_and_target.values()
+    )
+
     # Log summary
     logger.log(
         "INFO",
@@ -628,6 +670,8 @@ def stream_execute(
             "elapsed_sec": timer.elapsed,
             "rate": timer.rate(),
             "moves_by_folder": folder_move_counts,
+            "matches": total_digest_matches,
+            "matches_by_rule_and_target": matches_by_rule_and_target,
         },
         console=(
             "\n📊 Summary — Stream Execute\n"

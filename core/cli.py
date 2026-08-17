@@ -12,7 +12,6 @@ from core.config import AppConfig, build_default_config
 from core.database import init_db
 from core.executor import execute_actions, execute_actions_parallel, should_use_parallel_mode
 from core.imap_client import imap_login, list_all_folders, get_folder_sizes, expand_folders_recursive, prune_empty_folders
-from core.keywords import KeywordManager
 from core.logging_utils import JsonLogger, PhaseTimer
 from core.rule_engine import evaluate_rules, load_rules
 from core.stream_processor import count_stream_messages, stream_messages
@@ -78,6 +77,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-notifications",
         action="store_true",
         help="Disable all notifications for this run",
+    )
+    parser.add_argument(
+        "--notification-summary",
+        action="store_true",
+        help="Replace per-match/per-action notifications with one digest per phase "
+             "(rule/target breakdown for evaluate, moved/deleted/failed for execute). "
+             "Standalone flag -- if --no-notifications is also set, that wins and "
+             "nothing is sent at all.",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -243,11 +250,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip all move actions during execution",
     )
     p_exec.add_argument(
-        "--no-keyword",
-        action="store_true",
-        help="Skip all keyword (set/remove flags) actions during execution",
-    )
-    p_exec.add_argument(
         "--folder-order",
         dest="folder_order",
         choices=["most-first", "least-first", "alpha"],
@@ -369,11 +371,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip all move actions during the execute phase",
     )
     p_run.add_argument(
-        "--no-keyword",
-        action="store_true",
-        help="Skip all keyword (set/remove flags) actions during the execute phase",
-    )
-    p_run.add_argument(
         "--folder-order",
         dest="folder_order",
         choices=["most-first", "least-first", "alpha"],
@@ -473,11 +470,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip all move actions during execution",
     )
     p_eval_exec.add_argument(
-        "--no-keyword",
-        action="store_true",
-        help="Skip all keyword (set/remove flags) actions during execution",
-    )
-    p_eval_exec.add_argument(
         "--folder-order",
         dest="folder_order",
         choices=["most-first", "least-first", "alpha"],
@@ -547,19 +539,6 @@ def build_parser() -> argparse.ArgumentParser:
         "compact-cache",
         help="Prune cached headers for messages that have already been handled",
     )
-
-    p_keywords = sub.add_parser("keywords", help="Manage predefined keywords")
-    kw_sub = p_keywords.add_subparsers(dest="kw_cmd", required=True)
-
-    kw_sub.add_parser("list", help="List all predefined keywords")
-
-    p_kw_add = kw_sub.add_parser("add", help="Add a new predefined keyword")
-    p_kw_add.add_argument("keyword", help="Keyword to add")
-
-    p_kw_remove = kw_sub.add_parser("remove", help="Remove a predefined keyword")
-    p_kw_remove.add_argument("keyword", help="Keyword to remove")
-
-    kw_sub.add_parser("edit", help="Edit keywords in default editor")
 
     p_conflicts = sub.add_parser("check-conflicts", help="Detect and resolve rule conflicts")
     p_conflicts.add_argument(
@@ -724,11 +703,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-move",
         action="store_true",
         help="Skip rule-based folder routing — upload all messages to the default folder",
-    )
-    p_mbox.add_argument(
-        "--no-keyword",
-        action="store_true",
-        help="Accepted for consistency; mbox-import does not apply keyword actions",
     )
     p_mbox.add_argument(
         "--no-source-dedup",
@@ -1250,8 +1224,6 @@ def _build_disabled_action_types(args: argparse.Namespace) -> set[str]:
     disabled: set[str] = set()
     if getattr(args, "no_move", False):
         disabled.add("move")
-    if getattr(args, "no_keyword", False):
-        disabled.update({"set_keywords", "remove_keywords"})
     return disabled
 
 
@@ -1405,6 +1377,7 @@ def handle_execute(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLog
         # Log execute completion summary notification
         summary_context: dict[str, object] = {
             "done": stats.get("done", 0),
+            "done_trash": stats.get("done_trash", 0),
             "failed": stats.get("failed", 0),
             "skipped": stats.get("skipped", 0),
         }
@@ -2011,87 +1984,6 @@ def handle_compact_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: J
     return 0
 
 
-def handle_keywords(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
-    """Handle the ``keywords`` command for managing predefined keywords."""
-
-    del db, logger  # Unused – kept for consistent handler signature
-
-    keyword_manager = KeywordManager(cfg.paths.data_dir)
-
-    if args.kw_cmd == "list":
-        keywords = keyword_manager.get_keywords()
-        if not keywords:
-            print("No predefined keywords found.")
-        else:
-            print("Predefined Keywords:")
-            for i, kw in enumerate(keywords, 1):
-                print(f"  {i}. {kw}")
-        return 0
-
-    elif args.kw_cmd == "add":
-        keyword = args.keyword.strip()
-        if not keyword:
-            print("Error: Keyword cannot be empty")
-            return 1
-
-        if keyword_manager.add_keyword(keyword):
-            print(f"✓ Added keyword: {keyword}")
-            return 0
-        else:
-            print(f"⚠️  Keyword already exists: {keyword}")
-            return 1
-
-    elif args.kw_cmd == "remove":
-        keyword = args.keyword.strip()
-        if not keyword:
-            print("Error: Keyword cannot be empty")
-            return 1
-
-        if keyword_manager.remove_keyword(keyword):
-            print(f"✓ Removed keyword: {keyword}")
-            return 0
-        else:
-            print(f"⚠️  Keyword not found: {keyword}")
-            return 1
-
-    elif args.kw_cmd == "edit":
-        import subprocess
-        import os
-
-        # Try to open the config file with the default editor
-        config_file = cfg.paths.data_dir / "keywords.json"
-        editor = None
-
-        # Check environment variables first
-        editor = os.environ.get("EDITOR") or os.environ.get("VISUAL")
-
-        # Fallback to common editors if no env var set
-        if not editor:
-            for cmd in ["nano", "vi", "vim", "gedit", "code"]:
-                try:
-                    result = subprocess.run(["which", cmd], capture_output=True, check=False)
-                    if result.returncode == 0:
-                        editor = cmd
-                        break
-                except (OSError, subprocess.CalledProcessError):
-                    pass
-
-        if not editor:
-            print(f"Could not find an editor. Please edit manually: {config_file}")
-            print("Format:")
-            print('  {"predefined_keywords": ["keyword1", "keyword2", ...]}\n')
-            return 1
-
-        try:
-            subprocess.run([editor, str(config_file)], check=False)
-            return 0
-        except (OSError, subprocess.CalledProcessError) as e:
-            print(f"Error opening editor: {e}")
-            return 1
-
-    return 1
-
-
 def handle_view_cache(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogger) -> int:
     """Handle the ``view-cache`` command for interactive cache viewing."""
 
@@ -2408,7 +2300,6 @@ COMMAND_HANDLERS: dict[str, Handler] = {
     "clear-pending": handle_clear_pending,
     "clear-cache": handle_clear_cache,
     "compact-cache": handle_compact_cache,
-    "keywords": handle_keywords,
     "check-conflicts": handle_check_conflicts,
     "view-cache": handle_view_cache,
     "review": handle_review,
@@ -2499,6 +2390,7 @@ def main(argv: Sequence[str] | None = None, *, base_dir: Path | None = None) -> 
             gotify_notifier=gotify_notifier,
             telegram_notifier=telegram_notifier,
             telegram_min_priority=telegram_min_priority,
+            summary_mode=getattr(args, "notification_summary", False),
         )
         notifier = AsyncNotificationDispatcher(dispatcher)
 
@@ -2547,7 +2439,6 @@ __all__ = [
     "handle_clear_pending",
     "handle_clear_cache",
     "handle_compact_cache",
-    "handle_keywords",
     "handle_check_conflicts",
     "handle_view_cache",
     "handle_review",

@@ -13,7 +13,6 @@ from tqdm import tqdm
 from core.config import DEFAULT_DATA_DIR
 from core.imap_client import imap_login, list_all_folders
 from core.logging_utils import JsonLogger
-from core.keywords import KeywordManager
 from core.ui_components import prompt_yes_no, format_count
 from core.tools.coverage_analyzer import (
     RuleCoverageAnalyzer,
@@ -90,7 +89,6 @@ class RuleWizard:
         self.show_progress = show_progress
         self.cache_engine: Optional[CacheQueryEngine] = None
         self.coverage_analyzer: Optional[RuleCoverageAnalyzer] = None
-        self.keyword_manager = KeywordManager(config.paths.data_dir)
         self.email_extractor = EmailPatternExtractor()
         self.subject_extractor = SubjectPatternExtractor()
         self.rule_builder = RuleBuilder()
@@ -144,20 +142,6 @@ class RuleWizard:
         """
         print("\nPreparing wizard data...")
 
-        # Check if keyword cache is valid
-        cached_keywords = self.wizard_cache.get_keywords()
-        if cached_keywords is None:
-            # Cache miss - extract now
-            try:
-                print("Extracting keywords from cache (this may take a moment)...")
-                keywords = self.cache_engine.extract_unique_keywords(limit=999999, min_count=1)
-                self.wizard_cache.set_keywords(keywords)
-                print(f"✓ Cached {len(keywords)} unique keywords")
-            except Exception as e:
-                print(f"⚠️  Could not cache keywords: {e}")
-        else:
-            print(f"✓ Using cached keywords ({len(cached_keywords)} available)")
-
         # Pre-fetch folders on startup (USER CONFIRMED)
         print("Fetching folder list from mail server...")
         cached_folders = self.wizard_cache.get_folders()
@@ -197,20 +181,6 @@ class RuleWizard:
             print(f"  Age: {age_hours:.1f} hours")
         else:
             print("Folders: ❌ Not cached")
-
-        # Keywords
-        keywords_cache = cache.get('keywords', {})
-        keywords_timestamp = keywords_cache.get('timestamp', 0)
-        keywords_data = keywords_cache.get('data')
-
-        if keywords_data:
-            age_hours = (time.time() - keywords_timestamp) / 3600
-            status = "✓ Valid" if age_hours < 6 else "⚠️ Stale"
-            print(f"\nKeywords: {status}")
-            print(f"  Count: {len(keywords_data)}")
-            print(f"  Age: {age_hours:.1f} hours")
-        else:
-            print("\nKeywords: ❌ Not cached")
 
         print("=" * 60)
 
@@ -615,9 +585,17 @@ class RuleWizard:
             elif "actions" in rule:
                 actions = rule.get("actions", [])
 
+            from core.rule_validator import RuleValidator
+
             for i, action in enumerate(actions):
                 if not isinstance(action, dict):
                     errors.append(f"Action {i + 1}: Must be a dictionary")
+                    continue
+
+                is_bracket = "do" in action and any(
+                    k in action for k in RuleValidator._BRACKET_AGE_KEYS
+                )
+                if is_bracket:
                     continue
 
                 action_type = action.get("type", "")
@@ -626,9 +604,6 @@ class RuleWizard:
                 elif action_type == "move":
                     if not action.get("target"):
                         errors.append(f"Action {i + 1}: Move action missing target folder")
-                elif action_type in ("set_keywords", "remove_keywords"):
-                    if not action.get("keywords"):
-                        errors.append(f"Action {i + 1}: {action_type} action missing keywords array")
 
         # Use RuleValidator for soft warnings (only if no hard errors)
         if not errors:
@@ -702,22 +677,6 @@ class RuleWizard:
                             action["target"] = target
                             break
                 print(f"✓ Target set to \"{target}\"")
-
-            elif "keywords action missing keywords" in error or "action missing keywords array" in error:
-                keywords_str = input("Enter keywords (comma-separated): ").strip()
-                if not keywords_str:
-                    print("❌ Keywords cannot be empty")
-                    return None
-                keywords = [k.strip() for k in keywords_str.split(",")]
-                # Find and fix the keywords action
-                if "action" in rule and rule["action"].get("type") in ("set_keywords", "remove_keywords"):
-                    rule["action"]["keywords"] = keywords
-                elif "actions" in rule:
-                    for action in rule["actions"]:
-                        if action.get("type") in ("set_keywords", "remove_keywords") and not action.get("keywords"):
-                            action["keywords"] = keywords
-                            break
-                print(f"✓ Keywords set to {keywords}")
 
         # Re-validate
         print("\nRe-validating...")
@@ -1652,17 +1611,6 @@ class RuleWizard:
             print("✓ Action fixed!")
             return True
 
-        elif "requires at least one keyword" in error_msg:
-            action_type = action.get("type", "unknown")
-            print(f"\n⚠️  Action {action_idx + 1} ({action_type}) requires at least one keyword.")
-            keyword = input("Enter a keyword to add: ").strip()
-            if not keyword:
-                print("⚠️  Keyword cannot be empty.")
-                return self._fix_action_error(error_msg)  # Retry
-            action["keywords"] = [keyword]
-            print("✓ Action fixed!")
-            return True
-
         return False
 
     def _validate_cache(self) -> bool:
@@ -1910,7 +1858,7 @@ class RuleWizard:
         selection_result = curses.wrapper(selector.run)
 
         if selection_result is None:
-            # ISSUE #1 FIX: Offer manual entry on cancellation (consistent with keyword selection)
+            # ISSUE #1 FIX: Offer manual entry on cancellation
             print("\nSelection cancelled.")
             manual_response = prompt_yes_no("Would you like to enter the value manually?", default=True)
             if manual_response:
@@ -2860,15 +2808,7 @@ class RuleWizard:
                 # Show current actions
                 print(f"\nYou have {len(self.rule_builder.actions)} action(s):")
                 for i, action in enumerate(self.rule_builder.actions, 1):
-                    action_type = action.get("type", "unknown")
-                    if action_type == "move":
-                        target = action.get("target", "(no target)")
-                        print(f"  {i}. Move to '{target}'")
-                    elif action_type in ("set_keywords", "remove_keywords"):
-                        keywords = action.get("keywords", [])
-                        print(f"  {i}. {action_type.replace('_', ' ').title()}: {keywords}")
-                    else:
-                        print(f"  {i}. {action_type}")
+                    print(f"  {i}. {self._describe_action(action)}")
 
                 # Ask if they want to add another
                 response = prompt_yes_no("Add another action?", default=False)
@@ -2892,8 +2832,7 @@ class RuleWizard:
         """
         print("\nAction type:")
         print("  1. Move (move messages to a folder)")
-        print("  2. Add Keywords (add keywords/labels to messages)")
-        print("  3. Remove Keywords (remove keywords/labels from messages)")
+        print("  2. Age-gated bracket (different action depending on message age)")
 
         choice = input("  > ").strip()
 
@@ -2909,335 +2848,161 @@ class RuleWizard:
             return True
 
         elif choice == "2":
-            keywords = self._get_keywords()
-            if not keywords:
-                print("Keywords cancelled.")
-                return False
-
-            self.rule_builder.add_action("set_keywords", keywords=keywords)
-            # ISSUE #2 FIX: Standardized success message format
-            print(f"✓ Action: add keywords {keywords}")
-            return True
-
-        elif choice == "3":
-            keywords = self._get_keywords()
-            if not keywords:
-                print("Keywords cancelled.")
-                return False
-
-            self.rule_builder.add_action("remove_keywords", keywords=keywords)
-            # ISSUE #2 FIX: Standardized success message format
-            print(f"✓ Action: remove keywords {keywords}")
-            return True
+            return self._add_age_bracket_action()
 
         else:
-            print("Invalid choice. Please select 1, 2, or 3.")
+            print("Invalid choice. Please select 1 or 2.")
             return self._add_single_action()
 
-    def _get_keywords(self) -> List[str]:
-        """Get keywords from user - either select from cache or enter manually.
+    def _describe_action(self, action: dict) -> str:
+        """Human-readable one-line summary of a plain action or an
+        age-gated bracket, for the "current actions" review list."""
+        if self._is_age_bracket(action):
+            label = self._describe_age_bracket(
+                {k: v for k, v in action.items() if k != "do"}
+            )
+            return f"If {label}: {self._describe_do_list(action.get('do') or [])}"
 
-        Returns:
-            List of keywords, empty list if cancelled
+        action_type = action.get("type", "unknown")
+        if action_type == "move":
+            target = action.get("target", "(no target)")
+            return f"Move to '{target}'"
+        return str(action_type)
+
+    @staticmethod
+    def _is_age_bracket(action: dict) -> bool:
+        age_keys = ("age_days_gt", "age_days_gte", "age_days_lt", "age_days_lte", "age_days_eq")
+        return "do" in action and any(k in action for k in age_keys)
+
+    @staticmethod
+    def _describe_do_list(do_items: List[dict]) -> str:
+        if not do_items:
+            return "do nothing"
+        parts = []
+        for a in do_items:
+            if a.get("type", "move") == "move":
+                parts.append(f"move to '{a.get('target', '(no target)')}'")
+            else:
+                parts.append(str(a.get("type")))
+        return ", ".join(parts)
+
+    @staticmethod
+    def _describe_age_bracket(age_kwargs: dict) -> str:
+        labels = {
+            "age_days_gt": "age > {:g}d",
+            "age_days_gte": "age >= {:g}d",
+            "age_days_lt": "age < {:g}d",
+            "age_days_lte": "age <= {:g}d",
+            "age_days_eq": "age == {:g}d",
+        }
+        parts = [labels[k].format(v) for k, v in age_kwargs.items() if k in labels]
+        return " and ".join(parts)
+
+    def _add_age_bracket_action(self) -> bool:
+        """Prompt for an age-gated action bracket and add it to the rule.
+
+        A bracket only fires for messages whose age matches its condition;
+        its nested actions (0 or more) only run then. An empty action list
+        is a deliberate no-op (e.g. "if this message is less than a day
+        old, do nothing").
         """
-        # Check if we have predefined keywords
-        predefined_keywords = self.keyword_manager.get_keywords()
-        predefined_count = len(predefined_keywords)
+        age_kwargs = self._get_age_bracket_bounds()
+        if age_kwargs is None:
+            print("Age bracket cancelled.")
+            return False
 
-        # Try to get keywords from cache (NEW: check wizard cache first)
-        try:
-            # Check wizard cache first (6-hour TTL)
-            keyword_tuples = self.wizard_cache.get_keywords()
-
-            if keyword_tuples is None:
-                # Cache miss - extract from database and cache result
-                print("Extracting keywords from email cache...")
-                keyword_tuples = self.cache_engine.extract_unique_keywords(limit=999999, min_count=1)
-                self.wizard_cache.set_keywords(keyword_tuples)
-
-        except Exception as e:
-            print(f"⚠️  Could not load keywords from cache: {e}")
-            keyword_tuples = []
-
-        # Rest of method unchanged
-        if predefined_count > 0:
-            print(f"\n📌 {predefined_count} predefined keyword(s) available")
-
-        # Offer options based on what we have
-        if keyword_tuples or predefined_count > 0:
-            print("\nChoose how to select keywords:")
-            print("  1. Select from list (predefined + cached)")
-            print("  2. Enter manually (comma-separated)")
-            if predefined_count > 0:
-                print("  3. Manage predefined keywords")
-
+        print("\nWhat should happen when this bracket fires?")
+        do_actions: List[dict] = []
+        while True:
+            print(f"\nBracket action(s) so far: {self._describe_do_list(do_actions)}")
+            print("  1. Move (move messages to a folder)")
+            print("  2. Done (finish this bracket)")
             choice = input("  > ").strip()
-
             if choice == "1":
-                return self._select_keywords_from_list(keyword_tuples)
-            elif choice == "2":
-                return self._enter_keywords_manually()
-            elif choice == "3" and predefined_count > 0:
-                return self._manage_keywords()
+                target = self._select_target_folder()
+                if target:
+                    do_actions.append({"type": "move", "target": target})
+                    print(f"✓ Bracket action: move to '{target}'")
+                else:
+                    print("Target folder selection cancelled.")
+            elif choice in ("2", ""):
+                break
             else:
-                print("Invalid choice. Defaulting to manual entry.")
-                return self._enter_keywords_manually()
-        else:
-            # No keywords in cache or predefined, go straight to manual entry
-            print("\nNo predefined or cached keywords found.")
-            return self._enter_keywords_manually()
+                print("Invalid choice. Please select 1 or 2.")
 
-    def _select_keywords_from_list(self, keyword_tuples: List[Tuple[str, int]]) -> Optional[List[str]]:
-        """Show filterable list of keywords for selection.
+        self.rule_builder.add_age_bracket(do_actions, **age_kwargs)
+        label = self._describe_age_bracket(age_kwargs)
+        print(f"✓ Action: if {label}, {self._describe_do_list(do_actions)}")
+        return True
 
-        Displays predefined keywords first (with 📌 indicator), then cached keywords
-        (with 📊 indicator), separated by a visual divider.
-
-        Args:
-            keyword_tuples: List of (keyword, count) tuples from cache
+    def _get_age_bracket_bounds(self) -> Optional[dict]:
+        """Prompt for an age-gated bracket's age key(s).
 
         Returns:
-            List of selected keywords, or None if cancelled
+            Dict of age_days_* kwargs for RuleBuilder.add_age_bracket, or
+            None if cancelled/invalid.
         """
-        # Get predefined keywords
-        predefined = self.keyword_manager.get_keywords()
 
-        # Build items list: predefined first, then cached (excluding duplicates)
-        items = []
+        def _read_days(prompt: str) -> Optional[float]:
+            raw = input(prompt).strip()
+            if not raw:
+                return None
+            try:
+                return float(raw)
+            except ValueError:
+                print("⚠️  Please enter a number.")
+                return _read_days(prompt)
 
-        # Add predefined keywords with 📌 indicator and 0 message count
-        for kw in predefined:
-            items.append((f"📌 {kw}", 0))
+        print("\nAge condition for this bracket:")
+        print("  1. Older than N days (age > N)")
+        print("  2. Older than or equal to N days (age >= N)")
+        print("  3. Younger than N days (age < N)")
+        print("  4. Younger than or equal to N days (age <= N)")
+        print("  5. Exactly N days old (age == N)")
+        print("  6. Bounded band (e.g. between 30 and 90 days)")
+        choice = input("  > ").strip()
 
-        # Add visual separator if there are cached keywords
-        cached_keywords_dict = {kw: count for kw, count in keyword_tuples if kw not in predefined}
-        if cached_keywords_dict:
-            items.append(("─" * 40, 0))  # Visual separator
+        simple = {
+            "1": ("age_days_gt", "Older than how many days? > "),
+            "2": ("age_days_gte", "Older than or equal to how many days? > "),
+            "3": ("age_days_lt", "Younger than how many days? > "),
+            "4": ("age_days_lte", "Younger than or equal to how many days? > "),
+            "5": ("age_days_eq", "Exactly how many days old? > "),
+        }
+        if choice in simple:
+            key, prompt = simple[choice]
+            n = _read_days(prompt)
+            return None if n is None else {key: n}
 
-            # Add cached keywords with 📊 indicator
-            for kw, count in keyword_tuples:
-                if kw not in predefined:
-                    items.append((f"📊 {kw}", count))
-
-        # If no items, show explanation
-        if not items:
-            print("\nNo predefined keywords or cached keywords found.")
-            return self._enter_keywords_manually()
-
-        print("\nSelect keywords to add/remove:")
-        print("  📌 PREDEFINED KEYWORDS - always available")
-        print("  📊 CACHED KEYWORDS - from your messages")
-        print("\nYou can:")
-        print("  - Browse and select keywords")
-        print("  - Type to filter in real-time")
-        print("  - Press ESC to cancel and enter manually")
-        print()
-        print("(Use arrow keys to navigate, type to filter, Enter to select, ESC to cancel)")
-        input("Press Enter to open keyword selector...")
-
-        # Show filterable selector
-        selector = FilterableListSelector(items, "Select Keywords")
-        selection_result = curses.wrapper(selector.run)
-
-        if selection_result is None:
-            # User cancelled - offer manual entry
-            print("\nSelection cancelled.")
-            response = prompt_yes_no("Would you like to enter keywords manually?", default=False)
-            if response:
-                return self._enter_keywords_manually()
-            else:
+        if choice == "6":
+            print("\nLower bound:")
+            print("  1. Older than N days (age > N)")
+            print("  2. Older than or equal to N days (age >= N)")
+            lower_choice = input("  > ").strip()
+            lower_key = {"1": "age_days_gt", "2": "age_days_gte"}.get(lower_choice)
+            if not lower_key:
+                print("⚠️  Invalid choice.")
+                return None
+            lower_n = _read_days("Lower bound in days? > ")
+            if lower_n is None:
                 return None
 
-        # Extract label from (label, data) tuple returned by selector
-        if isinstance(selection_result, tuple):
-            selected_display = selection_result[0]
-        else:
-            selected_display = selection_result
-
-        # Extract keyword from display text, removing emoji prefix and message count
-        # Handles both "📌 keyword" and "📊 keyword (count messages)" formats
-        keyword = selected_display
-        if keyword.startswith("📌 "):
-            keyword = keyword[2:].strip()
-        elif keyword.startswith("📊 "):
-            keyword = keyword[2:].strip()
-            # Remove "(count messages)" suffix if present
-            if " (" in keyword:
-                keyword = keyword.split(" (")[0]
-
-        # For now, return single keyword
-        # TODO: Support multiple selection if FilterableListSelector is enhanced
-        selected_keywords = [keyword]
-
-        # ISSUE #3 FIX: Show confirmation/editing menu for selected keywords
-        return self._confirm_keywords(selected_keywords)
-
-    def _enter_keywords_manually(self) -> Optional[List[str]]:
-        """Prompt user to enter keywords as comma-separated text.
-
-        Returns:
-            List of keywords, or None if cancelled
-        """
-        print("\nEnter keywords (comma-separated):")
-        print("Examples: Important, Work, Personal")
-        print("IMAP flags: \\Seen, \\Flagged, \\Answered, \\Draft")
-        keywords_input = input("  > ").strip()
-
-        if not keywords_input:
-            return None
-
-        # Parse keywords and clean them
-        keywords = [kw.strip() for kw in keywords_input.split(",") if kw.strip()]
-        return keywords if keywords else None
-
-    def _manage_keywords(self) -> Optional[List[str]]:
-        """Offer keyword management options (add, remove, list).
-
-        Returns:
-            List of selected keywords, or None if cancelled
-        """
-        while True:
-            print("\nManage predefined keywords:")
-            print("  1. View all keywords")
-            print("  2. Add new keyword")
-            print("  3. Remove keyword")
-            print("  4. Return to keyword selection")
-
-            choice = input("  > ").strip()
-
-            if choice == "1":
-                self._list_keywords()
-            elif choice == "2":
-                self._add_keyword_interactive()
-            elif choice == "3":
-                self._remove_keyword_interactive()
-            elif choice == "4":
-                # Return to main keyword selection
-                return self._get_keywords()
-            else:
-                print("Invalid choice. Please select 1, 2, 3, or 4.")
-
-    def _list_keywords(self) -> None:
-        """Display all predefined keywords."""
-        keywords = self.keyword_manager.get_keywords()
-        if not keywords:
-            print("\nNo predefined keywords found.")
-            return
-
-        print("\nPredefined Keywords:")
-        for i, kw in enumerate(keywords, 1):
-            print(f"  {i}. {kw}")
-
-    def _add_keyword_interactive(self) -> None:
-        """Interactively add a new keyword."""
-        keyword = input("\nEnter new keyword: ").strip()
-        if not keyword:
-            print("Keyword cannot be empty.")
-            return
-
-        if self.keyword_manager.add_keyword(keyword):
-            print(f"✓ Added keyword: {keyword}")
-        else:
-            print(f"⚠️  Keyword already exists: {keyword}")
-
-    def _remove_keyword_interactive(self) -> None:
-        """Interactively remove a keyword."""
-        self._list_keywords()
-        keyword = input("\nEnter keyword to remove: ").strip()
-        if not keyword:
-            print("Keyword cannot be empty.")
-            return
-
-        if self.keyword_manager.remove_keyword(keyword):
-            print(f"✓ Removed keyword: {keyword}")
-        else:
-            print(f"⚠️  Keyword not found: {keyword}")
-
-    def _confirm_keywords(self, keywords: List[str]) -> Optional[List[str]]:
-        """ISSUE #3 FIX: Show confirmation and editing menu for selected keywords.
-
-        Allows user to review, edit, or add more keywords after selection.
-
-        Args:
-            keywords: List of selected keywords
-
-        Returns:
-            Final list of keywords, or None if cancelled
-        """
-        while True:
-            print(f"\nSelected keywords: {keywords}")
-            print("\nOptions:")
-            print("  1. Confirm and use these keywords (or just press Enter)")
-            print("  2. Add another keyword")
-            print("  3. Remove a keyword from the list")
-            print("  4. Start over and select different keywords")
-            print("  5. Cancel (go back)")
-
-            choice = input("\n  > ").strip()
-
-            if choice == "1" or choice == "":
-                # Confirm - return the keywords
-                return keywords if keywords else None
-
-            elif choice == "2":
-                # Add another keyword
-                print("\nAdd another keyword:")
-                print("  1. Select from list")
-                print("  2. Enter manually")
-
-                sub_choice = input("  > ").strip()
-
-                if sub_choice == "1":
-                    # Recursive call to select from list
-                    additional = self._get_keywords()
-                    if additional:
-                        # Combine with existing, removing duplicates
-                        keywords = list(dict.fromkeys(keywords + additional))
-                        print(f"✓ Keywords updated: {keywords}")
-                    continue
-
-                elif sub_choice == "2":
-                    # Enter manually
-                    new_kw = input("Enter keyword: ").strip()
-                    if new_kw and new_kw not in keywords:
-                        keywords.append(new_kw)
-                        print(f"✓ Added: {new_kw}")
-                    elif new_kw in keywords:
-                        print(f"⚠️  Already in list: {new_kw}")
-                    continue
-
-            elif choice == "3":
-                # Remove a keyword
-                if len(keywords) == 1:
-                    print("⚠️  Cannot remove - this is your only keyword.")
-                    continue
-
-                print("\nRemove which keyword?")
-                for i, kw in enumerate(keywords, 1):
-                    print(f"  {i}. {kw}")
-
-                try:
-                    idx = int(input("  > ").strip()) - 1
-                    if 0 <= idx < len(keywords):
-                        removed = keywords.pop(idx)
-                        print(f"✓ Removed: {removed}")
-                    else:
-                        print("Invalid choice.")
-                except ValueError:
-                    print("Invalid input.")
-                continue
-
-            elif choice == "4":
-                # Start over
-                print("\nStarting keyword selection again...")
-                return self._get_keywords()
-
-            elif choice == "5":
-                # Cancel
+            print("\nUpper bound:")
+            print("  1. Younger than N days (age < N)")
+            print("  2. Younger than or equal to N days (age <= N)")
+            upper_choice = input("  > ").strip()
+            upper_key = {"1": "age_days_lt", "2": "age_days_lte"}.get(upper_choice)
+            if not upper_key:
+                print("⚠️  Invalid choice.")
+                return None
+            upper_n = _read_days("Upper bound in days? > ")
+            if upper_n is None:
                 return None
 
-            else:
-                print("Invalid choice. Please select 1-5.")
+            return {lower_key: lower_n, upper_key: upper_n}
+
+        print("Invalid choice.")
+        return None
 
     def _configure_metadata(self) -> bool:
         """Set rule name and priority.
@@ -3254,13 +3019,13 @@ class RuleWizard:
             if action_type == "move":
                 target = first_action.get("target", "")
                 suggested_name = target.replace("/", " » ") if target else "Move"
-            elif action_type in ("set_keywords", "remove_keywords"):
-                keywords = first_action.get("keywords", [])
-                action_desc = action_type.replace("_", " ").title()
-                if keywords:
-                    suggested_name = f"{action_desc} » {', '.join(keywords)}"
-                else:
-                    suggested_name = action_desc
+            elif self._is_age_bracket(first_action):
+                do_items = first_action.get("do") or []
+                move_target = next(
+                    (a.get("target") for a in do_items if a.get("type", "move") == "move" and a.get("target")),
+                    None,
+                )
+                suggested_name = move_target.replace("/", " » ") if move_target else "Age-gated rule"
 
         print(f"\nRule name [default: {suggested_name}]:")
         name = input("  > ").strip()

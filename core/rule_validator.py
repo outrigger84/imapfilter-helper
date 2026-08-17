@@ -58,6 +58,13 @@ class RuleValidator:
 
         return len(warnings) == 0, warnings
 
+    # Age-gated action bracket keys, as understood by
+    # core.rule_engine.expand_actions_for_age. A bracket item is an actions-
+    # list entry with a "do" key plus at least one of these age keys.
+    _BRACKET_AGE_LOWER_KEYS = ("age_days_gt", "age_days_gte")
+    _BRACKET_AGE_UPPER_KEYS = ("age_days_lt", "age_days_lte")
+    _BRACKET_AGE_KEYS = _BRACKET_AGE_LOWER_KEYS + _BRACKET_AGE_UPPER_KEYS + ("age_days_eq",)
+
     def _validate_actions(self, rule: dict[str, Any]) -> list[str]:
         """Validate rule actions for suspicious patterns.
 
@@ -78,20 +85,90 @@ class RuleValidator:
             warnings.append("Rule has no actions defined")
             return warnings
 
-        # Validate each action
-        for i, action in enumerate(actions):
-            if not isinstance(action, dict):
+        has_top_level_move = False
+        bracket_do_has_move = False
+
+        for i, item in enumerate(actions):
+            if not isinstance(item, dict):
                 continue
 
-            action_type = action.get("type", "move")
+            is_bracket = "do" in item and any(k in item for k in self._BRACKET_AGE_KEYS)
+            if is_bracket:
+                warnings.extend(self._validate_bracket(item, i))
+                do_items = item.get("do") or []
+                if not isinstance(do_items, list):
+                    continue
+                if any(
+                    isinstance(a, dict) and a.get("type", "move") == "move" for a in do_items
+                ):
+                    bracket_do_has_move = True
+                for j, sub_action in enumerate(do_items):
+                    warnings.extend(self._validate_single_action(sub_action, f"{i + 1}.{j + 1}"))
+                continue
 
-            # Validate move actions
-            if action_type == "move":
-                target = action.get("target", "")
-                if not target:
-                    warnings.append(
-                        f"Action {i + 1}: Move action has no target folder specified"
-                    )
+            if item.get("type", "move") == "move":
+                has_top_level_move = True
+            warnings.extend(self._validate_single_action(item, str(i + 1)))
+
+        if has_top_level_move and bracket_do_has_move:
+            warnings.append(
+                "⚠️ Rule mixes an unconditional 'move' action with an "
+                "age-gated bracket that also moves - both can fire for the "
+                "same message, since conflict resolution only dedupes "
+                "across different rules, not within one rule's own actions. "
+                "Prefer two mutually exclusive age brackets instead."
+            )
+
+        return warnings
+
+    def _validate_single_action(self, action: Any, label: str) -> list[str]:
+        """Validate one plain action dict (used for top-level items and for
+        each item inside a bracket's "do" list)."""
+        warnings: list[str] = []
+        if not isinstance(action, dict):
+            return warnings
+
+        action_type = action.get("type", "move")
+        if action_type == "move":
+            target = action.get("target", "")
+            if not target:
+                warnings.append(f"Action {label}: Move action has no target folder specified")
+
+        return warnings
+
+    def _validate_bracket(self, bracket: dict[str, Any], index: int) -> list[str]:
+        """Validate an age-gated action bracket's shape.
+
+        A bracket may combine at most one lower-bound age key
+        (age_days_gt/age_days_gte) and one upper-bound age key
+        (age_days_lt/age_days_lte) to express a bounded band. age_days_eq is
+        exclusive of bound keys. "do" must be a list if present.
+        """
+        warnings: list[str] = []
+
+        lower = [k for k in self._BRACKET_AGE_LOWER_KEYS if k in bracket]
+        upper = [k for k in self._BRACKET_AGE_UPPER_KEYS if k in bracket]
+        has_eq = "age_days_eq" in bracket
+
+        if len(lower) > 1:
+            warnings.append(
+                f"Action {index + 1}: bracket has multiple lower-bound age keys "
+                f"({'/'.join(lower)}) - only one is allowed"
+            )
+        if len(upper) > 1:
+            warnings.append(
+                f"Action {index + 1}: bracket has multiple upper-bound age keys "
+                f"({'/'.join(upper)}) - only one is allowed"
+            )
+        if has_eq and (lower or upper):
+            warnings.append(
+                f"Action {index + 1}: age_days_eq cannot be combined with "
+                "age_days_gt/age_days_gte/age_days_lt/age_days_lte in the same bracket"
+            )
+
+        do_items = bracket.get("do")
+        if do_items is not None and not isinstance(do_items, list):
+            warnings.append(f"Action {index + 1}: bracket 'do' must be a list")
 
         return warnings
 
@@ -149,22 +226,28 @@ class RuleValidator:
         return depth
 
     # Condition-key families as understood by core.rule_engine.
-    # The engine evaluates flag, age and logical keys in one dict as an AND,
-    # but silently ignores header-operator keys when any other family is
+    # The engine evaluates age and logical keys in one dict as an AND, but
+    # silently ignores header-operator keys when any other family is
     # present, and within a family only evaluates the first key it finds.
     _HEADER_OPERATOR_KEYS = (
         "contains", "equals", "regex", "not_contains", "not_equals", "not_regex",
     )
-    _FLAG_KEYS = ("has_keyword", "has_flag", "lacks_keyword", "lacks_flag")
     _AGE_KEYS = ("age_days_gt", "age_days_lt", "age_days_eq")
     _LOGICAL_KEYS = ("not", "all", "any")
+    # Retired: keyword/flag conditions are no longer evaluated by the engine
+    # at all (custom IMAP keywords don't reliably persist - see
+    # core/keywords.py's removal). A rule still using one of these keys will
+    # silently never match on that clause.
+    _RETIRED_FLAG_KEYS = ("has_keyword", "has_flag", "lacks_keyword", "lacks_flag")
 
     def _find_ambiguous_conditions(self, node: Any, path: str = "root") -> list[str]:
         """Find condition dicts that the rule engine would evaluate partially.
 
-        Two silent footguns are detected:
-        - A dict mixing header-operator keys with flag/age/logical keys: the
-          engine returns after the flag/age/logical checks and never evaluates
+        Three footguns are detected:
+        - A dict using a retired flag/keyword key: the engine no longer
+          evaluates these at all, so that clause silently never matches.
+        - A dict mixing header-operator keys with age/logical keys: the
+          engine returns after the age/logical checks and never evaluates
           the header clause.
         - A dict with more than one key from the same family (e.g. both
           ``contains`` and ``not_contains``): the engine only evaluates the
@@ -180,13 +263,20 @@ class RuleValidator:
         if not isinstance(node, dict):
             return issues
 
+        retired_flag_keys = [k for k in self._RETIRED_FLAG_KEYS if k in node]
+        if retired_flag_keys:
+            issues.append(
+                f"⚠️ {path}: {'/'.join(retired_flag_keys)} is no longer evaluated by "
+                "the engine (keyword/flag conditions were retired - custom IMAP "
+                "keywords don't reliably persist) and will never match"
+            )
+
         header_ops = [k for k in self._HEADER_OPERATOR_KEYS if k in node]
-        flag_keys = [k for k in self._FLAG_KEYS if k in node]
         age_keys = [k for k in self._AGE_KEYS if k in node]
         logical_keys = [k for k in self._LOGICAL_KEYS if k in node]
 
-        if header_ops and (flag_keys or age_keys or logical_keys):
-            others = flag_keys + age_keys + logical_keys
+        if header_ops and (age_keys or logical_keys):
+            others = age_keys + logical_keys
             issues.append(
                 f"⚠️ {path}: header condition ({'/'.join(header_ops)}) is silently "
                 f"IGNORED when combined with {'/'.join(others)} in the same block - "
@@ -195,7 +285,6 @@ class RuleValidator:
 
         for family_name, present in (
             ("header operators", header_ops),
-            ("flag conditions", flag_keys),
             ("age conditions", age_keys),
         ):
             if len(present) > 1:

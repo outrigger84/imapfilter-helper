@@ -9,9 +9,6 @@ Usage:
     python3 wizard.py                                  # Start the wizard
     python3 wizard.py --cache-file partial.db          # Use specific cache file
     python3 wizard.py --cache-file /tmp/test.db        # Use absolute path
-    python3 wizard.py --add-keyword Important           # Add a predefined keyword
-    python3 wizard.py --remove-keyword Old              # Remove a predefined keyword
-    python3 wizard.py --list-keywords                   # List predefined keywords
 
 Prerequisites:
     - Cache must be built first: python3 main.py build-cache
@@ -19,7 +16,7 @@ Prerequisites:
       (creates a small cache you can use while building the full one)
 
 Exit codes:
-    0   - Rule created successfully or keyword operation succeeded
+    0   - Rule created successfully
     1   - Error occurred
     130 - User cancelled the wizard
 """
@@ -33,7 +30,6 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 from core.config import build_default_config
-from core.keywords import KeywordManager
 from core.logging_utils import JsonLogger
 from core.tools.rule_wizard_core import RuleWizard
 
@@ -96,24 +92,6 @@ def build_parser() -> argparse.ArgumentParser:
         description="IMAPFilter Rule Wizard - Create and manage email filter rules"
     )
 
-    # Keyword management options
-    kw_group = parser.add_mutually_exclusive_group()
-    kw_group.add_argument(
-        "--add-keyword",
-        metavar="KEYWORD",
-        help="Add a predefined keyword and exit",
-    )
-    kw_group.add_argument(
-        "--remove-keyword",
-        metavar="KEYWORD",
-        help="Remove a predefined keyword and exit",
-    )
-    kw_group.add_argument(
-        "--list-keywords",
-        action="store_true",
-        help="List all predefined keywords and exit",
-    )
-
     # Cache management options
     cache_group = parser.add_argument_group("cache management")
     cache_group.add_argument(
@@ -157,50 +135,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     return parser
-
-
-def handle_keyword_operations(args: argparse.Namespace, config) -> int:
-    """Handle keyword management operations. Returns 0 to continue to wizard, non-zero to exit."""
-    if not any([args.add_keyword, args.remove_keyword, args.list_keywords]):
-        return 0  # No keyword operations requested, continue to wizard
-
-    keyword_manager = KeywordManager(config.paths.data_dir)
-
-    if args.list_keywords:
-        keywords = keyword_manager.get_keywords()
-        if not keywords:
-            print("No predefined keywords found.")
-        else:
-            print("Predefined Keywords:")
-            for i, kw in enumerate(keywords, 1):
-                print(f"  {i}. {kw}")
-        return 1  # Exit after listing
-
-    elif args.add_keyword:
-        keyword = args.add_keyword.strip()
-        if not keyword:
-            print("Error: Keyword cannot be empty")
-            return 1
-
-        if keyword_manager.add_keyword(keyword):
-            print(f"✓ Added keyword: {keyword}")
-        else:
-            print(f"⚠️  Keyword already exists: {keyword}")
-        return 1  # Exit after adding
-
-    elif args.remove_keyword:
-        keyword = args.remove_keyword.strip()
-        if not keyword:
-            print("Error: Keyword cannot be empty")
-            return 1
-
-        if keyword_manager.remove_keyword(keyword):
-            print(f"✓ Removed keyword: {keyword}")
-        else:
-            print(f"⚠️  Keyword not found: {keyword}")
-        return 1  # Exit after removing
-
-    return 0
 
 
 def handle_cache_operations(args: argparse.Namespace, config, logger) -> int:
@@ -272,11 +206,6 @@ def main() -> int:
 
         # Create logger for IMAP operations
         logger = JsonLogger(config.paths.log_file)
-
-        # Handle keyword operations
-        exit_code = handle_keyword_operations(args, config)
-        if exit_code != 0:
-            return exit_code
 
         # Handle cache operations
         exit_code = handle_cache_operations(args, config, logger)

@@ -543,9 +543,10 @@ def generate_markdown(flags: list[Flag], rules_dir: Path, output_path: Path) -> 
         "- **File naming:** `rules/{priority}_{folder_underscored}_{description}.json`",
         "- **Priority:** integer, lower = higher precedence (first-match-wins evaluation)",
         "- **Conditions:** nested `all`/`any` with `header` + operator "
-        "(`contains`, `equals`, `regex`, `not_contains`, `not_equals`, `age_days_gt`, `has_keyword`, etc.)",
-        '- **Actions:** array of `{"type": "move", "target": "Folder/Path"}` '
-        'and/or `{"type": "set_keywords", "keywords": ["tag"]}`',
+        "(`contains`, `equals`, `regex`, `not_contains`, `not_equals`, `age_days_gt`, etc.)",
+        '- **Actions:** array of `{"type": "move", "target": "Folder/Path"}`, optionally mixed with '
+        'age-gated brackets like `{"age_days_gt": 30, "do": [{"type": "move", "target": "Folder/Path"}]}` '
+        "(only applies once the message is that old; `\"do\": []` is a deliberate no-op)",
         "",
         f"## Flagged Emails ({len(flags)} issues)",
         "",

@@ -187,13 +187,12 @@ class RuleBuilder:
             self.logic = self._flat_logic  # Backward compatibility
         return self
 
-    def add_action(self, action_type: str, target: str = "", keywords: List[str] = None) -> "RuleBuilder":
-        """Add an action to the rule.
+    def add_action(self, action_type: str, target: str = "") -> "RuleBuilder":
+        """Add a plain (unconditional) action to the rule.
 
         Args:
-            action_type: Type of action ("move", "set_keywords", or "remove_keywords")
+            action_type: Type of action (currently only "move" is supported)
             target: Target folder path for move actions (e.g., "Banking/NatWest")
-            keywords: List of keywords for keyword actions
 
         Returns:
             Self for method chaining
@@ -201,9 +200,48 @@ class RuleBuilder:
         action = {"type": action_type.lower()}
         if target:
             action["target"] = target
-        if keywords:
-            action["keywords"] = keywords
         self.actions.append(action)
+        return self
+
+    def add_age_bracket(
+        self,
+        do: List[dict],
+        *,
+        age_days_gt: Optional[float] = None,
+        age_days_gte: Optional[float] = None,
+        age_days_lt: Optional[float] = None,
+        age_days_lte: Optional[float] = None,
+        age_days_eq: Optional[float] = None,
+    ) -> "RuleBuilder":
+        """Add an age-gated action bracket to the rule.
+
+        A bracket only fires when the message's age satisfies its age
+        key(s) -- at most one lower-bound (age_days_gt/age_days_gte) and one
+        upper-bound (age_days_lt/age_days_lte) key, ANDed together to form a
+        bounded band, or age_days_eq alone. Its `do` list (0+ ordinary
+        actions, e.g. {"type": "move", "target": "..."}) only runs when the
+        bracket fires -- an empty `do` is a deliberate no-op (e.g. "if this
+        message is less than a day old, do nothing").
+
+        See core.rule_engine.expand_actions_for_age for the evaluation
+        semantics (first-bracket-wins among brackets in the same rule).
+
+        Returns:
+            Self for method chaining
+        """
+        bracket: dict = {}
+        if age_days_gt is not None:
+            bracket["age_days_gt"] = age_days_gt
+        if age_days_gte is not None:
+            bracket["age_days_gte"] = age_days_gte
+        if age_days_lt is not None:
+            bracket["age_days_lt"] = age_days_lt
+        if age_days_lte is not None:
+            bracket["age_days_lte"] = age_days_lte
+        if age_days_eq is not None:
+            bracket["age_days_eq"] = age_days_eq
+        bracket["do"] = list(do)
+        self.actions.append(bracket)
         return self
 
     def add_comment(self, comment: str) -> "RuleBuilder":
@@ -287,22 +325,31 @@ class RuleBuilder:
         if not self.actions:
             return False, "At least one action is required"
 
-        # Validate each action
+        # Validate each action. Age-gated brackets ("do" + an age key) are
+        # validated via RuleValidator's bracket rules rather than duplicating
+        # that logic here; plain items must be a supported action type.
+        from core.rule_validator import RuleValidator
+
         for i, action in enumerate(self.actions):
+            is_bracket = "do" in action and any(
+                k in action for k in RuleValidator._BRACKET_AGE_KEYS
+            )
+            if is_bracket:
+                continue
+
             action_type = action.get("type", "")
             if not action_type:
                 return False, f"Action {i+1} is missing a type"
 
-            if action_type not in ("move", "set_keywords", "remove_keywords"):
+            if action_type != "move":
                 return False, f"Action {i+1} has unsupported type: {action_type}"
 
-            # Validate action type specific requirements
-            if action_type == "move":
-                if not action.get("target"):
-                    return False, f"Action {i+1} (move) requires a target folder"
-            elif action_type in ("set_keywords", "remove_keywords"):
-                if not action.get("keywords"):
-                    return False, f"Action {i+1} ({action_type}) requires at least one keyword"
+            if not action.get("target"):
+                return False, f"Action {i+1} (move) requires a target folder"
+
+        bracket_warnings = RuleValidator()._validate_actions({"actions": self.actions})
+        if bracket_warnings:
+            return False, bracket_warnings[0]
 
         # Validate each condition
         for i, condition in enumerate(self.conditions):
@@ -439,21 +486,25 @@ def save_rule(rule: dict | list, rules_dir: Path) -> Tuple[bool, str]:
     if "action" not in rule and "actions" not in rule:
         return False, "Rule must have either 'action' or 'actions' field"
 
+    from core.rule_validator import RuleValidator
+
+    def _is_bracket(item: dict) -> bool:
+        return "do" in item and any(k in item for k in RuleValidator._BRACKET_AGE_KEYS)
+
     # Validate single action (backward compatible)
     if "action" in rule:
         action = rule.get("action", {})
         if not isinstance(action, dict):
             return False, "Action must be a dictionary"
 
-        if "type" not in action:
-            return False, "Action must have 'type' field"
+        if not _is_bracket(action):
+            if "type" not in action:
+                return False, "Action must have 'type' field"
 
-        # Validate action type specific requirements
-        action_type = action.get("type", "")
-        if action_type == "move" and "target" not in action:
-            return False, "Move action must have 'target' field"
-        elif action_type in ("set_keywords", "remove_keywords") and "keywords" not in action:
-            return False, f"{action_type} action must have 'keywords' field"
+            # Validate action type specific requirements
+            action_type = action.get("type", "")
+            if action_type == "move" and "target" not in action:
+                return False, "Move action must have 'target' field"
 
     # Validate actions array
     if "actions" in rule:
@@ -468,6 +519,9 @@ def save_rule(rule: dict | list, rules_dir: Path) -> Tuple[bool, str]:
             if not isinstance(action, dict):
                 return False, f"Action {i+1} must be a dictionary"
 
+            if _is_bracket(action):
+                continue
+
             if "type" not in action:
                 return False, f"Action {i+1} must have 'type' field"
 
@@ -475,8 +529,10 @@ def save_rule(rule: dict | list, rules_dir: Path) -> Tuple[bool, str]:
             action_type = action.get("type", "")
             if action_type == "move" and "target" not in action:
                 return False, f"Action {i+1} (move) must have 'target' field"
-            elif action_type in ("set_keywords", "remove_keywords") and "keywords" not in action:
-                return False, f"Action {i+1} ({action_type}) must have 'keywords' field"
+
+        bracket_warnings = RuleValidator()._validate_actions({"actions": actions})
+        if bracket_warnings:
+            return False, bracket_warnings[0]
 
     # Create rules directory if it doesn't exist
     try:

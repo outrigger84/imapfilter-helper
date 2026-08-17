@@ -544,7 +544,7 @@ class RuleWizard:
             print(f"  Logic: {logic.upper()}")
 
         action = rule['action']
-        print(f"  Action: {action['type']} to '{action['target']}'")
+        print(f"  Action: {action.get('type', 'move')} to '{action.get('target', '(no target)')}'")
         print()
 
         # Confirm save

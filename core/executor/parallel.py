@@ -12,10 +12,9 @@ from tqdm import tqdm
 
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 
-from core.executor.helpers import _imap_response_text, _quote_mailbox, _uidvalidity_mismatch
+from core.executor.helpers import TRASH_LIKE_TARGETS, _imap_response_text, _quote_mailbox, _uidvalidity_mismatch
 
 from core.executor.operations import (
-    _perform_batch_keyword_operations,
     _perform_batch_move_operations,
     _verify_move_operation,
 )
@@ -167,7 +166,7 @@ def _execute_folder_worker(
     backup_dir: Path | None = None,
     logger: JsonLogger | None = None,
     progress_callback: Callable[[int], None] | None = None,
-) -> tuple[str, int, int]:
+) -> tuple[str, int, int, int]:
     """
     Process all actions for a single source folder (runs in worker thread).
 
@@ -190,7 +189,7 @@ def _execute_folder_worker(
         logger: JsonLogger for logging
 
     Returns:
-        Tuple of (folder_name, actions_done, actions_failed)
+        Tuple of (folder_name, actions_done, actions_failed, actions_done_trash)
     """
     if logger is None:
         logger = JsonLogger(Path("imapfilter.log"))
@@ -198,6 +197,7 @@ def _execute_folder_worker(
     main_db = None
     actions_done = 0
     actions_failed = 0
+    actions_done_trash = 0
 
     try:
         logger.log("DEBUG", "worker_start", {"worker_id": worker_id, "folder": folder})
@@ -225,12 +225,15 @@ def _execute_folder_worker(
                 console=f"  ▶ Worker {worker_id}: {grp_folder} → {target or '(no target)'} ({len(group_actions):,} messages)",
             )
             if dry_run:
+                is_trash_target = bool(target) and target.strip().lower() in TRASH_LIKE_TARGETS
                 for action in group_actions:
                     main_db.execute(
                         "UPDATE actions SET status = ?, executed_at = ? WHERE id = ?",
                         ("done", now_iso(), action["id"]),
                     )
                     actions_done += 1
+                    if is_trash_target:
+                        actions_done_trash += 1
                     if progress_callback is not None:
                         progress_callback(1)
                 main_db.commit()
@@ -290,47 +293,13 @@ def _execute_folder_worker(
 
                 supports_uid_move = hasattr(client, "capabilities") and b"MOVE" in getattr(client, "capabilities", ())
 
-                keyword_actions_set = [a for a in group_actions if a.get("action_type") == "set_keywords"]
-                keyword_actions_remove = [a for a in group_actions if a.get("action_type") == "remove_keywords"]
                 move_actions = [a for a in group_actions if a.get("action_type", "move") == "move"]
 
                 logger.log("DEBUG", "worker_actions_separated", {
                     "worker_id": worker_id,
                     "folder": grp_folder,
-                    "set_keywords": len(keyword_actions_set),
-                    "remove_keywords": len(keyword_actions_remove),
                     "moves": len(move_actions),
                 })
-
-                if keyword_actions_set:
-                    logger.log("DEBUG", "worker_processing_keywords_set", {"worker_id": worker_id, "folder": grp_folder, "count": len(keyword_actions_set)})
-                    batch_done, batch_failed = _perform_batch_keyword_operations(
-                        client=client,
-                        main_db=main_db,
-                        folder=grp_folder,
-                        actions=keyword_actions_set,
-                        action_type="set_keywords",
-                        logger=logger,
-                        verbose=False,
-                    )
-                    logger.log("DEBUG", "worker_keywords_set_done", {"worker_id": worker_id, "folder": grp_folder, "done": batch_done, "failed": batch_failed})
-                    actions_done += batch_done
-                    actions_failed += batch_failed
-
-                if keyword_actions_remove:
-                    logger.log("DEBUG", "worker_processing_keywords_remove", {"worker_id": worker_id, "folder": grp_folder, "count": len(keyword_actions_remove)})
-                    batch_done, batch_failed = _perform_batch_keyword_operations(
-                        client=client,
-                        main_db=main_db,
-                        folder=grp_folder,
-                        actions=keyword_actions_remove,
-                        action_type="remove_keywords",
-                        logger=logger,
-                        verbose=False,
-                    )
-                    logger.log("DEBUG", "worker_keywords_remove_done", {"worker_id": worker_id, "folder": grp_folder, "done": batch_done, "failed": batch_failed})
-                    actions_done += batch_done
-                    actions_failed += batch_failed
 
                 successful_moves: list[tuple[dict, str | None]] = []
 
@@ -350,6 +319,8 @@ def _execute_folder_worker(
                     )
                     actions_done += batch_done
                     actions_failed += batch_failed
+                    if target and target.strip().lower() in TRASH_LIKE_TARGETS:
+                        actions_done_trash += batch_done
                     if verify_moves and target:
                         successful_moves.extend(batch_successful)
 
@@ -412,7 +383,7 @@ def _execute_folder_worker(
             except Exception:
                 pass
 
-    return folder, actions_done, actions_failed
+    return folder, actions_done, actions_failed, actions_done_trash
 
 
 def execute_actions_parallel(
@@ -673,11 +644,12 @@ def execute_actions_parallel(
 
     total_done = 0
     total_failed = 0
+    total_done_trash = 0
     _stats_lock = threading.Lock()
     _first_error: list[Exception] = []  # captures first fatal error for strict mode
 
     def _worker(worker_id: int) -> None:
-        nonlocal total_done, total_failed
+        nonlocal total_done, total_failed, total_done_trash
         conn: imaplib.IMAP4 | None = None
         if not dry_run:
             conn = _imap_login(secrets_path, logger)
@@ -689,7 +661,7 @@ def execute_actions_parallel(
                     wfolder, wactions = work_q.get_nowait()
                 except _queue.Empty:
                     break
-                done = failed = 0
+                done = failed = done_trash = 0
                 reported_via_cb = [0]
 
                 def _progress_cb(n: int, _reported=reported_via_cb) -> None:
@@ -697,7 +669,7 @@ def execute_actions_parallel(
                     actions_bar.update(n)
 
                 try:
-                    _, done, failed = _execute_folder_worker(
+                    _, done, failed, done_trash = _execute_folder_worker(
                         conn=conn,
                         db_path=db_path,
                         folder=wfolder,
@@ -728,7 +700,7 @@ def execute_actions_parallel(
                     if not dry_run:
                         try:
                             conn = _imap_login(secrets_path, logger)
-                            _, done, failed = _execute_folder_worker(
+                            _, done, failed, done_trash = _execute_folder_worker(
                                 conn=conn,
                                 db_path=db_path,
                                 folder=wfolder,
@@ -765,6 +737,7 @@ def execute_actions_parallel(
                 with _stats_lock:
                     total_done += done
                     total_failed += failed
+                    total_done_trash += done_trash
                     _td, _tf = total_done, total_failed
                 # Catch-all: update bar for any actions not already reported via callback
                 # (e.g. verification steps, failed actions mid-exception, etc.)
@@ -809,6 +782,7 @@ def execute_actions_parallel(
         "failed": total_failed,
         "skipped": 0,
         "suppressed": 0,
+        "done_trash": total_done_trash,
     }
 
     logger.log(

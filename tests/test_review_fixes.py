@@ -28,20 +28,6 @@ from core.stream_processor import StreamMessage
 # ---------------------------------------------------------------------------
 
 
-def test_find_matching_rule_evaluates_flag_conditions():
-    rule = {
-        "name": "keyword rule",
-        "priority": 10,
-        "conditions": [{"has_keyword": "newsletter"}],
-    }
-    header = {"from": "sender@example.com"}
-
-    assert find_matching_rule(header, [rule], flags=["newsletter"]) is rule
-    assert find_matching_rule(header, [rule], flags=["other"]) is None
-    # Without flags the condition cannot be evaluated and must not match.
-    assert find_matching_rule(header, [rule]) is None
-
-
 def test_find_matching_rule_evaluates_age_conditions():
     rule = {
         "name": "age rule",
@@ -102,16 +88,19 @@ def test_coverage_analyzer_matches_executor_precedence(tmp_path: Path):
     # Overlapping rules: lower priority number must win, as in evaluate_rules.
     _write_rule(rules_dir, "specific", 10, [{"header": "from", "contains": "@example.com"}])
     _write_rule(rules_dir, "broad", 100, [{"header": "from", "contains": "@"}])
-    # Rule that only matches via flags — regression check for metadata loss.
-    _write_rule(rules_dir, "flagged", 5, [{"has_keyword": "special"}])
+    # Rule that only matches via age — regression check for metadata loss.
+    _write_rule(rules_dir, "aged", 5, [{"age_days_gt": 30}])
 
     db_path = tmp_path / "cache.db"
     conn = sqlite3.connect(db_path)
     conn.execute("CREATE TABLE headers (folder TEXT, uid TEXT, data TEXT, updated_at TEXT)")
     plain = json.dumps({"header": "From: sender@example.com\n\n", "flags": []})
-    special = json.dumps({"header": "From: other@example.com\n\n", "flags": ["special"]})
+    old = json.dumps({
+        "header": "From: other@example.com\n\n",
+        "internaldate": (datetime.now(timezone.utc) - timedelta(days=90)).strftime("%d-%b-%Y %H:%M:%S +0000"),
+    })
     conn.execute("INSERT INTO headers VALUES ('INBOX', '1', ?, NULL)", (plain,))
-    conn.execute("INSERT INTO headers VALUES ('INBOX', '2', ?, NULL)", (special,))
+    conn.execute("INSERT INTO headers VALUES ('INBOX', '2', ?, NULL)", (old,))
     conn.commit()
     conn.close()
 
@@ -122,8 +111,8 @@ def test_coverage_analyzer_matches_executor_precedence(tmp_path: Path):
         "overlap must be attributed to the lower-priority-number rule, "
         f"got {dict(stats.coverage_by_rule)}"
     )
-    assert stats.coverage_by_rule.get("flagged") == 1, (
-        "has_keyword rules must be evaluated with message flags, "
+    assert stats.coverage_by_rule.get("aged") == 1, (
+        "age_days_gt rules must be evaluated with message dates, "
         f"got {dict(stats.coverage_by_rule)}"
     )
     assert "broad" not in stats.coverage_by_rule
@@ -134,18 +123,30 @@ def test_coverage_analyzer_matches_executor_precedence(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_validator_flags_header_mixed_with_flag_condition():
+def test_validator_flags_header_mixed_with_age_condition():
     validator = RuleValidator()
     rule = {
         "name": "mixed",
         "conditions": [
-            {"header": "from", "contains": "x@example.com", "has_keyword": "seen-it"}
+            {"header": "from", "contains": "x@example.com", "age_days_gt": 30}
         ],
         "actions": [{"type": "move", "target": "Archive"}],
     }
     is_valid, warnings = validator.validate_rule(rule)
     assert not is_valid
     assert any("IGNORED" in w for w in warnings)
+
+
+def test_validator_flags_retired_keyword_condition():
+    validator = RuleValidator()
+    rule = {
+        "name": "stale-keyword",
+        "conditions": [{"has_keyword": "seen-it"}],
+        "actions": [{"type": "move", "target": "Archive"}],
+    }
+    is_valid, warnings = validator.validate_rule(rule)
+    assert not is_valid
+    assert any("no longer evaluated" in w for w in warnings)
 
 
 def test_validator_flags_multiple_operators_in_one_block():
@@ -169,7 +170,6 @@ def test_validator_accepts_well_formed_rules():
         "conditions": {
             "all": [
                 {"header": "from", "contains": "@example.com"},
-                {"has_keyword": "newsletter"},
                 {"age_days_gt": 30},
             ]
         },
@@ -179,14 +179,15 @@ def test_validator_accepts_well_formed_rules():
     assert is_valid, warnings
 
 
-def test_validator_accepts_flag_and_age_in_same_block():
-    # The engine ANDs flag and age keys in one dict correctly; only header
-    # operators are dropped. This combination must not warn.
+def test_validator_accepts_well_formed_age_gated_actions():
     validator = RuleValidator()
     rule = {
-        "name": "flag-age",
-        "conditions": [{"has_keyword": "newsletter", "age_days_gt": 30}],
-        "actions": [{"type": "move", "target": "Archive"}],
+        "name": "retention",
+        "conditions": {"header": "from", "contains": "@example.com"},
+        "actions": [
+            {"age_days_lte": 365, "do": [{"type": "move", "target": "A"}]},
+            {"age_days_gt": 365, "do": [{"type": "move", "target": "B"}]},
+        ],
     }
     is_valid, warnings = validator.validate_rule(rule)
     assert is_valid, warnings

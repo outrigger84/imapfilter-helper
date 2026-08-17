@@ -17,6 +17,7 @@ from core.logging_utils import JsonLogger, PhaseTimer, now_iso
 
 
 from core.executor.helpers import (
+    TRASH_LIKE_TARGETS,
     _encode_mailbox_utf7,
     _format_imap_details,
     _imap_response_text,
@@ -112,8 +113,9 @@ def execute_actions(
 
     suppressed = 0  # calculated after CTE is built below
 
-    # Order by effective priority first (ensures keywords execute before moves across all rules)
-    # Then by folder/target for batch processing, then by creation order
+    # Order by effective priority first (rule priority, then position within
+    # a rule's expanded actions list). Then by folder/target for batch
+    # processing, then by creation order.
     if folder_order == "most-first":
         order_clause = "ORDER BY priority DESC, folder_action_count DESC, folder, target, created_at ASC, id ASC"
     elif folder_order == "least-first":
@@ -257,7 +259,7 @@ def execute_actions(
         disable=not (show_progress and show_folder_bar),
     )
 
-    stats = {"done": 0, "skipped": 0, "failed": 0, "suppressed": suppressed}
+    stats = {"done": 0, "skipped": 0, "failed": 0, "suppressed": suppressed, "done_trash": 0}
 
     if verbose and suppressed:
         logger.log(
@@ -519,144 +521,6 @@ def execute_actions(
         # current_items: (action_id, uid, rule_name, action_type, action_data)
         rule_name = current_items[0][2] if current_items else None
 
-        # Handle keyword actions (set_keywords, remove_keywords)
-        if action_type in ("set_keywords", "remove_keywords"):
-            if dry_run:
-                for a_id, uid, _, _, action_data in current_items:
-                    keywords = []
-                    if action_data:
-                        try:
-                            data = json.loads(action_data)
-                            keywords = data.get("keywords", [])
-                        except json.JSONDecodeError:
-                            pass
-
-                    actions_bar.update(1)
-                    if verbose:
-                        logger.log(
-                            "INFO",
-                            "dry_action_preview",
-                            {"folder": folder, "uid": uid, "action_type": action_type, "keywords": keywords},
-                            console=f"   📝 Would {action_type} on {folder}/{uid}: {keywords}",
-                        )
-            else:
-                assert client is not None
-
-                # Select the folder once for all per-message STORE operations.
-                sel_typ, sel_resp = client.select(f'"{folder}"')
-                log_imap_call(
-                    "imap_select",
-                    op_label=f'SELECT "{folder}"',
-                    status=sel_typ,
-                    response=sel_resp,
-                    folder=folder,
-                )
-                if sel_typ != "OK":
-                    for a_id, uid, _, _, _ in current_items:
-                        db.execute(
-                            "UPDATE actions SET status='failed', executed_at=? WHERE id=?",
-                            (now_iso(), a_id),
-                        )
-                        stats["failed"] += 1
-                        actions_bar.update(1)
-                    db.commit()
-                    logger.log(
-                        "ERROR",
-                        f"{action_type}_select_failed",
-                        {"folder": folder, "status": sel_typ},
-                        console=f"   ❌ Cannot select {folder} for {action_type}",
-                    )
-                    folders_bar.update(1)
-                    current_items = []
-                    current_key = None
-                    return
-
-                store_op = "+FLAGS" if action_type == "set_keywords" else "-FLAGS"
-
-                for a_id, uid, _, _, action_data in current_items:
-                    keywords = []
-                    if action_data:
-                        try:
-                            data = json.loads(action_data)
-                            keywords = data.get("keywords", [])
-                        except json.JSONDecodeError:
-                            logger.log(
-                                "WARN",
-                                "action_data_parse_failed",
-                                {"folder": folder, "uid": uid, "action_id": a_id},
-                            )
-
-                    if not keywords:
-                        logger.log(
-                            "WARN",
-                            f"{action_type}_empty",
-                            {"folder": folder, "uid": uid},
-                        )
-                        db.execute(
-                            "UPDATE actions SET status='skipped', executed_at=? WHERE id=?",
-                            (now_iso(), a_id),
-                        )
-                        stats["skipped"] += 1
-                        actions_bar.update(1)
-                        continue
-
-                    flags_str = " ".join(keywords)
-                    try:
-                        typ, resp = client.uid("STORE", uid, store_op, f"({flags_str})")
-                        log_imap_call(
-                            f"imap_uid_store_{action_type}",
-                            op_label=f"UID STORE {store_op}",
-                            status=typ,
-                            response=resp,
-                            folder=folder,
-                            uid=uid,
-                        )
-                        if typ == "OK":
-                            db.execute(
-                                "UPDATE actions SET status='done', executed_at=? WHERE id=?",
-                                (now_iso(), a_id),
-                            )
-                            stats["done"] += 1
-                            if verbose:
-                                logger.log(
-                                    "INFO",
-                                    f"{action_type}_done",
-                                    {"folder": folder, "uid": uid, "keywords": keywords},
-                                    console=f"   🏷️  {action_type} {folder}/{uid}: {keywords}",
-                                )
-                        else:
-                            error_detail = _format_imap_details(resp)
-                            db.execute(
-                                "UPDATE actions SET status='failed', executed_at=?, error_message=? WHERE id=?",
-                                (now_iso(), error_detail, a_id),
-                            )
-                            stats["failed"] += 1
-                            logger.log(
-                                "ERROR",
-                                f"{action_type}_failed",
-                                {"folder": folder, "uid": uid, "keywords": keywords, "error": error_detail},
-                            )
-                    except imaplib.IMAP4.error as exc:
-                        db.execute(
-                            "UPDATE actions SET status='failed', executed_at=?, error_message=? WHERE id=?",
-                            (now_iso(), str(exc), a_id),
-                        )
-                        stats["failed"] += 1
-                        logger.log(
-                            "ERROR",
-                            f"{action_type}_imap_error",
-                            {"folder": folder, "uid": uid, "error": str(exc)},
-                        )
-
-                    actions_bar.update(1)
-
-                db.commit()
-
-            folders_bar.update(1)
-            current_items = []
-            current_key = None
-            return
-
         # Handle move actions (original logic)
         uids = [uid for _, uid, _, _, _ in current_items]
 
@@ -845,6 +709,8 @@ def execute_actions(
                         (folder, uid_value),
                     ).rowcount
                     stats["done"] += 1
+                    if target and target.strip().lower() in TRASH_LIKE_TARGETS:
+                        stats["done_trash"] += 1
 
                     console_msg = f"   ✅ Moved {folder}/{uid_value} → {display_target}" if verbose else None
                     logger.log(
@@ -941,6 +807,8 @@ def execute_actions(
                         )
                         stats["failed"] += 1
                         stats["done"] -= 1
+                        if target and target.strip().lower() in TRASH_LIKE_TARGETS:
+                            stats["done_trash"] -= 1
 
                         context = {
                             "folder": folder,
@@ -1584,7 +1452,7 @@ def execute_actions(
             break
         for a_id, uid, folder, _raw_target, rule_name, _priority, _created_at, action_type, action_data in rows:
             target = _encode_mailbox_utf7(_raw_target) if _raw_target else _raw_target
-            # Group by (folder, target, action_type) to prevent mixing moves with keyword actions
+            # Group by (folder, target, action_type) for batch processing
             key = (folder, target, action_type)
             if current_key is not None and key != current_key:
                 flush_group()

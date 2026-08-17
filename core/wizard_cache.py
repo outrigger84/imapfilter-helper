@@ -1,7 +1,7 @@
 """
 Wizard Cache Manager
 
-Provides persistent caching for wizard data (folders, keywords) with TTL.
+Provides persistent caching for wizard data (folders) with TTL.
 Thread-safe for concurrent wizard sessions.
 Includes coverage analysis caching for performance optimization.
 """
@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 class WizardCache:
     """
-    Persistent cache for wizard data (folders, keywords) with 6-hour TTL.
+    Persistent cache for wizard data (folders) with 6-hour TTL.
 
     Thread-safe for concurrent wizard sessions.
     """
@@ -126,57 +126,11 @@ class WizardCache:
         }
         self.save()
 
-    def get_keywords(self) -> Optional[List[Tuple[str, int]]]:
-        """
-        Get cached keywords if valid (< 6 hours old).
-
-        Returns:
-            List of (keyword, count) tuples, or None if stale/missing
-        """
-        cache = self.load()
-        keywords_cache = cache.get('keywords', {})
-
-        timestamp = keywords_cache.get('timestamp', 0)
-        data = keywords_cache.get('data')
-
-        if data is None:
-            return None
-
-        # Check if cache is stale
-        age = time.time() - timestamp
-        if age > self.CACHE_TTL_SECONDS:
-            return None
-
-        # Convert from JSON list format to tuples
-        return [(kw, count) for kw, count in data]
-
-    def set_keywords(self, keywords: List[Tuple[str, int]]):
-        """
-        Store keywords in cache with current timestamp.
-
-        Args:
-            keywords: List of (keyword, count) tuples
-        """
-        cache = self.load()
-        # Convert tuples to lists for JSON serialization
-        cache['keywords'] = {
-            'timestamp': time.time(),
-            'data': [[kw, count] for kw, count in keywords]
-        }
-        self.save()
-
     def invalidate_folders(self):
         """Force re-fetch of folders on next request."""
         cache = self.load()
         if 'folders' in cache:
             cache['folders']['timestamp'] = 0
-            self.save()
-
-    def invalidate_keywords(self):
-        """Force re-extraction of keywords on next request."""
-        cache = self.load()
-        if 'keywords' in cache:
-            cache['keywords']['timestamp'] = 0
             self.save()
 
     def clear(self):
@@ -291,6 +245,5 @@ class WizardCache:
         return {
             'version': self.CACHE_VERSION,
             'folders': {'timestamp': 0, 'data': None},
-            'keywords': {'timestamp': 0, 'data': None},
             'coverage': {'timestamp': 0, 'rules_mtime': None, 'db_mtime': None, 'data': None}
         }

@@ -24,9 +24,44 @@ except Exception:  # pragma: no cover - gracefully degrade when curses is missin
 from core.config import build_default_config
 from core.database import init_db
 from core.logging_utils import JsonLogger
-from core.rule_engine import evaluate_rules, load_rules
+from core.rule_engine import all_possible_move_targets, evaluate_rules, load_rules
 from core.rule_utils import slugify
 from core.rule_validator import RuleValidator
+
+
+def _is_age_bracket(action: Any) -> bool:
+    """True if an actions-list item is an age-gated bracket (a "do" key
+    plus at least one age key) rather than a plain action."""
+    return isinstance(action, dict) and "do" in action and any(
+        k in action for k in RuleValidator._BRACKET_AGE_KEYS
+    )
+
+
+def _describe_age_bracket(bracket: dict) -> str:
+    """One-line description of a bracket's age gate, e.g. 'age > 30 days'."""
+    labels = {
+        "age_days_gt": "age > {} days",
+        "age_days_gte": "age >= {} days",
+        "age_days_lt": "age < {} days",
+        "age_days_lte": "age <= {} days",
+        "age_days_eq": "age = {} days",
+    }
+    parts = [labels[k].format(bracket[k]) for k in labels if k in bracket]
+    return " and ".join(parts) if parts else "(no age condition)"
+
+
+def _describe_do_list(do_items: Any) -> str:
+    """One-line description of a bracket's nested actions, or 'no action'."""
+    if not isinstance(do_items, list) or not do_items:
+        return "no action"
+    parts = []
+    for item in do_items:
+        if not isinstance(item, dict):
+            continue
+        act_type = item.get("type", "move")
+        target = item.get("target")
+        parts.append(f"{act_type} → {target}" if target else act_type)
+    return ", ".join(parts) if parts else "no action"
 
 
 # ---------------------------------------------------------------------------
@@ -250,19 +285,15 @@ def summarise_condition(node: Any) -> str:
             label = "ALL" if key == "all" else "ANY"
             return f"Group {label} ({len(children)} entries)"
 
-        # Handle keyword/flag conditions
-        if "has_keyword" in node or "has_flag" in node:
-            keyword = node.get("has_keyword") or node.get("has_flag")
-            return f"has keyword: {keyword}"
-        if "lacks_keyword" in node or "lacks_flag" in node:
-            keyword = node.get("lacks_keyword") or node.get("lacks_flag")
-            return f"lacks keyword: {keyword}"
-
         # Handle age conditions
         if "age_days_gt" in node:
             return f"age > {node['age_days_gt']} days"
+        if "age_days_gte" in node:
+            return f"age >= {node['age_days_gte']} days"
         if "age_days_lt" in node:
             return f"age < {node['age_days_lt']} days"
+        if "age_days_lte" in node:
+            return f"age <= {node['age_days_lte']} days"
         if "age_days_eq" in node:
             return f"age = {node['age_days_eq']} days"
 
@@ -300,10 +331,7 @@ def summarise_action(actions: Any) -> str:
         summaries = []
         for action in actions:
             if isinstance(action, dict):
-                act_type = action.get("type", "move")
-                target = action.get("target")
-                summary = f"{act_type} → {target}" if target else act_type
-                summaries.append(summary)
+                summaries.append(summarise_action(action))
         if summaries:
             return f"{len(actions)} actions: {', '.join(summaries)}"
         return "(no actions)"
@@ -311,6 +339,10 @@ def summarise_action(actions: Any) -> str:
     # Handle single action (dict)
     if not isinstance(actions, dict):
         return "(no action)"
+
+    if _is_age_bracket(actions):
+        return f"if {_describe_age_bracket(actions)}: {_describe_do_list(actions.get('do'))}"
+
     act_type = actions.get("type", "move")
     target = actions.get("target")
     summary = f"{act_type} → {target}" if target else act_type
@@ -417,14 +449,10 @@ def _detect_condition_type(node: dict[str, Any]) -> str:
     """Detect the type of a condition node.
 
     Returns:
-        "group" | "keyword" | "age" | "header" | "unknown"
+        "group" | "age" | "header" | "unknown"
     """
     if "all" in node or "any" in node:
         return "group"
-
-    # Check for keyword conditions
-    if any(key in node for key in ["has_keyword", "has_flag", "lacks_keyword", "lacks_flag"]):
-        return "keyword"
 
     # Check for age conditions
     if any(key in node for key in ["age_days_gt", "age_days_lt", "age_days_eq"]):
@@ -537,77 +565,6 @@ def edit_simple_condition(node: dict[str, Any]) -> dict[str, Any]:
             node[match_field] = prompt("  Match value: ", allow_empty=True)
         elif action == "x":
             edit_generic_dict(node, protected={"header", "equals", "not_equals", "contains", "not_contains", "regex", "not_regex"})
-
-
-def edit_keyword_condition(node: dict[str, Any]) -> dict[str, Any]:
-    """Interactively edit a keyword-based condition."""
-
-    while True:
-        # Detect which operator is being used
-        operator = None
-        keyword_value = ""
-        for op in ["has_keyword", "has_flag", "lacks_keyword", "lacks_flag"]:
-            if op in node:
-                operator = op
-                keyword_value = node.get(op, "")
-                break
-
-        if not operator:
-            operator = "has_keyword"
-
-        # Build extras (non-protected fields)
-        extras = {k: v for k, v in node.items()
-                  if k not in {"has_keyword", "has_flag", "lacks_keyword", "lacks_flag"}}
-        extras_summary = ", ".join(
-            f"{key}={json.dumps(value, ensure_ascii=False)}"
-            for key, value in extras.items()
-        ) or "(none)"
-
-        # Friendly operator display
-        operator_display = {
-            "has_keyword": "has keyword",
-            "has_flag": "has keyword",
-            "lacks_keyword": "lacks keyword",
-            "lacks_flag": "lacks keyword"
-        }[operator]
-
-        action = choose_menu_option(
-            "Keyword condition editor",
-            [
-                ("o", f"Operator : {operator_display}"),
-                ("v", f"Keyword  : {keyword_value or '<unset>'}"),
-                ("x", f"Extras   : {extras_summary}"),
-                ("b", "Back"),
-            ],
-        )
-
-        if action in {None, "b"}:
-            return node
-
-        if action == "o":
-            print("\n  1. Has keyword")
-            print("  2. Lacks keyword")
-            choice = input("  > ").strip()
-
-            # Determine new operator
-            if choice == "1":
-                new_op = "has_keyword"
-            elif choice == "2":
-                new_op = "lacks_keyword"
-            else:
-                print("⚠️  Please enter 1 or 2.")
-                continue
-
-            # Remove all existing keyword operator keys
-            for op in ["has_keyword", "has_flag", "lacks_keyword", "lacks_flag"]:
-                node.pop(op, None)
-            node[new_op] = keyword_value or ""
-
-        elif action == "v":
-            node[operator] = prompt("  Keyword/Flag: ", allow_empty=True)
-
-        elif action == "x":
-            edit_generic_dict(node, protected={"has_keyword", "has_flag", "lacks_keyword", "lacks_flag"})
 
 
 def edit_age_condition(node: dict[str, Any]) -> dict[str, Any]:
@@ -777,31 +734,10 @@ def _get_match_type_menu(header: str | None = None) -> str:
 
 
 def _get_action_type_menu() -> str:
-    """Display numbered menu for action types and return the selected type."""
+    """Return the action type for a plain action (only "move" is supported)."""
 
-    action_types = [
-        ("move", "Move to folder"),
-        ("set_keywords", "Set keywords (add labels)"),
-        ("remove_keywords", "Remove keywords (remove labels)"),
-    ]
-
-    while True:
-        print("\nAction type:")
-        for idx, (type_key, description) in enumerate(action_types, start=1):
-            print(f"  {idx}. {description}")
-
-        raw = input("Select action type (1-3): ").strip()
-        if not raw:
-            print("⚠️  Please enter a number between 1 and 3.")
-            continue
-
-        try:
-            choice = int(raw)
-            if 1 <= choice <= 3:
-                return action_types[choice - 1][0]
-            print("⚠️  Please enter a number between 1 and 3.")
-        except ValueError:
-            print("⚠️  Please enter a valid number.")
+    print("\nAction type: move (the only supported plain action type)")
+    return "move"
 
 
 def select_condition_field() -> tuple[str, str]:
@@ -809,8 +745,8 @@ def select_condition_field() -> tuple[str, str]:
 
     Returns:
         Tuple of (field_type, field_name) where:
-        - field_type: "header" | "keyword" | "age"
-        - field_name: field name for headers, or "" for keyword/age
+        - field_type: "header" | "age"
+        - field_name: field name for headers, or "" for age
     """
     print("\nSelect condition field:")
     print("  1. From (sender address)")
@@ -818,9 +754,8 @@ def select_condition_field() -> tuple[str, str]:
     print("  3. Subject")
     print("  4. List-ID")
     print("  5. Reply-To")
-    print("  6. Keyword/Flag (IMAP keywords)")
-    print("  7. Age (message age in days)")
-    print("  8. Other (enter custom header)")
+    print("  6. Age (message age in days)")
+    print("  7. Other (enter custom header)")
 
     while True:
         choice = input("  > ").strip()
@@ -830,15 +765,14 @@ def select_condition_field() -> tuple[str, str]:
             "3": ("header", "subject"),
             "4": ("header", "list-id"),
             "5": ("header", "reply-to"),
-            "6": ("keyword", ""),
-            "7": ("age", ""),
+            "6": ("age", ""),
         }
         if choice in field_map:
             return field_map[choice]
-        elif choice == "8":
+        elif choice == "7":
             custom = prompt("  Enter header name: ")
             return ("header", custom.lower())
-        print("⚠️  Please enter a number 1-8.")
+        print("⚠️  Please enter a number 1-7.")
 
 
 def select_header_field() -> str:
@@ -860,23 +794,6 @@ def make_condition() -> dict[str, Any]:
         match_field = _get_match_type_menu(header=field_name)
         value = prompt("  Match value: ")
         return {"header": field_name, match_field: value}
-
-    elif field_type == "keyword":
-        # Create keyword condition
-        print("\nKeyword operator:")
-        print("  1. Has keyword (message must have this keyword/flag)")
-        print("  2. Lacks keyword (message must NOT have this keyword/flag)")
-
-        while True:
-            choice = input("  > ").strip()
-            if choice == "1":
-                keyword = prompt("  Keyword/Flag: ")
-                return {"has_keyword": keyword}
-            elif choice == "2":
-                keyword = prompt("  Keyword/Flag: ")
-                return {"lacks_keyword": keyword}
-            else:
-                print("⚠️  Please enter 1 or 2.")
 
     elif field_type == "age":
         # Create age condition
@@ -1081,9 +998,7 @@ def edit_condition_group(node: dict[str, Any]) -> dict[str, Any]:
             child_dict = dict(child)
             cond_type = _detect_condition_type(child_dict)
 
-            if cond_type == "keyword":
-                children[index] = edit_keyword_condition(child_dict)
-            elif cond_type == "age":
+            if cond_type == "age":
                 children[index] = edit_age_condition(child_dict)
             else:  # header or unknown
                 children[index] = edit_simple_condition(child_dict)
@@ -1116,9 +1031,14 @@ def edit_action_block(actions: Any) -> list[dict[str, Any]]:
         if choice is None or choice == back_index:
             return actions
         if choice == add_index:
-            # Add new action
-            new_action = {"type": "move", "target": ""}
-            actions.append(new_action)
+            kind = choose_menu_option(
+                "Add action",
+                [("m", "Move action"), ("a", "Age-gated bracket"), ("b", "Cancel")],
+            )
+            if kind == "m":
+                actions.append({"type": "move", "target": ""})
+            elif kind == "a":
+                actions.append(_edit_age_bracket_action({}))
             continue
 
         # Edit existing action
@@ -1132,13 +1052,16 @@ def edit_action_block(actions: Any) -> list[dict[str, Any]]:
             actions.pop(choice)
             continue
         if action_choice == "e":
-            actions[choice] = _edit_single_action(dict(action))
+            if _is_age_bracket(action):
+                actions[choice] = _edit_age_bracket_action(dict(action))
+            else:
+                actions[choice] = _edit_single_action(dict(action))
 
     return actions
 
 
 def _edit_single_action(action: dict[str, Any]) -> dict[str, Any]:
-    """Interactive editor for a single action within an action list."""
+    """Interactive editor for a single plain (move) action within an action list."""
 
     if not action:
         action = {"type": "move", "target": ""}
@@ -1146,19 +1069,12 @@ def _edit_single_action(action: dict[str, Any]) -> dict[str, Any]:
     while True:
         act_type = action.get("type", "move")
         target = action.get("target", "")
-        keywords = action.get("keywords", [])
 
-        # Build menu options based on action type
         options: list[tuple[str, str]] = [("t", f"Type: {act_type}")]
-
         if act_type == "move":
             options.append(("r", f"Target folder: {target or '<unset>'}"))
-        elif act_type in ("set_keywords", "remove_keywords"):
-            keywords_summary = ", ".join(keywords) if keywords else "<unset>"
-            options.append(("k", f"Keywords: {keywords_summary}"))
 
-        # Add extras and back options
-        extras = {k: v for k, v in action.items() if k not in {"type", "target", "keywords"}}
+        extras = {k: v for k, v in action.items() if k not in {"type", "target"}}
         extras_summary = ", ".join(
             f"{key}={json.dumps(value, ensure_ascii=False)}" for key, value in extras.items()
         ) or "(none)"
@@ -1171,72 +1087,116 @@ def _edit_single_action(action: dict[str, Any]) -> dict[str, Any]:
             return action
 
         if choice == "t":
-            new_type = _get_action_type_menu()
-            # Clean up old fields when changing type
-            if new_type != act_type:
-                action["type"] = new_type
-                action.pop("target", None)
-                action.pop("keywords", None)
-                if new_type == "move":
-                    action["target"] = ""
-                else:
-                    action["keywords"] = []
+            action["type"] = _get_action_type_menu()
+            if "target" not in action:
+                action["target"] = ""
 
         elif choice == "r" and act_type == "move":
             action["target"] = prompt("  Target folder: ", allow_empty=True)
 
-        elif choice == "k" and act_type in ("set_keywords", "remove_keywords"):
-            # Edit keywords array
-            keywords = action.get("keywords", [])
-            while True:
-                print("\nCurrent keywords:")
-                if keywords:
-                    for i, kw in enumerate(keywords, 1):
-                        print(f"  {i}. {kw}")
-                else:
-                    print("  (none)")
-
-                print("\nOptions:")
-                print("  a. Add keyword")
-                print("  r. Remove keyword")
-                print("  c. Clear all")
-                print("  d. Done")
-
-                kw_choice = input("  > ").strip().lower()
-
-                if kw_choice == "a":
-                    kw = prompt("Enter keyword: ")
-                    if kw and kw not in keywords:
-                        keywords.append(kw)
-                        print(f"✓ Added: {kw}")
-
-                elif kw_choice == "r":
-                    if keywords:
-                        idx_str = input("Enter number to remove: ").strip()
-                        try:
-                            idx = int(idx_str) - 1
-                            if 0 <= idx < len(keywords):
-                                removed = keywords.pop(idx)
-                                print(f"✓ Removed: {removed}")
-                        except ValueError:
-                            print("⚠️  Invalid number")
-
-                elif kw_choice == "c":
-                    if confirm("Clear all keywords?", default=False):
-                        keywords.clear()
-                        print("✓ Cleared all keywords")
-
-                elif kw_choice == "d":
-                    action["keywords"] = keywords
-                    break
-
         elif choice == "x":
-            extras = {k: v for k, v in action.items() if k not in {"type", "target", "keywords"}}
+            extras = {k: v for k, v in action.items() if k not in {"type", "target"}}
             edit_generic_dict(extras)
             for key in list(action):
-                if key not in {"type", "target", "keywords"}:
+                if key not in {"type", "target"}:
                     action.pop(key)
             action.update(extras)
+
+
+def _edit_age_bracket_action(bracket: dict[str, Any]) -> dict[str, Any]:
+    """Interactive editor for an age-gated action bracket.
+
+    A bracket has one or two age keys (a lower bound age_days_gt/gte and/or
+    an upper bound age_days_lt/lte, or age_days_eq alone) plus a "do" list
+    of ordinary actions that only run when the bracket's age gate is
+    satisfied. See core.rule_engine.expand_actions_for_age.
+    """
+    if not isinstance(bracket.get("do"), list):
+        bracket["do"] = []
+
+    while True:
+        age_summary = _describe_age_bracket(bracket)
+        do_summary = _describe_do_list(bracket.get("do"))
+
+        options: list[tuple[str, str]] = [
+            ("a", f"Age condition: {age_summary}"),
+            ("d", f"Actions when it fires: {do_summary}"),
+            ("b", "Back"),
+        ]
+        choice = choose_menu_option("Age-gated bracket editor", options)
+
+        if choice in {None, "b"}:
+            return bracket
+
+        if choice == "a":
+            _edit_age_bracket_bounds(bracket)
+
+        elif choice == "d":
+            bracket["do"] = edit_action_block(bracket.get("do") or [])
+
+
+def _edit_age_bracket_bounds(bracket: dict[str, Any]) -> None:
+    """Edit a bracket's age key(s) in place."""
+
+    age_keys = list(RuleValidator._BRACKET_AGE_KEYS)
+
+    print("\nAge condition:")
+    print("  1. Older than N days (age > N)")
+    print("  2. Older than or equal to N days (age >= N)")
+    print("  3. Younger than N days (age < N)")
+    print("  4. Younger than or equal to N days (age <= N)")
+    print("  5. Exactly N days old (age = N)")
+    print("  6. Bounded band (combine a lower and upper bound)")
+    choice = input("  > ").strip()
+
+    simple = {
+        "1": "age_days_gt",
+        "2": "age_days_gte",
+        "3": "age_days_lt",
+        "4": "age_days_lte",
+        "5": "age_days_eq",
+    }
+    if choice in simple:
+        value = prompt("  Days: ", allow_empty=False)
+        try:
+            days = float(value)
+        except ValueError:
+            print("⚠️  Please enter a number.")
+            return
+        for key in age_keys:
+            bracket.pop(key, None)
+        bracket[simple[choice]] = days
+        return
+
+    if choice == "6":
+        lower_choice = input("  Lower bound - 1: age > N, 2: age >= N > ").strip()
+        lower_key = {"1": "age_days_gt", "2": "age_days_gte"}.get(lower_choice)
+        if not lower_key:
+            print("⚠️  Invalid choice.")
+            return
+        lower_value = prompt("  Lower bound days: ", allow_empty=False)
+
+        upper_choice = input("  Upper bound - 1: age < N, 2: age <= N > ").strip()
+        upper_key = {"1": "age_days_lt", "2": "age_days_lte"}.get(upper_choice)
+        if not upper_key:
+            print("⚠️  Invalid choice.")
+            return
+        upper_value = prompt("  Upper bound days: ", allow_empty=False)
+
+        try:
+            lower_days = float(lower_value)
+            upper_days = float(upper_value)
+        except ValueError:
+            print("⚠️  Please enter numbers.")
+            return
+
+        for key in age_keys:
+            bracket.pop(key, None)
+        bracket[lower_key] = lower_days
+        bracket[upper_key] = upper_days
+        return
+
+    print("⚠️  Invalid choice.")
 
 
 def edit_comments_list(items: list[str]) -> list[str]:
@@ -1382,13 +1342,12 @@ class RuleManager:
             if isinstance(actions, dict):
                 actions = [actions]
 
-            for action in actions:
-                if isinstance(action, dict) and action.get('type') == 'move':
-                    target = action.get('target', '')
-                    if target:  # Skip empty targets
-                        if target not in folders:
-                            folders[target] = []
-                        folders[target].append(rule)
+            # Sees through age-gated action brackets, so a rule with
+            # different targets for different age bands (e.g. "move to X
+            # while recent, move to Deleted Messages once old") is listed
+            # under every folder it could ever move a message to.
+            for target in all_possible_move_targets(actions):
+                folders.setdefault(target, []).append(rule)
 
         # Sort rules within each folder by priority
         for folder in folders:

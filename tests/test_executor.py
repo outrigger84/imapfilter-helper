@@ -611,28 +611,17 @@ def test_missing_message_id_verification_skipped(tmp_path):
     db.close()
 
 
-def test_execute_actions_applies_set_keywords(tmp_path: Path):
-    """set_keywords actions issue a real UID STORE +FLAGS via execute_actions()."""
+def test_execute_actions_tracks_done_trash(tmp_path: Path):
+    """stats['done_trash'] counts moves to trash-like targets separately
+    from ordinary moves, for the --notification-summary execute digest."""
     db, logger = _prepare_db_with_actions(
         tmp_path,
-        [],
+        [
+            ("msg-1", "INBOX", "rule-1", "Deleted Messages", 100, "pending", "2024-01-01T00:00:00Z"),
+            ("msg-2", "INBOX", "rule-1", "Archive", 100, "pending", "2024-01-01T00:00:00Z"),
+            ("msg-3", "INBOX", "rule-1", "Trash", 100, "pending", "2024-01-01T00:00:00Z"),
+        ],
     )
-    with db:
-        db.execute(
-            "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at, action_type, action_data) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-            (
-                "msg-1",
-                "INBOX",
-                "retention-rule",
-                None,
-                100,
-                "pending",
-                "2024-01-01T00:00:00Z",
-                "set_keywords",
-                json.dumps({"keywords": ["Retain-30"]}),
-            ),
-        )
     client = FakeClient()
 
     _timer, stats = execute_actions(
@@ -645,47 +634,7 @@ def test_execute_actions_applies_set_keywords(tmp_path: Path):
         verbose=False,
     )
 
-    assert stats["done"] == 1
-    store_calls = [cmd for cmd in client.commands if cmd[0] == "STORE"]
-    assert len(store_calls) == 1
-
-    status = db.execute("SELECT status FROM actions WHERE uid = ?", ("msg-1",)).fetchone()[0]
-    assert status == "done"
+    assert stats["done"] == 3
+    assert stats["done_trash"] == 2  # "Deleted Messages" and "Trash", not "Archive"
     db.close()
 
-
-def test_execute_actions_applies_remove_keywords(tmp_path: Path):
-    """remove_keywords actions issue a real UID STORE -FLAGS via execute_actions()."""
-    db, logger = _prepare_db_with_actions(tmp_path, [])
-    with db:
-        db.execute(
-            "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at, action_type, action_data) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-            (
-                "msg-1",
-                "INBOX",
-                "cleanup-rule",
-                None,
-                100,
-                "pending",
-                "2024-01-01T00:00:00Z",
-                "remove_keywords",
-                json.dumps({"keywords": ["Retain-30"]}),
-            ),
-        )
-    client = FakeClient()
-
-    _timer, stats = execute_actions(
-        client,
-        db,
-        show_progress=False,
-        dry_run=False,
-        strict=False,
-        logger=logger,
-        verbose=False,
-    )
-
-    assert stats["done"] == 1
-    status = db.execute("SELECT status FROM actions WHERE uid = ?", ("msg-1",)).fetchone()[0]
-    assert status == "done"
-    db.close()

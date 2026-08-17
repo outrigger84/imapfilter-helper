@@ -1,9 +1,8 @@
-"""Per-message and batched IMAP move/keyword operations (worker layer)."""
+"""Per-message and batched IMAP move operations (worker layer)."""
 from __future__ import annotations
 
 import datetime
 import imaplib
-import json
 import sqlite3
 from pathlib import Path
 from typing import Callable
@@ -336,143 +335,6 @@ def _perform_move_operation(
         )
         main_db.commit()
         return ('failed', error_msg)
-
-
-def _perform_batch_keyword_operations(
-    client: imaplib.IMAP4,
-    main_db: sqlite3.Connection,
-    folder: str,
-    actions: list[dict],
-    action_type: str,
-    logger: JsonLogger | None = None,
-    verbose: bool = False,
-) -> tuple[int, int]:
-    """
-    Perform batch keyword operations (set or remove) for multiple actions.
-
-    Dramatically reduces IMAP operations by batching multiple UIDs with the same
-    keywords into a single STORE command.
-
-    Args:
-        client: IMAP client connection
-        main_db: Main database connection with 30-second busy timeout
-        folder: Source folder containing messages
-        actions: List of action dicts with {id, uid, action_type, action_data, ...}
-        action_type: Either 'set_keywords' or 'remove_keywords'
-        logger: Optional logger for detailed logging
-        verbose: Enable verbose logging
-
-    Returns:
-        Tuple of (actions_done, actions_failed)
-    """
-    actions_done = 0
-    actions_failed = 0
-
-    # First, select the folder once
-    try:
-        sel_typ, sel_resp = client.select(f'"{folder}"', readonly=False)
-        if sel_typ != "OK":
-            error_msg = f"Cannot open folder: {_imap_response_text(sel_resp)}"
-            for action in actions:
-                main_db.execute(
-                    "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
-                    ("failed", now_iso(), error_msg, action["id"]),
-                )
-                actions_failed += 1
-            main_db.commit()
-            return actions_done, actions_failed
-    except Exception as exc:
-        error_msg = str(exc)
-        for action in actions:
-            main_db.execute(
-                "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
-                ("failed", now_iso(), error_msg, action["id"]),
-            )
-            actions_failed += 1
-        main_db.commit()
-        return actions_done, actions_failed
-
-    # Parse and group actions by keyword set
-    uid_keyword_map: dict[str, tuple[int, list[str]]] = {}  # uid -> (action_id, keywords)
-    invalid_actions: list[tuple[int, str]] = []  # (action_id, reason)
-
-    for action in actions:
-        action_id = action["id"]
-        uid = action["uid"]
-        action_data = action.get("action_data")
-
-        keywords = []
-        if action_data:
-            try:
-                data = json.loads(action_data)
-                keywords = data.get("keywords", [])
-            except json.JSONDecodeError:
-                invalid_actions.append((action_id, "Invalid action_data JSON"))
-                continue
-
-        if not keywords:
-            invalid_actions.append((action_id, "No keywords specified"))
-            continue
-
-        uid_keyword_map[uid] = (action_id, keywords)
-
-    # Handle invalid actions
-    for action_id, reason in invalid_actions:
-        main_db.execute(
-            "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
-            ("skipped", now_iso(), reason, action_id),
-        )
-        actions_failed += 1
-
-    # Group UIDs by keyword set for batching
-    if uid_keyword_map:
-        keyword_set_to_data: dict[tuple, list[tuple[str, int]]] = {}  # keyword_tuple -> [(uid, action_id)]
-        for uid, (action_id, keywords) in uid_keyword_map.items():
-            key = tuple(sorted(keywords))
-            if key not in keyword_set_to_data:
-                keyword_set_to_data[key] = []
-            keyword_set_to_data[key].append((uid, action_id))
-
-        # Execute one STORE per keyword set (batch operation)
-        for keyword_tuple, uid_action_pairs in keyword_set_to_data.items():
-            keywords = list(keyword_tuple)
-            uids = [uid for uid, _ in uid_action_pairs]
-            uid_str = ",".join(uids)
-            flags_str = " ".join(keywords)
-
-            try:
-                if action_type == "set_keywords":
-                    typ, resp = client.uid("STORE", uid_str, "+FLAGS", f"({flags_str})")
-                else:  # remove_keywords
-                    typ, resp = client.uid("STORE", uid_str, "-FLAGS", f"({flags_str})")
-
-                # Record result for each UID
-                for uid, action_id in uid_action_pairs:
-                    if typ == "OK":
-                        main_db.execute(
-                            "UPDATE actions SET status = ?, executed_at = ? WHERE id = ?",
-                            ("done", now_iso(), action_id),
-                        )
-                        actions_done += 1
-                    else:
-                        error_msg = f"STORE {action_type} failed: {_format_imap_details(resp)}"
-                        main_db.execute(
-                            "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
-                            ("failed", now_iso(), error_msg, action_id),
-                        )
-                        actions_failed += 1
-
-            except Exception as exc:
-                error_msg = str(exc)
-                for uid, action_id in uid_action_pairs:
-                    main_db.execute(
-                        "UPDATE actions SET status = ?, executed_at = ?, error_message = ? WHERE id = ?",
-                        ("failed", now_iso(), error_msg, action_id),
-                    )
-                    actions_failed += 1
-
-    main_db.commit()
-    return actions_done, actions_failed
 
 
 def _perform_batch_move_operations(
