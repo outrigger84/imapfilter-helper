@@ -5,7 +5,6 @@ rule_wizard_core.py to avoid code duplication.
 """
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -100,63 +99,3 @@ def generate_filename(name: str, rules_dir: Path) -> Path:
 
     filename = f"{next_id:05d}_{slug}.json"
     return rules_dir / filename
-
-
-def load_all_rules(rules_dir: Path) -> List[dict]:
-    """Load all rule JSON files from the specified directory.
-
-    Args:
-        rules_dir: Path to the rules directory
-
-    Returns:
-        List of rule dictionaries loaded from JSON files.
-        Returns empty list if directory doesn't exist or has no JSON files.
-
-    Raises:
-        json.JSONDecodeError: If a rule file contains invalid JSON
-    """
-    if not rules_dir.exists():
-        return []
-
-    rules: List[dict] = []
-    for rule_file in sorted(rules_dir.glob("*.json")):
-        try:
-            with rule_file.open("r", encoding="utf-8") as handle:
-                rule_data = json.load(handle)
-                # Add filename metadata for reference
-                rule_data["_file"] = rule_file.name
-                rules.append(rule_data)
-        except json.JSONDecodeError as exc:
-            # Re-raise with more context
-            raise json.JSONDecodeError(
-                f"Invalid JSON in {rule_file.name}: {exc.msg}",
-                exc.doc,
-                exc.pos
-            ) from exc
-
-    return rules
-
-
-def save_rule_file(file_path: Path, rule: dict) -> None:
-    """Save a rule dictionary to a JSON file with proper formatting.
-
-    Args:
-        file_path: Path where the rule file should be saved
-        rule: Rule dictionary to save
-
-    Notes:
-        - Removes any "_file" metadata key before saving
-        - Uses 2-space indentation
-        - Ensures UTF-8 encoding
-        - Adds trailing newline
-    """
-    # Create a clean copy without metadata
-    clean_rule = {k: v for k, v in rule.items() if not k.startswith("_")}
-
-    # Ensure parent directory exists
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Write with consistent formatting
-    with file_path.open("w", encoding="utf-8") as handle:
-        json.dump(clean_rule, handle, indent=2, ensure_ascii=False)
-        handle.write("\n")

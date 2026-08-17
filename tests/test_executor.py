@@ -609,3 +609,83 @@ def test_missing_message_id_verification_skipped(tmp_path):
     # Verification should be skipped, and system should continue normally
     assert stats is not None
     db.close()
+
+
+def test_execute_actions_applies_set_keywords(tmp_path: Path):
+    """set_keywords actions issue a real UID STORE +FLAGS via execute_actions()."""
+    db, logger = _prepare_db_with_actions(
+        tmp_path,
+        [],
+    )
+    with db:
+        db.execute(
+            "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at, action_type, action_data) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                "msg-1",
+                "INBOX",
+                "retention-rule",
+                None,
+                100,
+                "pending",
+                "2024-01-01T00:00:00Z",
+                "set_keywords",
+                json.dumps({"keywords": ["Retain-30"]}),
+            ),
+        )
+    client = FakeClient()
+
+    _timer, stats = execute_actions(
+        client,
+        db,
+        show_progress=False,
+        dry_run=False,
+        strict=False,
+        logger=logger,
+        verbose=False,
+    )
+
+    assert stats["done"] == 1
+    store_calls = [cmd for cmd in client.commands if cmd[0] == "STORE"]
+    assert len(store_calls) == 1
+
+    status = db.execute("SELECT status FROM actions WHERE uid = ?", ("msg-1",)).fetchone()[0]
+    assert status == "done"
+    db.close()
+
+
+def test_execute_actions_applies_remove_keywords(tmp_path: Path):
+    """remove_keywords actions issue a real UID STORE -FLAGS via execute_actions()."""
+    db, logger = _prepare_db_with_actions(tmp_path, [])
+    with db:
+        db.execute(
+            "INSERT INTO actions (uid, folder, rule_name, target, priority, status, created_at, action_type, action_data) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                "msg-1",
+                "INBOX",
+                "cleanup-rule",
+                None,
+                100,
+                "pending",
+                "2024-01-01T00:00:00Z",
+                "remove_keywords",
+                json.dumps({"keywords": ["Retain-30"]}),
+            ),
+        )
+    client = FakeClient()
+
+    _timer, stats = execute_actions(
+        client,
+        db,
+        show_progress=False,
+        dry_run=False,
+        strict=False,
+        logger=logger,
+        verbose=False,
+    )
+
+    assert stats["done"] == 1
+    status = db.execute("SELECT status FROM actions WHERE uid = ?", ("msg-1",)).fetchone()[0]
+    assert status == "done"
+    db.close()
