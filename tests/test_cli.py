@@ -641,6 +641,25 @@ def test_parser_rejects_per_folder_on_stream():
         parser.parse_args(["stream", "--per-folder"])
 
 
+def test_parser_accepts_prune_empty_folders_on_stream():
+    parser = cli.build_parser()
+    parsed = parser.parse_args([
+        "stream", "--all-folders", "--prune-empty-folders", "--yes",
+        "--prune-log", "data/pruned.log",
+    ])
+    assert parsed.prune_empty_folders is True
+    assert parsed.yes is True
+    assert parsed.prune_log == Path("data/pruned.log")
+
+
+def test_parser_stream_prune_flags_default_off():
+    parser = cli.build_parser()
+    parsed = parser.parse_args(["stream", "--all-folders"])
+    assert parsed.prune_empty_folders is False
+    assert parsed.yes is False
+    assert parsed.prune_log is None
+
+
 def test_parser_accepts_rules_dir_global_option():
     parser = cli.build_parser()
     parsed = parser.parse_args(["--rules-dir", "custom-rules", "evaluate"])

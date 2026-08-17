@@ -527,6 +527,24 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Clear the resume log before running so all emails are re-evaluated from scratch",
     )
+    p_stream.add_argument(
+        "--prune-empty-folders",
+        action="store_true",
+        help="After streaming, scan all IMAP folders and delete empty leaf folders (no sub-folders, no messages)",
+    )
+    p_stream.add_argument(
+        "--yes",
+        action="store_true",
+        help="Auto-confirm all --prune-empty-folders deletions without prompting",
+    )
+    p_stream.add_argument(
+        "--prune-log",
+        dest="prune_log",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="Append a plain-text list of pruned (or, in --dry-run, candidate) folders to this file",
+    )
 
     sub.add_parser("clear-pending", help="Remove all pending actions without executing them")
 
@@ -1904,6 +1922,26 @@ def handle_stream(args: argparse.Namespace, cfg: AppConfig, db, logger: JsonLogg
                 # Server may have closed connection or lost socket
                 # Safe to ignore during exit
                 pass
+
+    if getattr(args, "prune_empty_folders", False):
+        # Log in even for dry-run: finding prunable folders only needs
+        # read-only LIST/STATUS, and dry-run should show the candidate list.
+        prune_client = imap_login(cfg.paths.secrets_file, logger)
+        try:
+            prune_empty_folders(
+                prune_client,
+                auto=getattr(args, "yes", False),
+                dry_run=args.dry_run,
+                logger=logger,
+                prune_log_file=getattr(args, "prune_log", None),
+            )
+        finally:
+            if prune_client is not None:
+                try:
+                    prune_client.logout()
+                except (imaplib.IMAP4.error, imaplib.IMAP4.abort, OSError, EOFError):
+                    pass
+
     return 0
 
 

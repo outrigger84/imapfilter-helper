@@ -29,6 +29,13 @@ WorkingDirectory=/root/imapfilter-helper
 # --notification-summary replaces the per-match/per-action notifications
 # with one digest per phase -- without it, a run touching tens of
 # thousands of matches would send one notification per match.
+#
+# --prune-empty-folders removes leaf folders left with no messages and no
+# subfolders after this sweep moves everything out of them (e.g. a
+# newsletter folder that's been fully purged to Deleted Messages). --yes
+# is required here: the normal per-folder "Remove X? [y/N]" prompt has no
+# TTY to answer it in a systemd context and would just fail. Every
+# deletion is still appended to --prune-log for after-the-fact review.
 ExecStart=/root/imapfilter-helper/scripts/run_scheduled.sh 7200 --notification-summary stream --all-folders --fresh \
   --exclude-folders "INBOX" \
   --exclude-folders "Deleted Messages" \
@@ -36,4 +43,5 @@ ExecStart=/root/imapfilter-helper/scripts/run_scheduled.sh 7200 --notification-s
   --exclude-folders "Sent Messages" \
   --exclude-folders "Sent Messages/Away From Computer" \
   --exclude-folders "Sent Messages/Tripit" \
-  --exclude-folders "Drafts"
+  --exclude-folders "Drafts" \
+  --prune-empty-folders --yes --prune-log data/pruned-folders.log
