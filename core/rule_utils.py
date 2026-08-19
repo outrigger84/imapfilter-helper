@@ -5,9 +5,40 @@ rule_wizard_core.py to avoid code duplication.
 """
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 from pathlib import Path
 from typing import List
+
+
+def encode_mailbox_utf7(mailbox: str) -> str:
+    """Encode a mailbox name to IMAP modified UTF-7 (mUTF-7, RFC 3501).
+
+    '&' must become '&-'; non-printable-ASCII characters use &<modified-base64>-.
+    Rule "target" fields are written in plain text, but cached/IMAP folder
+    names are always mUTF-7 -- comparing the two directly without this
+    encoding silently fails for any folder containing '&' or other special
+    characters.
+    """
+    result = []
+    i = 0
+    while i < len(mailbox):
+        ch = mailbox[i]
+        if ch == '&':
+            result.append('&-')
+        elif ord(ch) < 0x20 or ord(ch) > 0x7e:
+            run = []
+            while i < len(mailbox) and (ord(mailbox[i]) < 0x20 or ord(mailbox[i]) > 0x7e):
+                run.append(mailbox[i])
+                i += 1
+            encoded = ''.join(run).encode('utf-16-be')
+            b64 = base64.b64encode(encoded).decode('ascii').rstrip('=').replace('/', ',')
+            result.append(f'&{b64}-')
+            continue
+        else:
+            result.append(ch)
+        i += 1
+    return ''.join(result)
 
 
 def slugify(name: str) -> str:

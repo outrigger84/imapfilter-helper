@@ -1,7 +1,6 @@
 """Stream-based message execution for IMAPFilter."""
 from __future__ import annotations
 
-import base64
 import imaplib
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,34 +17,9 @@ from core.rule_engine import (
     _parse_header_date,
     _parse_internaldate,
 )
+from core.rule_utils import encode_mailbox_utf7 as _encode_mailbox_utf7
 from core.stream_processor import StreamMessage
 from core.stream_resume import ResumeLog
-
-
-def _encode_mailbox_utf7(mailbox: str) -> str:
-    """Encode a mailbox name to IMAP modified UTF-7 (mUTF-7, RFC 3501).
-
-    '&' must become '&-'; non-printable-ASCII characters use &<modified-base64>-.
-    """
-    result = []
-    i = 0
-    while i < len(mailbox):
-        ch = mailbox[i]
-        if ch == '&':
-            result.append('&-')
-        elif ord(ch) < 0x20 or ord(ch) > 0x7e:
-            run = []
-            while i < len(mailbox) and (ord(mailbox[i]) < 0x20 or ord(mailbox[i]) > 0x7e):
-                run.append(mailbox[i])
-                i += 1
-            encoded = ''.join(run).encode('utf-16-be')
-            b64 = base64.b64encode(encoded).decode('ascii').rstrip('=').replace('/', ',')
-            result.append(f'&{b64}-')
-            continue
-        else:
-            result.append(ch)
-        i += 1
-    return ''.join(result)
 
 
 def _format_imap_details(response) -> str:

@@ -15,6 +15,7 @@ from typing import Any, List, Optional, Sequence, Tuple
 from tqdm import tqdm
 
 from core.logging_utils import JsonLogger, PhaseTimer, now_iso
+from core.rule_utils import encode_mailbox_utf7
 
 _HEADER_PARSER = _HeaderParser()
 
@@ -617,6 +618,29 @@ def find_fired_bracket(
     return None
 
 
+def _is_pure_self_match(expanded_actions: Sequence[dict], folder: str) -> bool:
+    """True when every action in this match is a "move" back into the
+    folder the message is already in -- i.e. the message is already
+    correctly filed and applying this rule is a no-op.
+
+    Compares against the mUTF-7-encoded target, since `folder` (sourced
+    from the IMAP cache) is always mUTF-7 while rule targets are written
+    in plain text -- an unencoded comparison silently misses every target
+    containing a special character (e.g. "&" -> "&-"), which previously let
+    thousands of already-filed messages slip through as if they were new
+    matches.
+    """
+    if not expanded_actions:
+        return False
+    for action in expanded_actions:
+        if action.get("type", "move") != "move":
+            return False
+        target = action.get("target")
+        if not target or folder != encode_mailbox_utf7(target):
+            return False
+    return True
+
+
 def all_possible_move_targets(actions: Sequence[dict]) -> set[str]:
     """Every folder a rule's actions could ever move a message to, across
     all possible age outcomes -- ignores age gating entirely. For reporting/
@@ -705,6 +729,14 @@ def evaluate_rules(
     rule_match_counts: dict[str, int] = {}
     action_type_counts: dict[str, int] = {}
     matches_by_rule_and_target: dict[str, dict[str, int]] = {}
+    # Self-matches: messages already correctly filed in a rule's target
+    # folder, so applying the rule is a no-op. Tracked separately from the
+    # dicts above so the end-of-run summary can report them apart from
+    # matches that actually generate an action.
+    noop_total = 0
+    noop_folder_counts: dict[str, int] = {}
+    noop_rule_counts: dict[str, int] = {}
+    noop_by_rule_and_target: dict[str, dict[str, int]] = {}
     # Header rows to drop (same-folder no-op moves). Deleting from `headers`
     # while `cur` is still iterating it is undefined behavior in SQLite, so
     # deletions are collected here and applied after the scan completes.
@@ -836,6 +868,37 @@ def evaluate_rules(
                     continue
 
                 email_matched = True
+
+                # A rule whose *only* action is a move back into the folder
+                # the message is already in is a pure no-op: the message is
+                # already correctly filed. Count these separately rather
+                # than mixing them into the real match/action tallies above.
+                if _is_pure_self_match(expanded_actions, folder):
+                    noop_total += 1
+                    noop_folder_counts[folder] = noop_folder_counts.get(folder, 0) + 1
+                    noop_rule_counts[rule_name] = noop_rule_counts.get(rule_name, 0) + 1
+                    for action in expanded_actions:
+                        target = action["target"]
+                        noop_by_rule_and_target.setdefault(rule_name, {})
+                        noop_by_rule_and_target[rule_name][target] = (
+                            noop_by_rule_and_target[rule_name].get(target, 0) + 1
+                        )
+                        logger.log(
+                            "INFO",
+                            "skipped_same_folder_move",
+                            {
+                                "rule": rule.get("name"),
+                                "folder": folder,
+                                "uid": uid,
+                                "target": target,
+                            },
+                            console=f"⊘ {rule_name}: {folder}/{uid} already in target folder {target}",
+                        )
+                        # Remove from cache since the email is already in the target location
+                        # (deferred until after the scan — see stale_header_keys above)
+                        stale_header_keys.append((folder, uid))
+                    break
+
                 total_matches += 1
                 folder_match_counts[folder] = folder_match_counts.get(folder, 0) + 1
                 rule_match_counts[rule_name] = rule_match_counts.get(rule_name, 0) + 1
@@ -867,8 +930,14 @@ def evaluate_rules(
                         matches_by_rule_and_target[rule_name].get(target, 0) + 1
                     )
 
-                    # Skip redundant same-folder move actions
-                    if action_type == "move" and target and folder == target:
+                    # Skip redundant same-folder move actions. This only
+                    # fires for a *mixed* multi-action rule here -- a rule
+                    # whose only action is a same-folder move is caught
+                    # earlier as a pure self-match and never reaches this
+                    # loop. Compare against the mUTF-7-encoded target (see
+                    # _is_pure_self_match) so this isn't silently skipped for
+                    # targets containing '&' or other special characters.
+                    if action_type == "move" and target and folder == encode_mailbox_utf7(target):
                         logger.log(
                             "INFO",
                             "skipped_same_folder_move",
@@ -966,6 +1035,7 @@ def evaluate_rules(
     rule_summary = sorted(rule_match_counts.items(), key=lambda kv: (-kv[1], kv[0]))
     total_actions = sum(action_type_counts.values())
     action_summary = sorted(action_type_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    noop_rule_summary = sorted(noop_rule_counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
     def _fmt_summary(title: str, entries: list[tuple[str, int]], limit: int = 5) -> str:
         if not entries:
@@ -987,6 +1057,12 @@ def evaluate_rules(
         + _fmt_summary("📂  Matches by folder:", folder_summary)
         + _fmt_summary("🧠  Matches by rule:", rule_summary)
         + _fmt_summary("⚙️  Actions by type:", action_summary)
+        + (
+            f"\n   ⊘  Already filed (no-op, excluded above): {noop_total}\n"
+            + _fmt_summary("🧠  No-op matches by rule:", noop_rule_summary)
+            if noop_total
+            else ""
+        )
     )
     logger.log(
         "INFO",
@@ -1002,6 +1078,10 @@ def evaluate_rules(
             "matches_by_rule": rule_match_counts,
             "actions_by_type": action_type_counts,
             "matches_by_rule_and_target": matches_by_rule_and_target,
+            "noop_matches": noop_total,
+            "noop_matches_by_folder": noop_folder_counts,
+            "noop_matches_by_rule": noop_rule_counts,
+            "noop_matches_by_rule_and_target": noop_by_rule_and_target,
         },
         console=summary_console,
     )

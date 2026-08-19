@@ -412,10 +412,50 @@ def test_evaluate_rules_defers_same_folder_header_deletes(tmp_path: Path):
         db, [rule], scope="all", dry_run=False, show_progress=False, logger=logger
     )
 
-    assert matches == 3
+    # `matches` counts real, actionable matches only -- the two same-folder
+    # no-ops (Archive/1, Archive/2) are tracked separately (see
+    # noop_matches in the phase_summary payload), not folded in here.
+    assert matches == 1
     # Same-folder matches: header rows removed (after the scan), no action queued
     remaining = [f for (f,) in db.execute("SELECT folder FROM headers ORDER BY folder")]
     assert remaining == ["INBOX"]
     queued = db.execute("SELECT folder, uid, target FROM actions").fetchall()
     assert queued == [("INBOX", "3", "Archive")]
+    db.close()
+
+
+def test_evaluate_rules_same_folder_skip_handles_ampersand_folders(tmp_path: Path):
+    """Rule targets are written in plain text ("Hop Burns & Black"), but
+    cached/IMAP folder names are always mUTF-7 ("Hop Burns &- Black") --
+    comparing them unencoded silently misses the same-folder no-op for any
+    folder containing '&' (or other mUTF-7-special characters), letting an
+    already-filed message masquerade as a fresh match. See the Apple Private
+    Relay rule investigation in 2026-08."""
+    db, logger = _make_db(tmp_path)
+    rule = {
+        "name": "Hop Burns & Black",
+        "priority": 100,
+        "conditions": {"header": "subject", "contains": "Hello"},
+        "action": {"type": "move", "target": "Receipts/Food/Hop Burns & Black"},
+    }
+    with db:
+        db.execute(
+            "INSERT INTO headers (folder, uid, data, updated_at) VALUES (?,?,?,?)",
+            (
+                "Receipts/Food/Hop Burns &- Black",
+                "1",
+                json.dumps({"header": "Subject: Hello\n\n"}),
+                "2026-01-01T00:00:00Z",
+            ),
+        )
+
+    _timer, _rule_count, matches = evaluate_rules(
+        db, [rule], scope="all", dry_run=False, show_progress=False, logger=logger
+    )
+
+    assert matches == 0
+    remaining = db.execute("SELECT folder FROM headers").fetchall()
+    assert remaining == []
+    queued = db.execute("SELECT * FROM actions").fetchall()
+    assert queued == []
     db.close()

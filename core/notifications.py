@@ -418,6 +418,11 @@ class NotificationDispatcher:
             by_rule_target: dict = context.get("matches_by_rule_and_target", {})
             lines = [f"🎯 Total matches: {total_matches}"]
             lines.extend(_rule_target_digest_lines(by_rule_target))
+            noop_total = context.get("noop_matches", 0)
+            if noop_total:
+                noop_by_rule_target: dict = context.get("noop_matches_by_rule_and_target", {})
+                lines.append(f"⊘ Already filed (no-op): {noop_total}")
+                lines.extend(_rule_target_digest_lines(noop_by_rule_target))
             body = "\n".join(lines)
             priority = 2
 

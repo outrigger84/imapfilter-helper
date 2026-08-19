@@ -283,8 +283,18 @@ def test_evaluate_logs_matches_by_rule_and_target():
         assert breakdown == {
             "The Economist": {
                 "Deleted Messages": 1,  # uid 1, >365 days old
-                "The Economist": 1,     # uid 2, <=365 days old -- same-folder skip
             }
         }
+
+        # uid 2 (<=365 days old) is a same-folder no-op -- already filed in
+        # "The Economist", so it's reported separately rather than mixed
+        # into the real match/action breakdown above.
+        noop_breakdown = phase_summary["noop_matches_by_rule_and_target"]
+        assert noop_breakdown == {
+            "The Economist": {
+                "The Economist": 1,
+            }
+        }
+        assert phase_summary["noop_matches"] == 1
 
         db.close()
